@@ -70,10 +70,17 @@ RGB data         : R0-R4, G0-G5, B0-B4 spread across GPIOs (get from Elecrow con
 not `digitalRead`. You must poll the expander (or use its INT line) — you cannot attach a
 simple GPIO interrupt to the button. The encoder rotation *is* on direct GPIOs (42/4).
 
-### Display perf note (board-specific)
+### ⚠️ Display perf note (board-specific) — this is a Phase-0 GATE, not a tuning detail
 The ST7701 is an **RGB-parallel** panel — it needs a framebuffer in PSRAM and the
 `Arduino_GFX` / `esp32-s3 RGB LCD` peripheral. At 480×480×16bpp that's ~460 KB/frame; fits
-in 8 MB PSRAM but bandwidth-limited at 240 MHz. Keep LVGL redraw regions small.
+in 8 MB PSRAM but bandwidth-limited at 240 MHz.
+
+Driving an RGB panel from a PSRAM framebuffer on the S3 is *the* classic source of
+tearing/flicker, and that PSRAM/peripheral bandwidth competes directly with WiFi/SOAP
+traffic on the same SoC. If redraw can't stay clean while the network is busy, it changes
+everything downstream (bounce buffers, double- vs direct-buffer, smaller redraw regions).
+→ **Promote to a Phase-0 exit gate:** *sustained flicker-free redraw while WiFi is active.*
+Keep LVGL redraw regions small; expect to tune bounce-buffer size and PSRAM clock.
 
 ### Reference docs
 - Wiki: https://www.elecrow.com/wiki/CrowPanel_2.1inch-HMI_ESP32_Rotary_Display_480_IPS_Round_Touch_Knob_Screen.html
@@ -125,11 +132,40 @@ ContentDirectory /MediaServer/ContentDirectory/Control
   SOAPACTION: "urn:schemas-upnp-org:service:ContentDirectory:1#Browse"
 ```
 
-### Playing a playlist / favorite / radio (two-step, NOT just "Play")
-1. `Browse` the container → parse DIDL-Lite → get each item's `res` URI + metadata.
-2. `SetAVTransportURI` with the URI **and** its DIDL metadata, then `Play`.
-   (For a playlist you typically clear queue, add the playlist's items / queue URI, then
-   `Play` from queue index 0.)
+### Playing a playlist / favorite / radio — TWO DISTINCT FLOWS (don't conflate)
+These are not the same sequence; Phase 3 must implement both separately.
+
+**A. Radio / favorite (single stream):**
+1. `Browse` the container → parse DIDL-Lite → get the item's `res` URI + metadata.
+2. `SetAVTransportURI` with the URI **and** its DIDL metadata, then `Play`. Done.
+
+**B. Sonos playlist (`SQ:n`, multi-track queue) — more than clear/add/Play:**
+1. `Browse` `SQ:` to enumerate playlists; get the chosen container's URI/metadata.
+2. (Optional) `RemoveAllTracksFromQueue` to clear.
+3. `AddURIToQueue` with the container URI + metadata (enqueues all its tracks).
+4. `SetAVTransportURI` to the **queue itself**: `x-rincon-queue:RINCON_<uuid>#0`.
+5. `Seek` (Unit=TRACK_NR) to track 0, then `Play`.
+
+### ⚠️ Group coordinator targeting (will bite you the moment speakers are grouped)
+In a Sonos group, **all transport + queue actions must target the group coordinator**, not
+an arbitrary member. Sending `Play`/`Next`/`AddURIToQueue` to a non-coordinator fails or
+misbehaves. Volume can be per-speaker or group-wide. Before any transport call:
+- Query topology (`ZoneGroupTopology` service, or `http://<ip>:1400/status/topology`).
+- Resolve the target zone → its **coordinator IP** → send transport there.
+- The ROOMS screen (§6) selects a zone; internally that resolves to a coordinator.
+
+### Album art is plain HTTP (de-risks the S3 — no TLS needed for art)
+Now-playing art is served by the **speaker itself** at `http://<zone-ip>:1400/getaa?...`
+(plain HTTP, not HTTPS). So the art pipeline does **not** need `WiFiClientSecure`. Only
+LRCLIB lyrics force HTTPS. Budget TLS memory for lyrics only, not art.
+
+### Scope / auth reality check (Sonos S2)
+Local SOAP control of **local** functions (transport, volume, queue, Sonos playlists,
+radio/TuneIn favorites) works with no cloud auth. Streaming-service content (Spotify/Apple
+surfaced as favorites) embeds service tokens in DIDL `res`+metadata; replaying stored
+metadata generally works, but fresh service browsing can need account context.
+→ **v1 scope:** Sonos playlists (`SQ:`) + radio/TuneIn favorites (`R:0`/`FV:2`). Deep
+streaming-service browsing is out of scope for v1.
 
 ### Now-playing freshness
 - **Start with polling**: `GetTransportInfo` + `GetPositionInfo` + `GetVolume` every ~1–2 s.
@@ -143,8 +179,12 @@ ContentDirectory /MediaServer/ContentDirectory/Control
 2. **Album art on ESP32-S3**: software JPEG decode only (no HW decoder). Use
    `TJpg_Decoder`, downscale to ~200–240 px, **decode once on track-change and cache** —
    never per poll. Skip dominant-color/bilinear fanciness initially.
-3. **PCF8574 button polling** for the press.
-4. SSDP discovery robustness across reboots.
+3. **PCF8574 button polling** for the press. Polling the expander at the UI tick can alias
+   fast presses → **debounce / edge-latch** in software, or wire the PCF8574 **INT line** to
+   a GPIO so presses are caught on edge, not sampled. Push/play-pause must feel crisp.
+4. **SSDP discovery robustness across reboots.** Multicast M-SEARCH on ESP32 is flaky across
+   routers/reboots. Mitigation: **persist discovered zone IPs + UUIDs in NVS**; on boot use
+   the cached IPs directly and only re-run SSDP on failure (or periodic refresh).
 
 ---
 
@@ -176,7 +216,8 @@ ContentDirectory /MediaServer/ContentDirectory/Control
   custom 8MB-PSRAM-16MB-flash config; enable OPI PSRAM).
 - **LVGL 8.4 or 9.x** for UI (lists, progress arc, image widget).
 - **Arduino_GFX** (or ESP32 RGB LCD driver) for ST7701 panel.
-- **HTTPClient** + **WiFiClientSecure** (SOAP / lyrics / art).
+- **HTTPClient** for SOAP + album art (both plain HTTP — art is served by the speaker at
+  `http://<ip>:1400/getaa`). **WiFiClientSecure** only for LRCLIB lyrics (HTTPS).
 - **ArduinoJson** (config + any JSON APIs) and lightweight XML string-scan helpers for DIDL.
 - **TJpg_Decoder** for album art JPEG.
 - **Preferences (NVS)** for WiFi + settings persistence.
@@ -224,12 +265,18 @@ Screens / state machine (LVGL):
   encoder counts (GPIO 42/4), button reads via PCF8574 (0x21, P5), backlight (GPIO 6).
 - Get the exact ST7701 timings + RGB pin map from Elecrow's config. **Gate everything else
   on this working.**
+- **Exit gate (hard):** sustained **flicker-free redraw while WiFi is connected/active**
+  (see §2 perf note). If it tears, fix it here — it dictates the buffering strategy for all
+  later UI work.
 
 ### Phase 1 — Talk to Sonos (1 day) — *recommended starting point*
 - SSDP discovery → print discovered zone IPs.
 - Minimal SOAP: send `Play` / `Pause`, read `GetTransportInfo`, against a hardcoded zone IP.
 - Spike with **javos65 lib** first to validate your network/speakers fast, then decide
   build-vs-borrow for the real client (mind GPL if copying).
+- **Dev affordance:** support a **hardcoded zone IP** (compile-time / NVS override) to
+  bypass SSDP during development, and add a **serial SOAP tracer** (log request/response
+  envelopes). Keep both for the life of the project — they pay for themselves in Phase 3.
 - **Exit criteria:** the board can pause/resume real music on your Sonos.
 
 ### Phase 2 — Now Playing (2–3 days)
@@ -255,15 +302,31 @@ Screens / state machine (LVGL):
 Direct control is ~2–3× the proxy-approach firmware effort, almost all of it in Phase 3
 (Browse + DIDL parsing). Payoff: a self-contained knob with no server dependency.
 
+The per-phase day estimates above are **ideal-case** for someone fluent in LVGL + FreeRTOS.
+First-time LVGL-on-RGB-panel work is lumpy: Phase 2 (LVGL render + FreeRTOS task split +
+JPEG decode/cache) is realistically closer to a week than 2–3 days. Treat the numbers as
+ordering/relative-weight, not a schedule.
+
 ---
 
 ## 8. Open questions / decisions for next session
+
+### Decided
+- **LVGL 9.x** (not 8.x). Rationale: SonosESP — the primary MIT reference to crib from —
+  is 9.5; matching its version maximizes copy-paste leverage. Verify the ST7701 RGB driver
+  is 9.x-compatible during Phase 0.
+- **Polling, not GENA events**, for now-playing in v1 (events are a later optional upgrade).
+- **Discovery: SSDP once → cache IPs/UUIDs in NVS → use cache on boot**, re-run SSDP only
+  on failure (see §3 hard part #4).
+- **v1 content scope:** Sonos playlists (`SQ:`) + radio/TuneIn favorites (`R:0`/`FV:2`);
+  deep streaming-service browsing out of scope (see §3 auth note).
+
+### Still open
 - [ ] Pull Elecrow's exact board config (ST7701 timing + full RGB pin map) — **blocker for Phase 0.**
 - [ ] Confirm PCF8574 address (0x21) and button pin (P5) against the real schematic.
-- [ ] Default Sonos room/zone, and whether multi-zone is needed at v1.
-- [ ] LVGL 8.x vs 9.x (SonosESP uses 9.5; ensure ST7701 driver compatibility).
+- [ ] Verify GPIO 4 (encoder B) isn't shared with an S3 strapping/JTAG function.
+- [ ] Default Sonos room/zone, and whether multi-zone/grouping is needed at v1.
 - [ ] Build-vs-borrow the SOAP client (GPL javos65 lib vs MIT SonosESP patterns vs own).
-- [ ] Polling vs GENA event subscription for now-playing (start polling).
 
 ## 9. Repo setup suggestion (sonos-nest)
 ```
