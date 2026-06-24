@@ -24,6 +24,10 @@ pio run -t upload       # flash over USB-C
 pio device monitor      # serial @ 115200
 ```
 
+On **WSL2 (Windows)**, USB needs bridging first — see
+[`docs/flashing-wsl.md`](docs/flashing-wsl.md) for a full step-by-step (usbipd-win, build,
+flash, and the Phase-0 self-test checklist).
+
 ### First-time setup
 
 1. `pio run` once to fetch libraries.
