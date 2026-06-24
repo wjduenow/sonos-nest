@@ -321,9 +321,26 @@ ordering/relative-weight, not a schedule.
 - **v1 content scope:** Sonos playlists (`SQ:`) + radio/TuneIn favorites (`R:0`/`FV:2`);
   deep streaming-service browsing out of scope (see §3 auth note).
 
+### Resolved during Phase 0
+- **Elecrow board config pulled** from their official example repo
+  (`CrowPanel-2.1inch-HMI-ESP32-Rotary-Display.../example/RotaryScreen_2_1/RotaryScreen_2_1.ino`).
+  Full RGB pin map, 3-wire SPI init bus (CS=16/SCK=2/SDA=1), and ST7701 timings
+  (hsync/vsync fp=10, pw=4, bp=20) are now in `src/board_pins.h`. Panel uses the stock
+  `st7701_type5_init_operations`, BGR color order, IPS=false. PCLK/polarity left at
+  Arduino_GFX defaults — tune empirically if it tears.
+- **PCF8574 @ 0x21 confirmed**; P0=touch rst, P2=touch int, P3=LCD pwr, P4=LCD rst,
+  P5=knob button (active-low). Matches the scaffold.
+- **Touch is CST816 @ 0x15** (NOT GT911 as originally assumed) — `Adafruit_CST8XX`-class.
+  Implemented as a minimal direct I2C driver in `src/hw/touch.cpp`.
+- **Arduino_GFX pinned to 1.3.1** in `platformio.ini`. Elecrow's example uses the older
+  API (`Arduino_ESP32RGBPanel(CS,SCK,SDA,DE,…)` + `Arduino_ST7701_RGBPanel`), dropped in
+  upstream 1.4.x. `display.cpp` matches the 1.3.1 signatures verbatim (timings live on
+  `Arduino_ST7701_RGBPanel`; only `gfx->begin()`, no `bus->begin()`). **Do not bump the
+  GFX lib without rewriting `display.cpp`.**
+
 ### Still open
-- [ ] Pull Elecrow's exact board config (ST7701 timing + full RGB pin map) — **blocker for Phase 0.**
-- [ ] Confirm PCF8574 address (0x21) and button pin (P5) against the real schematic.
+- [ ] On-device verify: flash `pio run -e bringup`, confirm RGB test pattern colors,
+  encoder sign/detents, button edges, touch coords — then the flicker-free-redraw gate.
 - [ ] Verify GPIO 4 (encoder B) isn't shared with an S3 strapping/JTAG function.
 - [ ] Default Sonos room/zone, and whether multi-zone/grouping is needed at v1.
 - [ ] Build-vs-borrow the SOAP client (GPL javos65 lib vs MIT SonosESP patterns vs own).

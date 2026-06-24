@@ -3,23 +3,20 @@
 PlatformIO adds this directory to the compiler include path (also forced via
 `-I include` in `platformio.ini`).
 
-## Required: `lv_conf.h`
+## `lv_conf.h` — provided
 
-LVGL needs a config header. It is **not** committed yet. After the first
-`pio run` fetches the LVGL library, copy its template and enable what you need:
+A tuned `lv_conf.h` for this board (LVGL 9.x, RGB565, builtin allocator, Montserrat
+14/20/28) is committed here. It only sets overrides; everything else falls back to
+`lv_conf_internal.h` defaults. We build with `-DLV_CONF_INCLUDE_SIMPLE`, so LVGL resolves
+`#include "lv_conf.h"` from this directory.
+
+To regenerate from the upstream template instead (e.g. on an LVGL major bump):
 
 ```
 cp .pio/libdeps/crowpanel-rotary/lvgl/lv_conf_template.h include/lv_conf.h
 ```
 
-Then edit `include/lv_conf.h`:
-- Set the first `#if 0` guard to `#if 1` to enable the file.
-- `LV_COLOR_DEPTH 16` (RGB565 to match the ST7701 framebuffer).
-- Enable PSRAM-backed buffers / custom malloc as needed.
-- Enable the widgets used (arc, list, image, label).
-
-We build with `-DLV_CONF_INCLUDE_SIMPLE`, so LVGL resolves `#include "lv_conf.h"`
-from this directory.
+…then set the leading `#if 0` guard to `#if 1` and re-apply the overrides above.
 
 ## `secrets.h`
 

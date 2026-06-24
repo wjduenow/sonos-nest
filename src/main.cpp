@@ -13,6 +13,10 @@
 #include "sonos/ssdp.h"
 #include "ui/screens.h"
 
+#ifdef PHASE0_BRINGUP
+#include "hw/bringup.h"
+#endif
+
 // --- FreeRTOS tasks (mutex-guarded shared PlayerState) ---
 static void uiTask(void *arg);     // LVGL render + input (encoder, button, touch)
 static void pollTask(void *arg);   // every 1-2s: GetTransportInfo/PositionInfo/Volume
@@ -23,10 +27,14 @@ void setup() {
   delay(200);
   Serial.println("\n[sonos-nest] boot");
 
+#ifdef PHASE0_BRINGUP
+  bringupRun();  // does not return — serial subsystem self-test
+#endif
+
   // Phase 0 — bring-up. Gate everything on flicker-free redraw while WiFi is active.
   playerStateInit();
-  pcf8574Init();        // expander first: it drives LCD power/reset + touch reset
-  displayInit();        // ST7701 RGB + LVGL
+  if (!pcf8574Init()) Serial.println("[boot] PCF8574 not responding — check I2C wiring");
+  if (!displayInit()) Serial.println("[boot] display init FAILED");  // ST7701 RGB + LVGL
   touchInit();
   encoderInit();
   uiInit();             // build LVGL screens
