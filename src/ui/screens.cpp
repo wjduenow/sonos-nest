@@ -3,6 +3,7 @@
 #include "album_art.h"
 #include "../player_state.h"
 #include "../sonos/ssdp.h"
+#include "../library.h"
 #include "../hw/encoder.h"
 #include "../hw/pcf8574.h"
 #include "../hw/display.h"
@@ -10,39 +11,81 @@
 #include <vector>
 #include <time.h>
 
-// Screens (plan §6):
-//   NOW PLAYING — art, title/artist, progress arc, play-state, volume; prev/next buttons.
-//     twist=volume  short press=play/pause  long press=open ROOMS  touch ◀/▶=prev/next
-//   ROOMS — scrollable zone list; twist=scroll  short press=select  long press=cancel
-//     (touch a row to pick it directly).
-// TODO Phase 3: PLAYLISTS / RADIO browse lists (reuse this list pattern). Phase 4: CLOCK.
+// Screens (plan §6). NOW PLAYING is home; long-press opens the MENU hub:
+//   MENU -> Now Playing / Rooms / Playlists / Favorites
+//   list screens: twist=scroll  short press=select  long press=back  (touch a row to pick)
+//   inactivity -> CLOCK screensaver; any input wakes.
 
 static Screen s_cur = Screen::NowPlaying;
 
-// --- NOW PLAYING widgets ---
+// ============================ generic list screen ============================
+
+struct ListScreen {
+  lv_obj_t *scr   = nullptr;
+  lv_obj_t *title = nullptr;
+  lv_obj_t *list  = nullptr;
+  int       sel   = 0;
+};
+
+static void listHighlight(ListScreen &L) {
+  uint32_t n = lv_obj_get_child_count(L.list);
+  for (uint32_t i = 0; i < n; ++i) {
+    lv_obj_t *b = lv_obj_get_child(L.list, i);
+    bool s = ((int)i == L.sel);
+    lv_obj_set_style_bg_opa(b, s ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(b, lv_color_white(), 0);
+    lv_obj_set_style_text_font(b, &lv_font_montserrat_20, 0);
+    if (s) lv_obj_scroll_to_view(b, LV_ANIM_ON);
+  }
+}
+
+static void listBuild(ListScreen &L, const char *titleText) {
+  L.scr = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(L.scr, lv_color_black(), 0);
+  lv_obj_remove_flag(L.scr, LV_OBJ_FLAG_SCROLLABLE);
+
+  L.title = lv_label_create(L.scr);
+  lv_obj_set_style_text_color(L.title, lv_color_white(), 0);
+  lv_obj_set_style_text_font(L.title, &lv_font_montserrat_20, 0);
+  lv_label_set_text(L.title, titleText);
+  lv_obj_align(L.title, LV_ALIGN_TOP_MID, 0, SH(12));
+
+  L.list = lv_list_create(L.scr);
+  lv_obj_set_size(L.list, SW(80), SH(64));
+  lv_obj_align(L.list, LV_ALIGN_CENTER, 0, SH(6));
+  lv_obj_set_style_bg_opa(L.list, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(L.list, 0, 0);
+}
+
+static void listSet(ListScreen &L, const std::vector<String> &labels, const char *icon,
+                    lv_event_cb_t clickCb) {
+  lv_obj_clean(L.list);
+  for (size_t i = 0; i < labels.size(); ++i) {
+    lv_obj_t *btn = lv_list_add_button(L.list, icon, labels[i].c_str());
+    lv_obj_add_event_cb(btn, clickCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+  }
+  if (L.sel >= (int)labels.size()) L.sel = 0;
+  listHighlight(L);
+}
+
+static void listMove(ListScreen &L, int delta) {
+  int n = (int)lv_obj_get_child_count(L.list);
+  if (n <= 0) return;
+  L.sel = (L.sel + delta) % n;
+  if (L.sel < 0) L.sel += n;
+  listHighlight(L);
+}
+
+// ============================ NOW PLAYING ============================
+
 static lv_obj_t *s_scrNow;
 static lv_obj_t *s_arc, *s_art, *s_title, *s_artist, *s_time, *s_zone, *s_vol;
 static uint32_t  s_volShownAt;
 
-// --- ROOMS widgets ---
-static lv_obj_t *s_scrRooms;
-static lv_obj_t *s_roomList;
-static std::vector<String> s_roomIps;   // parallel to the list rows
-static int s_roomSel = 0;
-
-// --- CLOCK screensaver ---
-static lv_obj_t *s_scrClock, *s_clkTime, *s_clkDate;
-static Screen    s_prevScreen = Screen::NowPlaying;  // where to return on wake
-static uint32_t  s_lastEncBtn = 0;                   // last encoder/button activity
-static const uint32_t kSaverMs        = 30000;       // idle -> screensaver
-static const uint8_t  kSaverBright    = 12;          // dimmed backlight %
-static const uint8_t  kFullBright     = 100;
-
 static void fmtTime(char *buf, size_t n, uint32_t sec) {
   snprintf(buf, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
 }
-
-// ---------------- NOW PLAYING ----------------
 
 static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.prev = true; stateUnlock(); } }
 static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; stateUnlock(); } }
@@ -158,72 +201,98 @@ static void renderNow() {
     lv_obj_add_flag(s_vol, LV_OBJ_FLAG_HIDDEN);
 }
 
-// ---------------- ROOMS ----------------
-
-static void highlightRoom() {
-  uint32_t n = lv_obj_get_child_count(s_roomList);
-  for (uint32_t i = 0; i < n; ++i) {
-    lv_obj_t *b = lv_obj_get_child(s_roomList, i);
-    bool sel = ((int)i == s_roomSel);
-    // Selected: solid blue fill. Unselected: transparent (black). Text stays white either
-    // way so every row is legible.
-    lv_obj_set_style_bg_opa(b, sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
-    lv_obj_set_style_text_color(b, lv_color_white(), 0);
-    lv_obj_set_style_text_font(b, &lv_font_montserrat_20, 0);  // ~1.5x the default 14
-    if (sel) lv_obj_scroll_to_view(b, LV_ANIM_ON);
+static void handleNowInput(KnobEvent ev, int32_t d) {
+  if (d != 0 && stateLock()) {
+    int v = (int)g_player.volume + d;
+    v = v < 0 ? 0 : (v > 100 ? 100 : v);
+    g_player.volume = (uint8_t)v;
+    g_pending.targetVolume = v;
+    stateUnlock();
+    char b[16];
+    snprintf(b, sizeof(b), LV_SYMBOL_VOLUME_MAX " %d", v);
+    lv_label_set_text(s_vol, b);
+    lv_obj_remove_flag(s_vol, LV_OBJ_FLAG_HIDDEN);
+    s_volShownAt = lv_tick_get();
+  }
+  if (ev == KnobEvent::Short && stateLock()) {
+    g_pending.playPause = true;
+    g_player.transport = (g_player.transport == TransportState::Playing)
+                             ? TransportState::Paused : TransportState::Playing;
+    stateUnlock();
+  } else if (ev == KnobEvent::Long) {
+    uiShow(Screen::Home);
   }
 }
 
-static void selectRoom(int idx) {
+// ============================ MENU / ROOMS / BROWSE ============================
+
+static ListScreen s_menu, s_rooms, s_browse;
+static std::vector<String> s_roomIps;   // parallel to the rooms list rows
+static bool s_browseQueue = false;      // current browse: true=playlist queue flow
+
+// forward decls
+static void menuSelect(int idx);
+static void roomSelect(int idx);
+static void browseSelect(int idx);
+
+static void menuClickCb(lv_event_t *e)   { s_menu.sel   = (int)(intptr_t)lv_event_get_user_data(e); menuSelect(s_menu.sel); }
+static void roomClickCb(lv_event_t *e)   { s_rooms.sel  = (int)(intptr_t)lv_event_get_user_data(e); roomSelect(s_rooms.sel); }
+static void browseClickCb(lv_event_t *e) { s_browse.sel = (int)(intptr_t)lv_event_get_user_data(e); browseSelect(s_browse.sel); }
+
+static const char *kMenuItems[] = {"Now Playing", "Rooms", "Playlists", "Favorites"};
+
+static void populateRooms() {
+  std::vector<String> labels;
+  s_roomIps.clear();
+  String cur;
+  if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
+  const std::vector<sonos::Zone> &zs = sonos::zones();
+  for (size_t i = 0; i < zs.size(); ++i) {
+    labels.push_back(zs[i].name);
+    s_roomIps.push_back(zs[i].ip);
+    if (zs[i].name == cur) s_rooms.sel = (int)i;
+  }
+  listSet(s_rooms, labels, LV_SYMBOL_AUDIO, roomClickCb);
+}
+
+static void enterBrowse(const char *title, const char *object, bool queueFlow) {
+  lv_label_set_text(s_browse.title, title);
+  s_browse.sel = 0;
+  s_browseQueue = queueFlow;
+  std::vector<String> loading = {"Loading"};
+  listSet(s_browse, loading, LV_SYMBOL_REFRESH, browseClickCb);
+  library::requestBrowse(object, queueFlow);
+  uiShow(Screen::Playlists);   // shared browse list (playlists + favorites)
+}
+
+static void menuSelect(int idx) {
+  switch (idx) {
+    case 0: uiShow(Screen::NowPlaying); break;
+    case 1: uiShow(Screen::Rooms); break;
+    case 2: enterBrowse("Playlists", "SQ:", true); break;
+    case 3: enterBrowse("Favorites", "FV:2", false); break;
+  }
+}
+
+static void roomSelect(int idx) {
   if (idx < 0 || idx >= (int)s_roomIps.size()) return;
   if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
   uiShow(Screen::NowPlaying);
 }
 
-static void roomClickCb(lv_event_t *e) {
-  int idx = (int)(intptr_t)lv_event_get_user_data(e);
-  selectRoom(idx);
+static void browseSelect(int idx) {
+  library::requestPlay(idx);   // netTask guards the index against the result count
+  uiShow(Screen::NowPlaying);
 }
 
-static void populateRooms() {
-  lv_obj_clean(s_roomList);
-  s_roomIps.clear();
+// ============================ CLOCK ============================
 
-  String cur;
-  if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
-
-  const std::vector<sonos::Zone> &zs = sonos::zones();
-  int curIdx = 0;
-  for (size_t i = 0; i < zs.size(); ++i) {
-    lv_obj_t *btn = lv_list_add_button(s_roomList, LV_SYMBOL_AUDIO, zs[i].name.c_str());
-    lv_obj_add_event_cb(btn, roomClickCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    s_roomIps.push_back(zs[i].ip);
-    if (zs[i].name == cur) curIdx = (int)i;
-  }
-  s_roomSel = curIdx;
-  highlightRoom();
-}
-
-static void buildRooms() {
-  s_scrRooms = lv_obj_create(nullptr);
-  lv_obj_set_style_bg_color(s_scrRooms, lv_color_black(), 0);
-  lv_obj_remove_flag(s_scrRooms, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t *hdr = lv_label_create(s_scrRooms);
-  lv_obj_set_style_text_color(hdr, lv_color_white(), 0);
-  lv_obj_set_style_text_font(hdr, &lv_font_montserrat_20, 0);
-  lv_label_set_text(hdr, "Rooms");
-  lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, SH(12));
-
-  s_roomList = lv_list_create(s_scrRooms);
-  lv_obj_set_size(s_roomList, SW(80), SH(64));
-  lv_obj_align(s_roomList, LV_ALIGN_CENTER, 0, SH(6));
-  lv_obj_set_style_bg_opa(s_roomList, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(s_roomList, 0, 0);
-}
-
-// ---------------- CLOCK screensaver ----------------
+static lv_obj_t *s_scrClock, *s_clkTime, *s_clkDate;
+static Screen    s_prevScreen = Screen::NowPlaying;
+static uint32_t  s_lastEncBtn = 0;
+static const uint32_t kSaverMs    = 30000;
+static const uint8_t  kSaverBright = 12;
+static const uint8_t  kFullBright  = 100;
 
 static void buildClock() {
   s_scrClock = lv_obj_create(nullptr);
@@ -247,7 +316,7 @@ static void updateClock() {
   time_t t = time(nullptr);
   struct tm lt;
   localtime_r(&t, &lt);
-  if (lt.tm_year + 1900 < 2021) {            // NTP not synced yet
+  if (lt.tm_year + 1900 < 2021) {
     lv_label_set_text(s_clkTime, "--:--");
     lv_label_set_text(s_clkDate, "syncing");
     return;
@@ -260,46 +329,18 @@ static void updateClock() {
   lv_label_set_text(s_clkDate, dbuf);
 }
 
-// ---------------- input + dispatch ----------------
-
-static void handleNowInput(KnobEvent ev, int32_t d) {
-  if (d != 0 && stateLock()) {
-    int v = (int)g_player.volume + d;
-    v = v < 0 ? 0 : (v > 100 ? 100 : v);
-    g_player.volume = (uint8_t)v;
-    g_pending.targetVolume = v;
-    stateUnlock();
-    char b[16];
-    snprintf(b, sizeof(b), LV_SYMBOL_VOLUME_MAX " %d", v);
-    lv_label_set_text(s_vol, b);
-    lv_obj_remove_flag(s_vol, LV_OBJ_FLAG_HIDDEN);
-    s_volShownAt = lv_tick_get();
-  }
-  if (ev == KnobEvent::Short && stateLock()) {
-    g_pending.playPause = true;
-    g_player.transport = (g_player.transport == TransportState::Playing)
-                             ? TransportState::Paused : TransportState::Playing;
-    stateUnlock();
-  } else if (ev == KnobEvent::Long) {
-    uiShow(Screen::Rooms);
-  }
-}
-
-static void handleRoomsInput(KnobEvent ev, int32_t d) {
-  if (d != 0 && !s_roomIps.empty()) {
-    int n = (int)s_roomIps.size();
-    s_roomSel = (s_roomSel + d) % n;
-    if (s_roomSel < 0) s_roomSel += n;
-    highlightRoom();
-  }
-  if (ev == KnobEvent::Short)      selectRoom(s_roomSel);
-  else if (ev == KnobEvent::Long)  uiShow(Screen::NowPlaying);  // cancel
-}
+// ============================ lifecycle ============================
 
 void uiInit() {
   buildNowPlaying();
-  buildRooms();
+  listBuild(s_menu, "Menu");
+  listBuild(s_rooms, "Rooms");
+  listBuild(s_browse, "Browse");
   buildClock();
+
+  std::vector<String> menu(kMenuItems, kMenuItems + 4);
+  listSet(s_menu, menu, LV_SYMBOL_LIST, menuClickCb);
+
   lv_screen_load(s_scrNow);
   s_cur = Screen::NowPlaying;
   s_lastEncBtn = lv_tick_get();
@@ -309,21 +350,15 @@ void uiTick() {
   KnobEvent ev = knobEvent();
   int32_t   d  = encoderDelta();
 
-  // Combined idle time across encoder/button (manual) and touch (LVGL indev).
   uint32_t now = lv_tick_get();
   if (d != 0 || ev != KnobEvent::None) s_lastEncBtn = now;
   uint32_t idle = lv_display_get_inactive_time(NULL);
   uint32_t encBtnIdle = now - s_lastEncBtn;
   if (encBtnIdle < idle) idle = encBtnIdle;
 
-  // Screensaver: any input while dimmed just wakes (and is consumed, not acted on).
   if (s_cur == Screen::Clock) {
-    if (idle < 250) {
-      backlightSet(kFullBright);
-      uiShow(s_prevScreen);
-    } else {
-      updateClock();
-    }
+    if (idle < 250) { backlightSet(kFullBright); uiShow(s_prevScreen); }
+    else            { updateClock(); }
     lv_timer_handler();
     return;
   }
@@ -336,16 +371,39 @@ void uiTick() {
     return;
   }
 
-  if (s_cur == Screen::NowPlaying) {
-    handleNowInput(ev, d);
-    const lv_image_dsc_t *dsc = nullptr;
-    if (albumArtTake(&dsc)) {
-      if (dsc) { lv_image_set_src(s_art, dsc); lv_obj_remove_flag(s_art, LV_OBJ_FLAG_HIDDEN); }
-      else     { lv_obj_add_flag(s_art, LV_OBJ_FLAG_HIDDEN); }
+  switch (s_cur) {
+    case Screen::NowPlaying: {
+      handleNowInput(ev, d);
+      const lv_image_dsc_t *dsc = nullptr;
+      if (albumArtTake(&dsc)) {
+        if (dsc) { lv_image_set_src(s_art, dsc); lv_obj_remove_flag(s_art, LV_OBJ_FLAG_HIDDEN); }
+        else     { lv_obj_add_flag(s_art, LV_OBJ_FLAG_HIDDEN); }
+      }
+      renderNow();
+      break;
     }
-    renderNow();
-  } else if (s_cur == Screen::Rooms) {
-    handleRoomsInput(ev, d);
+    case Screen::Home:
+      if (d) listMove(s_menu, d > 0 ? 1 : -1);
+      if (ev == KnobEvent::Short)     menuSelect(s_menu.sel);
+      else if (ev == KnobEvent::Long) uiShow(Screen::NowPlaying);
+      break;
+    case Screen::Rooms:
+      if (d) listMove(s_rooms, d > 0 ? 1 : -1);
+      if (ev == KnobEvent::Short)     roomSelect(s_rooms.sel);
+      else if (ev == KnobEvent::Long) uiShow(Screen::Home);
+      break;
+    case Screen::Playlists: {       // shared browse list (playlists + favorites)
+      std::vector<String> labels;
+      if (library::takeResults(labels)) {
+        if (labels.empty()) labels.push_back("(empty)");
+        listSet(s_browse, labels, LV_SYMBOL_AUDIO, browseClickCb);
+      }
+      if (d) listMove(s_browse, d > 0 ? 1 : -1);
+      if (ev == KnobEvent::Short)     browseSelect(s_browse.sel);
+      else if (ev == KnobEvent::Long) uiShow(Screen::Home);
+      break;
+    }
+    default: break;
   }
 
   lv_timer_handler();
@@ -353,8 +411,12 @@ void uiTick() {
 
 void uiShow(Screen s) {
   if (s == s_cur) return;
-  if (s == Screen::Rooms)       { populateRooms(); lv_screen_load(s_scrRooms); }
-  else if (s == Screen::Clock)  { lv_screen_load(s_scrClock); }
-  else                          { lv_screen_load(s_scrNow); }
+  switch (s) {
+    case Screen::Home:      lv_screen_load(s_menu.scr);   break;
+    case Screen::Rooms:     populateRooms(); lv_screen_load(s_rooms.scr); break;
+    case Screen::Playlists: lv_screen_load(s_browse.scr); break;
+    case Screen::Clock:     lv_screen_load(s_scrClock);   break;
+    default:                lv_screen_load(s_scrNow);     break;
+  }
   s_cur = s;
 }

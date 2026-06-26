@@ -16,6 +16,7 @@
 #include "ui/album_art.h"
 #include "net/ota.h"
 #include "settings.h"
+#include "library.h"
 
 #ifdef PHASE0_BRINGUP
 #include "hw/bringup.h"
@@ -42,8 +43,9 @@ static void artTask(void *arg);    // on track change: fetch art -> TJpg decode 
 // Volume + now-playing-room are the selected speaker; transport must hit its group
 // COORDINATOR (plan §3), which differs when the speaker is grouped.
 static String s_zoneName;
-static String s_zoneIp;    // the selected speaker (volume target)
-static String s_coordIp;   // its group coordinator (transport/queue/now-playing target)
+static String s_zoneIp;     // the selected speaker (volume target)
+static String s_coordIp;    // its group coordinator (transport/queue/now-playing target)
+static String s_coordUuid;  // coordinator's RINCON uuid (for the x-rincon-queue URI)
 
 // Switch the active zone to the speaker with this IP (from the ROOMS picker). Resets the
 // volume/transport/coordinator targets and updates the shared state. Returns false if the
@@ -51,14 +53,15 @@ static String s_coordIp;   // its group coordinator (transport/queue/now-playing
 static bool selectZoneByIp(const String &ip) {
   for (const auto &z : sonos::zones()) {
     if (z.ip != ip) continue;
-    s_zoneName = z.name;
-    s_zoneIp   = z.ip;
-    s_coordIp  = sonos::coordinatorIpFor(z.name);
+    s_zoneName  = z.name;
+    s_zoneIp    = z.ip;
+    s_coordIp   = z.coordIp.length() ? z.coordIp : sonos::coordinatorIpFor(z.name);
     if (s_coordIp.length() == 0) s_coordIp = s_zoneIp;
+    s_coordUuid = z.coordinatorUuid.length() ? z.coordinatorUuid : z.uuid;
     if (stateLock()) {
       g_player.zoneName        = z.name;
       g_player.coordinatorIp   = s_coordIp;
-      g_player.coordinatorUuid = z.uuid;
+      g_player.coordinatorUuid = s_coordUuid;
       // Clear stale now-playing so the UI doesn't show the previous room's track.
       g_player.title.clear(); g_player.artist.clear(); g_player.album.clear();
       g_player.artUri.clear();
@@ -94,14 +97,15 @@ static bool selectZone() {
       return false;
     }
   }
-  s_zoneName = zs[idx].name;
-  s_zoneIp   = zs[idx].ip;
-  s_coordIp  = sonos::coordinatorIpFor(s_zoneName);
+  s_zoneName  = zs[idx].name;
+  s_zoneIp    = zs[idx].ip;
+  s_coordIp   = zs[idx].coordIp.length() ? zs[idx].coordIp : sonos::coordinatorIpFor(s_zoneName);
   if (s_coordIp.length() == 0) s_coordIp = s_zoneIp;
+  s_coordUuid = zs[idx].coordinatorUuid.length() ? zs[idx].coordinatorUuid : zs[idx].uuid;
   if (stateLock()) {
     g_player.zoneName        = zs[idx].name;
     g_player.coordinatorIp   = s_coordIp;
-    g_player.coordinatorUuid = zs[idx].uuid;
+    g_player.coordinatorUuid = s_coordUuid;
     stateUnlock();
   }
   Serial.printf("[boot] zone %s @ %s, coordinator @ %s\n",
@@ -198,6 +202,9 @@ static void netTask(void *) {
     }
     if (p.prev) sonos::previous(s_coordIp);
     if (p.next) sonos::next(s_coordIp);
+
+    // Browse / play requests from the UI (ContentDirectory off the UI thread).
+    library::service(s_coordIp, s_coordIp, s_coordUuid);
 
     // Poll ~1 Hz.
     if (millis() - lastPoll > 1000) {
