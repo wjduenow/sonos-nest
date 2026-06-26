@@ -338,10 +338,22 @@ ordering/relative-weight, not a schedule.
   `Arduino_ST7701_RGBPanel`; only `gfx->begin()`, no `bus->begin()`). **Do not bump the
   GFX lib without rewriting `display.cpp`.**
 
+### On-device verification — PASSED (2026-06-25)
+Flashed `pio run -e bringup` to the real board and confirmed:
+- **Display**: RGB test pattern correct (TL=red/TR=green/BL=blue/BR=white) — RGB pin map,
+  ST7701 init, PSRAM framebuffer all good.
+- **Touch (CST816 @0x15)**: coords across the panel, in 0..479.
+- **Encoder (GPIO42/4)**: +1 per detent CW, -1 CCW (1 click = 1 step).
+- **Button (PCF8574 P5)**: press pulls P5 low, debounced PRESS latches. NOTE: the K112 tact
+  switch is stiff — needs a firm, centered push to actuate (initial "clicks" were the knob
+  bottoming out, not the switch).
+- Toolchain: ESP32 Arduino core 2.0.17, Arduino_GFX pinned to v1.3.1 (git tag).
+- Flashing/serial from WSL2: see `docs/flashing-wsl.md` (usbipd `--auto-attach` required;
+  each reset drops the bridge; `pio device monitor` needs a TTY so a pyserial reader is used).
+
 ### Still open
-- [ ] On-device verify: flash `pio run -e bringup`, confirm RGB test pattern colors,
-  encoder sign/detents, button edges, touch coords — then the flicker-free-redraw gate.
-- [ ] Verify GPIO 4 (encoder B) isn't shared with an S3 strapping/JTAG function.
+- [ ] Flicker-free-redraw gate under WiFi load — needs WiFi creds (Phase 1). Spinner UI
+  renders; not yet stressed with concurrent network traffic.
 - [ ] Default Sonos room/zone, and whether multi-zone/grouping is needed at v1.
 - [ ] Build-vs-borrow the SOAP client (GPL javos65 lib vs MIT SonosESP patterns vs own).
 

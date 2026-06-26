@@ -147,6 +147,38 @@ You should get an animated spinner + "sonos-nest" that twisting/pressing updates
 
 ---
 
+## Lessons from first bring-up (read this — it saves round-trips)
+
+Validated on the real board 2026-06-25. The ESP32-S3's native USB makes WSL flaky in
+specific ways:
+
+- **usbipd drops the bridge on every re-enumeration.** The board re-enumerates on each
+  reset and after entering/leaving download mode, so `/dev/ttyACM0` disappears and a plain
+  `usbipd attach` is one-shot. **Run `usbipd attach --wsl --busid <id> --auto-attach` in a
+  dedicated admin PowerShell and leave it open** — without it you'll be re-attaching
+  constantly.
+- **First flash needs manual download mode; later flashes don't.** The very first upload
+  failed with "No serial data received" until BOOT+RST download mode. Once our firmware
+  (USB-CDC enabled) was running, `pio run -t upload` auto-resets into the bootloader on its
+  own — no button dance needed.
+- **`pio device monitor` fails here** (`termios … Inappropriate ioctl for device`) because
+  this automated shell has no real TTY. Use a tiny pyserial reader instead, which also lets
+  you assert DTR (Arduino USB-CDC only emits once the host raises DTR):
+  ```python
+  import serial, sys, time
+  s = serial.Serial(sys.argv[1], 115200, timeout=0.2); s.dtr = True; s.rts = False
+  end = time.time() + float(sys.argv[2])
+  while time.time() < end:
+      d = s.read(4096)
+      if d: sys.stdout.write(d.decode(errors='replace')); sys.stdout.flush()
+  ```
+  Run with `~/.platformio/penv/bin/python reader.py /dev/ttyACM0 30`. (`~/.platformio/penv`
+  already has pyserial.) For an interactive terminal, prefer `pio device monitor` from a
+  normal WSL shell with a real TTY.
+- **Catching boot-time prints is racy.** Because reset drops the bridge, by the time
+  auto-attach re-bridges, the one-time `setup()` prints may be gone. The self-test loops
+  forever, so steady-state checks are reliable; for boot info, the periodic prints suffice.
+
 ## Alternative: flash from Windows directly
 
 If you'd rather skip usbipd, install PlatformIO (or VS Code + the PlatformIO extension) **on
