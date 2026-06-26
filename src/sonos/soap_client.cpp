@@ -1,4 +1,5 @@
 #include "soap_client.h"
+#include "didl.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
@@ -139,7 +140,10 @@ bool getPositionInfo(const String &ip, PlayerState &out) {
                   "<InstanceID>0</InstanceID>", r)) return false;
   out.durationSec = hmsToSec(extractTag(r, "TrackDuration"));
   out.positionSec = hmsToSec(extractTag(r, "RelTime"));
-  // TrackMetaData is escaped DIDL-Lite; title/artist/art are parsed in didl.cpp (Phase 2).
+  // TrackMetaData is escaped DIDL-Lite -> title/artist/album/art.
+  parseNowPlaying(extractTag(r, "TrackMetaData"), out);
+  // Album art URI is relative ("/getaa?...") and served by the speaker over plain HTTP.
+  if (out.artUri.startsWith("/")) out.artUri = "http://" + ip + ":1400" + out.artUri;
   return true;
 }
 

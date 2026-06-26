@@ -11,6 +11,7 @@
 #include "hw/pcf8574.h"
 #include "net/wifi.h"
 #include "sonos/ssdp.h"
+#include "sonos/soap_client.h"
 #include "ui/screens.h"
 
 #ifdef PHASE0_BRINGUP
@@ -20,10 +21,41 @@
 #include "net/phase1_test.h"
 #endif
 
+// Optional: pin a default room via include/secrets.h (#define SONOS_DEFAULT_ROOM "Name").
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 // --- FreeRTOS tasks (mutex-guarded shared PlayerState) ---
 static void uiTask(void *arg);     // LVGL render + input (encoder, button, touch)
-static void pollTask(void *arg);   // every 1-2s: GetTransportInfo/PositionInfo/Volume
+static void netTask(void *arg);    // drain pending commands + poll transport/position/volume
 static void artTask(void *arg);    // on track change: fetch art -> TJpg decode -> cache
+
+// IP of the speaker (group coordinator) the knob currently controls.
+static String s_targetIp;
+
+// Pick the zone to control after discovery. Defaults to the first discovered zone; set
+// -DSONOS_DEFAULT_ROOM=\"Living Room\" to pin a specific room. (ROOMS picker is Phase 4.)
+static void selectZone() {
+  const std::vector<sonos::Zone> &zs = sonos::zones();
+  if (zs.empty()) {
+    Serial.println("[boot] no Sonos zones found — discovery will retry in netTask");
+    return;
+  }
+  size_t idx = 0;
+#ifdef SONOS_DEFAULT_ROOM
+  for (size_t i = 0; i < zs.size(); ++i)
+    if (zs[i].name == SONOS_DEFAULT_ROOM) { idx = i; break; }
+#endif
+  s_targetIp = zs[idx].ip;
+  if (stateLock()) {
+    g_player.zoneName       = zs[idx].name;
+    g_player.coordinatorIp  = zs[idx].ip;
+    g_player.coordinatorUuid = zs[idx].uuid;
+    stateUnlock();
+  }
+  Serial.printf("[boot] controlling %s @ %s\n", zs[idx].name.c_str(), s_targetIp.c_str());
+}
 
 void setup() {
   Serial.begin(115200);
@@ -48,11 +80,12 @@ void setup() {
   // Phase 1 — network + Sonos discovery.
   wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
   sonos::ssdpDiscover();  // SSDP once -> cache IPs/UUIDs in NVS; cache-first on boot (§3)
+  selectZone();
 
   // Launch tasks. UI pinned to core 1; network work on core 0.
-  xTaskCreatePinnedToCore(uiTask,   "ui",   8192, nullptr, 3, nullptr, 1);
-  xTaskCreatePinnedToCore(pollTask, "poll", 8192, nullptr, 2, nullptr, 0);
-  xTaskCreatePinnedToCore(artTask,  "art",  8192, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(uiTask,  "ui",  8192, nullptr, 3, nullptr, 1);
+  xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(artTask, "art", 8192, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
@@ -67,11 +100,55 @@ static void uiTask(void *) {
   }
 }
 
-static void pollTask(void *) {
+static void netTask(void *) {
+  uint32_t lastPoll = 0;
+  uint32_t lastVolCmd = 0;
   for (;;) {
-    // TODO Phase 2: GetTransportInfo + GetPositionInfo + GetVolume on the coordinator,
-    //               write into g_player under g_stateMutex.
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    // If discovery failed at boot, keep retrying until we have a zone.
+    if (s_targetIp.length() == 0) {
+      if (sonos::ssdpDiscover()) selectZone();
+      if (s_targetIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+    }
+
+    // Drain pending commands (coalesced volume; latest wins).
+    PendingCmds p;
+    if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
+
+    if (p.targetVolume >= 0) { sonos::setVolume(s_targetIp, (uint8_t)p.targetVolume); lastVolCmd = millis(); }
+    if (p.playPause) {
+      TransportState st = TransportState::Unknown;
+      if (sonos::getTransportInfo(s_targetIp, st))
+        (st == TransportState::Playing) ? sonos::pause(s_targetIp) : sonos::play(s_targetIp);
+    }
+    if (p.prev) sonos::previous(s_targetIp);
+    if (p.next) sonos::next(s_targetIp);
+
+    // Poll ~1 Hz.
+    if (millis() - lastPoll > 1000) {
+      lastPoll = millis();
+      TransportState st = TransportState::Unknown;
+      PlayerState np;                       // scratch for position + now-playing metadata
+      uint8_t vol = 0;
+      bool gotVol = false;
+      sonos::getTransportInfo(s_targetIp, st);
+      sonos::getPositionInfo(s_targetIp, np);
+      // Skip volume readback briefly after a local change so the UI doesn't snap back.
+      if (millis() - lastVolCmd > 1500) gotVol = sonos::getVolume(s_targetIp, vol);
+
+      if (stateLock()) {
+        g_player.transport   = st;
+        g_player.positionSec = np.positionSec;
+        g_player.durationSec = np.durationSec;
+        g_player.title       = np.title;
+        g_player.artist      = np.artist;
+        g_player.album       = np.album;
+        g_player.artUri      = np.artUri;
+        if (gotVol) g_player.volume = vol;
+        g_player.dirty = true;
+        stateUnlock();
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(40));
   }
 }
 

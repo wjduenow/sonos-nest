@@ -28,8 +28,22 @@ struct PlayerState {
   bool          dirty = false;   // set by writers, cleared by ui_task after redraw
 };
 
-// Guard every read/write of the global PlayerState with this mutex.
+// Commands posted by ui_task (input) and drained by net_task (SOAP). Volume coalesces:
+// only the latest target is sent. Guarded by g_stateMutex like PlayerState.
+struct PendingCmds {
+  int  targetVolume = -1;   // -1 = none; else 0..100 to apply
+  bool playPause    = false;
+  bool next         = false;
+  bool prev         = false;
+};
+
+// Guard every read/write of the global PlayerState / PendingCmds with this mutex.
 extern SemaphoreHandle_t g_stateMutex;
 extern PlayerState       g_player;
+extern PendingCmds       g_pending;
 
 void playerStateInit();
+
+// RAII-ish helpers for the common short critical sections.
+inline bool stateLock()   { return xSemaphoreTake(g_stateMutex, portMAX_DELAY) == pdTRUE; }
+inline void stateUnlock() { xSemaphoreGive(g_stateMutex); }

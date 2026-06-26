@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <vector>
+#include "../player_state.h"
 
 namespace sonos {
 
@@ -18,5 +19,9 @@ struct DidlItem {
 
 // Scan a DIDL-Lite XML payload into items. Returns count parsed.
 size_t parseDidl(const String& didlXml, std::vector<DidlItem>& out);
+
+// Parse the (XML-escaped) TrackMetaData from GetPositionInfo into now-playing fields
+// (title/artist/album/artUri). artUri is left relative — caller prepends the speaker base.
+void parseNowPlaying(const String& trackMetaData, PlayerState& out);
 
 }  // namespace sonos
