@@ -161,10 +161,37 @@ static void uiTask(void *) {
   }
 }
 
+static uint32_t s_lastPoll = 0, s_lastVolCmd = 0, s_lastCoordRefresh = 0;
+
+// Drain + execute queued input commands. Kept cheap and called frequently (including
+// between the poll's SOAP calls) so a twist/press reaches the speaker with minimal lag.
+static void processPending() {
+  PendingCmds p;
+  if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
+
+  if (p.requestZoneIp.length()) {
+    selectZoneByIp(p.requestZoneIp);
+    s_lastPoll = 0;                      // poll the new zone immediately
+    s_lastCoordRefresh = millis();
+  }
+  if (p.targetVolume >= 0) {
+    sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume);   // volume -> the speaker
+    s_lastVolCmd = millis();
+  }
+  if (p.playPause) {
+    // Use the last polled state (no extra round-trip) — the UI already flipped optimistically.
+    TransportState st = TransportState::Unknown;
+    if (stateLock()) { st = g_player.transport; stateUnlock(); }
+    (st == TransportState::Playing) ? sonos::pause(s_coordIp) : sonos::play(s_coordIp);
+  }
+  if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
+  if (p.next) sonos::next(s_coordIp);
+
+  // Browse / play requests (ContentDirectory off the UI thread).
+  library::service(s_coordIp, s_coordIp, s_coordUuid);
+}
+
 static void netTask(void *) {
-  uint32_t lastPoll = 0;
-  uint32_t lastVolCmd = 0;
-  uint32_t lastCoordRefresh = 0;
   for (;;) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
 
@@ -174,49 +201,28 @@ static void netTask(void *) {
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
     }
 
-    // Re-resolve the coordinator periodically (grouping changes at runtime).
-    if (millis() - lastCoordRefresh > 5000) {
-      lastCoordRefresh = millis();
+    // Re-resolve the coordinator occasionally (grouping changes at runtime).
+    if (millis() - s_lastCoordRefresh > 15000) {
+      s_lastCoordRefresh = millis();
       String c = sonos::coordinatorIpFor(s_zoneName);
-      if (c.length()) {
+      if (c.length() && c != s_coordIp) {
         s_coordIp = c;
         if (stateLock()) { g_player.coordinatorIp = c; stateUnlock(); }
       }
     }
 
-    // Drain pending commands (coalesced volume; latest wins).
-    // Volume -> the speaker itself; transport -> the group coordinator.
-    PendingCmds p;
-    if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
+    processPending();
 
-    if (p.requestZoneIp.length()) {
-      selectZoneByIp(p.requestZoneIp);
-      lastPoll = 0;          // poll the new zone immediately
-      lastCoordRefresh = millis();
-    }
-    if (p.targetVolume >= 0) { sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume); lastVolCmd = millis(); }
-    if (p.playPause) {
+    // Poll ~1 Hz, interleaving command processing so input never waits behind the full poll.
+    if (millis() - s_lastPoll > 1000) {
+      s_lastPoll = millis();
       TransportState st = TransportState::Unknown;
-      if (sonos::getTransportInfo(s_coordIp, st))
-        (st == TransportState::Playing) ? sonos::pause(s_coordIp) : sonos::play(s_coordIp);
-    }
-    if (p.prev) sonos::previous(s_coordIp);
-    if (p.next) sonos::next(s_coordIp);
-
-    // Browse / play requests from the UI (ContentDirectory off the UI thread).
-    library::service(s_coordIp, s_coordIp, s_coordUuid);
-
-    // Poll ~1 Hz.
-    if (millis() - lastPoll > 1000) {
-      lastPoll = millis();
-      TransportState st = TransportState::Unknown;
-      PlayerState np;                       // scratch for position + now-playing metadata
+      PlayerState np;
       uint8_t vol = 0;
       bool gotVol = false;
-      sonos::getTransportInfo(s_coordIp, st);   // transport state lives on the coordinator
-      sonos::getPositionInfo(s_coordIp, np);
-      // Volume is per-speaker; skip readback briefly after a local change (no UI snap-back).
-      if (millis() - lastVolCmd > 1500) gotVol = sonos::getVolume(s_zoneIp, vol);
+      sonos::getTransportInfo(s_coordIp, st);  processPending();
+      sonos::getPositionInfo(s_coordIp, np);   processPending();
+      if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
       if (stateLock()) {
         g_player.transport   = st;
@@ -231,7 +237,7 @@ static void netTask(void *) {
         stateUnlock();
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(40));
+    vTaskDelay(pdMS_TO_TICKS(15));
   }
 }
 
