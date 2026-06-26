@@ -80,15 +80,38 @@ static void listMove(ListScreen &L, int delta) {
 // ============================ NOW PLAYING ============================
 
 static lv_obj_t *s_scrNow;
-static lv_obj_t *s_arc, *s_art, *s_title, *s_artist, *s_time, *s_zone, *s_vol;
+static lv_obj_t *s_arc, *s_art, *s_title, *s_artist, *s_time, *s_zone, *s_vol, *s_ripple;
 static uint32_t  s_volShownAt;
+
+// Subtle press feedback: a white ring that expands from the centre and fades out.
+static void rippleExec(void *obj, int32_t v) {  // v: 0..255
+  lv_obj_t *o = (lv_obj_t *)obj;
+  lv_coord_t sz = SW(8) + SW(52) * v / 255;
+  lv_obj_set_size(o, sz, sz);
+  lv_obj_center(o);
+  lv_obj_set_style_border_opa(o, (lv_opa_t)(LV_OPA_70 - LV_OPA_70 * v / 255), 0);
+}
+static void rippleDone(lv_anim_t *) { lv_obj_add_flag(s_ripple, LV_OBJ_FLAG_HIDDEN); }
+
+static void pressPulse() {
+  lv_obj_remove_flag(s_ripple, LV_OBJ_FLAG_HIDDEN);
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, s_ripple);
+  lv_anim_set_exec_cb(&a, rippleExec);
+  lv_anim_set_values(&a, 0, 255);
+  lv_anim_set_duration(&a, 280);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_completed_cb(&a, rippleDone);
+  lv_anim_start(&a);
+}
 
 static void fmtTime(char *buf, size_t n, uint32_t sec) {
   snprintf(buf, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
 }
 
-static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.prev = true; stateUnlock(); } }
-static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; stateUnlock(); } }
+static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.prev = true; stateUnlock(); } pressPulse(); }
+static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; stateUnlock(); } pressPulse(); }
 
 static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv_event_cb_t cb) {
   lv_obj_t *b = lv_button_create(scr);
@@ -171,6 +194,17 @@ static void buildNowPlaying() {
 
   makeNavBtn(s_scrNow, LV_SYMBOL_PREV, LV_ALIGN_LEFT_MID, prevCb);
   makeNavBtn(s_scrNow, LV_SYMBOL_NEXT, LV_ALIGN_RIGHT_MID, nextCb);
+
+  s_ripple = lv_obj_create(s_scrNow);
+  lv_obj_remove_flag(s_ripple, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_remove_flag(s_ripple, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_opa(s_ripple, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_color(s_ripple, lv_color_white(), 0);
+  lv_obj_set_style_border_width(s_ripple, 3, 0);
+  lv_obj_set_style_radius(s_ripple, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_size(s_ripple, SW(8), SW(8));
+  lv_obj_center(s_ripple);
+  lv_obj_add_flag(s_ripple, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void renderNow() {
@@ -222,6 +256,7 @@ static void handleNowInput(KnobEvent ev, int32_t d) {
     g_pending.setPlay  = wasPlaying ? 0 : 1;
     g_player.transport = wasPlaying ? TransportState::Paused : TransportState::Playing;
     stateUnlock();
+    pressPulse();   // subtle on-screen press feedback
   } else if (ev == KnobEvent::Long) {
     uiShow(Screen::Home);
   }
