@@ -524,6 +524,13 @@ void uiTick() {
   if (otaActive()) {
     if (lv_screen_active() != s_scrOta) { lv_screen_load(s_scrOta); backlightSet(100); }
     int p = otaProgress();
+    // Stall safety: if a started OTA makes no progress for 20s (e.g. the upload can't
+    // connect back), reboot into the still-valid firmware instead of hanging.
+    static int      s_otaLastP   = -2;
+    static uint32_t s_otaStallMs = 0;
+    uint32_t nowt = lv_tick_get();
+    if (p != s_otaLastP) { s_otaLastP = p; s_otaStallMs = nowt; }
+    else if (nowt - s_otaStallMs > 20000) { ESP.restart(); }
     lv_label_set_text_fmt(s_otaLabel, "Updating\n%d%%", p < 0 ? 0 : p);
     lv_timer_handler();
     return;

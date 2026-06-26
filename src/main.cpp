@@ -158,7 +158,9 @@ void loop() {
 static void uiTask(void *) {
   for (;;) {
     uiTick();                 // lv_timer_handler() + input handling
-    vTaskDelay(pdMS_TO_TICKS(5));
+    // During an OTA, back off hard so the lower-priority loop task (which runs the OTA
+    // write) isn't starved on this core — otherwise the transfer times out mid-upload.
+    vTaskDelay(pdMS_TO_TICKS(otaActive() ? 120 : 5));
   }
 }
 

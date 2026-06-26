@@ -310,8 +310,10 @@ Screens / state machine (LVGL):
   Pacific); any input wakes. Idle = min(encoder/button, touch) inactivity.
 - ✅ **Settings persistence (NVS)** — picked room saved via Preferences; boot preference is
   saved room → `SONOS_DEFAULT_ROOM` → first discovered.
-- ✅ **OTA updates** — ArduinoOTA as `sonos-nest` (`pio run -e ota -t upload`), with an
-  on-screen "Updating NN%" overlay. NOTE: the build host must reach the device's LAN IP.
+- ✅ **OTA updates** — ArduinoOTA as `sonos-nest`, on-screen "Updating NN%" overlay,
+  ~20s stall auto-reboot, and the UI task backs off during a transfer so it isn't starved
+  (otherwise uploads erred ~3%). **Working from WSL** after opening inbound to WSL (mirrored
+  firewall) — validated a full 100% over WiFi. See the `ota` skill + `docs/flashing-wsl.md`.
 - ✅ **Group / ungroup** — Group screen lists rooms with a ✓ for current group members
   (anchor = active room, marked *). Join = `SetAVTransportURI(member, x-rincon:<coordUuid>)`;
   leave = `BecomeCoordinatorOfStandaloneGroup`. Re-discovers + re-renders after each op.
