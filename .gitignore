@@ -15,6 +15,10 @@
 # Secrets — real WiFi/Sonos config (commit secrets.example.h instead)
 include/secrets.h
 
+# Python (hardware build scripts)
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 Thumbs.db

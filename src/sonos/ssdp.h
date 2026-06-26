@@ -11,9 +11,10 @@ namespace sonos {
 
 struct Zone {
   String name;
-  String ip;
+  String ip;            // this room's primary speaker (volume target)
   String uuid;          // RINCON_...
   String coordinatorUuid;
+  String coordIp;       // group coordinator's IP (transport target)
   bool   isCoordinator = false;
 };
 

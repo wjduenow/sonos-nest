@@ -155,8 +155,12 @@ static void highlightRoom() {
   for (uint32_t i = 0; i < n; ++i) {
     lv_obj_t *b = lv_obj_get_child(s_roomList, i);
     bool sel = ((int)i == s_roomSel);
+    // Selected: solid blue fill. Unselected: transparent (black). Text stays white either
+    // way so every row is legible.
     lv_obj_set_style_bg_opa(b, sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(b, lv_color_white(), 0);
+    lv_obj_set_style_text_font(b, &lv_font_montserrat_20, 0);  // ~1.5x the default 14
     if (sel) lv_obj_scroll_to_view(b, LV_ANIM_ON);
   }
 }
