@@ -131,9 +131,9 @@ static void buildNowPlaying() {
 
   s_zone = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_zone, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_zone, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(s_zone, &lv_font_montserrat_20, 0);
   lv_label_set_text(s_zone, "");
-  lv_obj_align(s_zone, LV_ALIGN_CENTER, 0, -SH(40));
+  lv_obj_align(s_zone, LV_ALIGN_CENTER, 0, -SH(32));
 
   s_title = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_title, lv_color_white(), 0);
@@ -146,18 +146,18 @@ static void buildNowPlaying() {
 
   s_artist = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_artist, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_artist, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(s_artist, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_align(s_artist, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(s_artist, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(s_artist, SW(70));
   lv_label_set_text(s_artist, "");
-  lv_obj_align(s_artist, LV_ALIGN_CENTER, 0, SH(25));
+  lv_obj_align(s_artist, LV_ALIGN_CENTER, 0, SH(23));
 
   s_time = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_time, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_time, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(s_time, &lv_font_montserrat_20, 0);
   lv_label_set_text(s_time, LV_SYMBOL_STOP " 0:00 / 0:00");
-  lv_obj_align(s_time, LV_ALIGN_CENTER, 0, SH(34));
+  lv_obj_align(s_time, LV_ALIGN_CENTER, 0, SH(33));
 
   s_vol = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_vol, lv_color_white(), 0);

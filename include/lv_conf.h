@@ -30,6 +30,7 @@
 // --- Fonts: 14 (default) for lists; 28 for now-playing title later ---
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_48 1   // clock screensaver
 
