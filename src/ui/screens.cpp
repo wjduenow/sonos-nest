@@ -92,12 +92,13 @@ static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; sta
 
 static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv_event_cb_t cb) {
   lv_obj_t *b = lv_button_create(scr);
-  lv_obj_set_size(b, SW(15), SW(15));
-  lv_obj_align(b, align, align == LV_ALIGN_LEFT_MID ? SW(2) : -SW(2), 0);
+  lv_obj_set_size(b, SW(23), SW(23));   // ~110px tap target
+  lv_obj_align(b, align, align == LV_ALIGN_LEFT_MID ? SW(1) : -SW(1), 0);
   lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_opa(b, LV_OPA_30, 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_40, 0);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);   // bigger arrow glyph
   lv_label_set_text(l, sym);
   lv_obj_center(l);
   return b;
@@ -300,22 +301,26 @@ static void buildClock() {
   lv_obj_set_style_bg_color(s_scrClock, lv_color_black(), 0);
   lv_obj_remove_flag(s_scrClock, LV_OBJ_FLAG_SCROLLABLE);
 
+  // 256 = 1.0x. LVGL has no >48px built-in font, so scale the labels up via transform.
   s_clkTime = lv_label_create(s_scrClock);
   lv_obj_set_style_text_color(s_clkTime, lv_color_white(), 0);
   lv_obj_set_style_text_font(s_clkTime, &lv_font_montserrat_48, 0);
-  // Scale the 48px font up ~2x (LVGL has no >48 built-in) for a big watch-face time.
   lv_obj_set_style_transform_pivot_x(s_clkTime, lv_pct(50), 0);
   lv_obj_set_style_transform_pivot_y(s_clkTime, lv_pct(50), 0);
-  lv_obj_set_style_transform_scale_x(s_clkTime, 512, 0);
-  lv_obj_set_style_transform_scale_y(s_clkTime, 512, 0);
+  lv_obj_set_style_transform_scale_x(s_clkTime, 720, 0);   // ~2.8x -> ~135px tall
+  lv_obj_set_style_transform_scale_y(s_clkTime, 720, 0);
   lv_label_set_text(s_clkTime, "--:--");
-  lv_obj_align(s_clkTime, LV_ALIGN_CENTER, 0, -SH(7));
+  lv_obj_align(s_clkTime, LV_ALIGN_CENTER, 0, -SH(8));
 
   s_clkDate = lv_label_create(s_scrClock);
   lv_obj_set_style_text_color(s_clkDate, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_clkDate, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(s_clkDate, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_transform_pivot_x(s_clkDate, lv_pct(50), 0);
+  lv_obj_set_style_transform_pivot_y(s_clkDate, lv_pct(50), 0);
+  lv_obj_set_style_transform_scale_x(s_clkDate, 384, 0);   // ~1.5x -> ~42px
+  lv_obj_set_style_transform_scale_y(s_clkDate, 384, 0);
   lv_label_set_text(s_clkDate, "");
-  lv_obj_align(s_clkDate, LV_ALIGN_CENTER, 0, SH(10));
+  lv_obj_align(s_clkDate, LV_ALIGN_CENTER, 0, SH(24));
 }
 
 static void updateClock() {
