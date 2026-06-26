@@ -93,7 +93,8 @@ static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; sta
 static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv_event_cb_t cb) {
   lv_obj_t *b = lv_button_create(scr);
   lv_obj_set_size(b, SW(23), SW(23));   // ~110px tap target
-  lv_obj_align(b, align, align == LV_ALIGN_LEFT_MID ? SW(1) : -SW(1), 0);
+  // Inset from the rim so the button clears the progress arc.
+  lv_obj_align(b, align, align == LV_ALIGN_LEFT_MID ? SW(7) : -SW(7), 0);
   lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_opa(b, LV_OPA_40, 0);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);

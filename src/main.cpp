@@ -255,7 +255,7 @@ static void artTask(void *) {
       } else if (albumArtFetch(cur)) {  // GET + TJpg decode + cache (never on UI task)
         last = cur;  fails = 0;
       } else if (++fails >= 4) {
-        last = cur;  fails = 0;         // give up after a few tries; don't spin forever
+        albumArtClear();  last = cur;  fails = 0;   // give up; don't leave the prior art up
       }
       // else: leave `last` unchanged so the next loop retries this URL (fixes stale art on
       // transient fetch failures during rapid track skipping).

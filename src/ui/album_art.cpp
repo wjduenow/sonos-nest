@@ -6,7 +6,7 @@
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 static const int    ART_MAX  = 180;
-static const size_t JPEG_MAX = 100 * 1024;
+static const size_t JPEG_MAX = 220 * 1024;   // high-res covers can exceed 100 KB
 
 static uint8_t  *s_jpeg = nullptr;          // raw JPEG download buffer (PSRAM)
 static uint16_t *s_buf[2] = {nullptr, nullptr};  // double-buffered RGB565 (PSRAM)
