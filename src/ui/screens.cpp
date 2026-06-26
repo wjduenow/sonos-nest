@@ -215,9 +215,10 @@ static void handleNowInput(KnobEvent ev, int32_t d) {
     s_volShownAt = lv_tick_get();
   }
   if (ev == KnobEvent::Short && stateLock()) {
-    g_pending.playPause = true;
-    g_player.transport = (g_player.transport == TransportState::Playing)
-                             ? TransportState::Paused : TransportState::Playing;
+    // Decide the explicit action from the real (pre-flip) state, then flip optimistically.
+    bool wasPlaying = (g_player.transport == TransportState::Playing);
+    g_pending.setPlay  = wasPlaying ? 0 : 1;
+    g_player.transport = wasPlaying ? TransportState::Paused : TransportState::Playing;
     stateUnlock();
   } else if (ev == KnobEvent::Long) {
     uiShow(Screen::Home);
@@ -302,8 +303,13 @@ static void buildClock() {
   s_clkTime = lv_label_create(s_scrClock);
   lv_obj_set_style_text_color(s_clkTime, lv_color_white(), 0);
   lv_obj_set_style_text_font(s_clkTime, &lv_font_montserrat_48, 0);
+  // Scale the 48px font up ~2x (LVGL has no >48 built-in) for a big watch-face time.
+  lv_obj_set_style_transform_pivot_x(s_clkTime, lv_pct(50), 0);
+  lv_obj_set_style_transform_pivot_y(s_clkTime, lv_pct(50), 0);
+  lv_obj_set_style_transform_scale_x(s_clkTime, 512, 0);
+  lv_obj_set_style_transform_scale_y(s_clkTime, 512, 0);
   lv_label_set_text(s_clkTime, "--:--");
-  lv_obj_align(s_clkTime, LV_ALIGN_CENTER, 0, -SH(5));
+  lv_obj_align(s_clkTime, LV_ALIGN_CENTER, 0, -SH(7));
 
   s_clkDate = lv_label_create(s_scrClock);
   lv_obj_set_style_text_color(s_clkDate, lv_palette_main(LV_PALETTE_GREY), 0);
@@ -356,13 +362,21 @@ void uiTick() {
   uint32_t encBtnIdle = now - s_lastEncBtn;
   if (encBtnIdle < idle) idle = encBtnIdle;
 
+  // Screensaver only when nothing is playing; if music starts, leave the clock.
+  bool playing = false;
+  if (stateLock()) { playing = (g_player.transport == TransportState::Playing); stateUnlock(); }
+
   if (s_cur == Screen::Clock) {
-    if (idle < 250) { backlightSet(kFullBright); uiShow(s_prevScreen); }
-    else            { updateClock(); }
+    if (idle < 250 || playing) {
+      backlightSet(kFullBright);
+      uiShow(playing ? Screen::NowPlaying : s_prevScreen);
+    } else {
+      updateClock();
+    }
     lv_timer_handler();
     return;
   }
-  if (idle > kSaverMs) {
+  if (idle > kSaverMs && !playing) {
     s_prevScreen = s_cur;
     updateClock();
     uiShow(Screen::Clock);

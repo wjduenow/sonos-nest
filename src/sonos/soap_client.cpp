@@ -63,9 +63,14 @@ static uint32_t hmsToSec(const String &t) {
 
 bool soapAction(const String &ip, const String &controlPath, const String &service,
                 const String &action, const String &bodyArgs, String &responseOut) {
-  WiFiClient client;
-  HTTPClient http;
+  // Persistent client/connection: with setReuse(true), consecutive calls to the same host
+  // reuse the open TCP socket instead of reconnecting — much lower latency for the common
+  // case (poll + commands all hitting the coordinator). soapAction is only ever called from
+  // netTask, so a static client is single-threaded and safe. (Album art uses its own client.)
+  static WiFiClient client;
+  static HTTPClient http;
   String url = "http://" + ip + ":1400" + controlPath;
+  http.setReuse(true);
   if (!http.begin(client, url)) return false;
   http.addHeader("Content-Type", "text/xml; charset=\"utf-8\"");
   http.addHeader("SOAPACTION", "\"" + service + "#" + action + "\"");

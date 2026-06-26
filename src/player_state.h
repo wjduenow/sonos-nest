@@ -32,7 +32,7 @@ struct PlayerState {
 // only the latest target is sent. Guarded by g_stateMutex like PlayerState.
 struct PendingCmds {
   int    targetVolume = -1;   // -1 = none; else 0..100 to apply
-  bool   playPause    = false;
+  int    setPlay      = -1;   // -1 = none; 0 = pause; 1 = play (explicit, decided by the UI)
   bool   next         = false;
   bool   prev         = false;
   String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP

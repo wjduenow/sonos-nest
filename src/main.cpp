@@ -178,17 +178,14 @@ static void processPending() {
     sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume);   // volume -> the speaker
     s_lastVolCmd = millis();
   }
-  if (p.playPause) {
-    // Use the last polled state (no extra round-trip) — the UI already flipped optimistically.
-    TransportState st = TransportState::Unknown;
-    if (stateLock()) { st = g_player.transport; stateUnlock(); }
-    (st == TransportState::Playing) ? sonos::pause(s_coordIp) : sonos::play(s_coordIp);
-  }
+  // Explicit play/pause decided by the UI (no round-trip, correct action).
+  if (p.setPlay == 0)      sonos::pause(s_coordIp);
+  else if (p.setPlay == 1) sonos::play(s_coordIp);
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
-  // After a skip the track (and art) change — poll again soon, once the speaker has settled
-  // out of TRANSITIONING, rather than waiting up to a full second.
-  if (p.prev || p.next) s_lastPoll = millis() - 600;
+  // After a transport change the track/state (and art) update — poll again soon, once the
+  // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.
+  if (p.prev || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;
 
   // Browse / play requests (ContentDirectory off the UI thread).
   library::service(s_coordIp, s_coordIp, s_coordUuid);
