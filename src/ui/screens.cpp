@@ -5,8 +5,10 @@
 #include "../sonos/ssdp.h"
 #include "../hw/encoder.h"
 #include "../hw/pcf8574.h"
+#include "../hw/display.h"
 #include <lvgl.h>
 #include <vector>
+#include <time.h>
 
 // Screens (plan §6):
 //   NOW PLAYING — art, title/artist, progress arc, play-state, volume; prev/next buttons.
@@ -27,6 +29,14 @@ static lv_obj_t *s_scrRooms;
 static lv_obj_t *s_roomList;
 static std::vector<String> s_roomIps;   // parallel to the list rows
 static int s_roomSel = 0;
+
+// --- CLOCK screensaver ---
+static lv_obj_t *s_scrClock, *s_clkTime, *s_clkDate;
+static Screen    s_prevScreen = Screen::NowPlaying;  // where to return on wake
+static uint32_t  s_lastEncBtn = 0;                   // last encoder/button activity
+static const uint32_t kSaverMs        = 30000;       // idle -> screensaver
+static const uint8_t  kSaverBright    = 12;          // dimmed backlight %
+static const uint8_t  kFullBright     = 100;
 
 static void fmtTime(char *buf, size_t n, uint32_t sec) {
   snprintf(buf, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
@@ -213,6 +223,43 @@ static void buildRooms() {
   lv_obj_set_style_border_width(s_roomList, 0, 0);
 }
 
+// ---------------- CLOCK screensaver ----------------
+
+static void buildClock() {
+  s_scrClock = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(s_scrClock, lv_color_black(), 0);
+  lv_obj_remove_flag(s_scrClock, LV_OBJ_FLAG_SCROLLABLE);
+
+  s_clkTime = lv_label_create(s_scrClock);
+  lv_obj_set_style_text_color(s_clkTime, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_clkTime, &lv_font_montserrat_48, 0);
+  lv_label_set_text(s_clkTime, "--:--");
+  lv_obj_align(s_clkTime, LV_ALIGN_CENTER, 0, -SH(5));
+
+  s_clkDate = lv_label_create(s_scrClock);
+  lv_obj_set_style_text_color(s_clkDate, lv_palette_main(LV_PALETTE_GREY), 0);
+  lv_obj_set_style_text_font(s_clkDate, &lv_font_montserrat_20, 0);
+  lv_label_set_text(s_clkDate, "");
+  lv_obj_align(s_clkDate, LV_ALIGN_CENTER, 0, SH(10));
+}
+
+static void updateClock() {
+  time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  if (lt.tm_year + 1900 < 2021) {            // NTP not synced yet
+    lv_label_set_text(s_clkTime, "--:--");
+    lv_label_set_text(s_clkDate, "syncing");
+    return;
+  }
+  int h12 = lt.tm_hour % 12; if (h12 == 0) h12 = 12;
+  char tbuf[8], dbuf[32];
+  snprintf(tbuf, sizeof(tbuf), "%d:%02d", h12, lt.tm_min);
+  strftime(dbuf, sizeof(dbuf), "%a %b %d", &lt);
+  lv_label_set_text(s_clkTime, tbuf);
+  lv_label_set_text(s_clkDate, dbuf);
+}
+
 // ---------------- input + dispatch ----------------
 
 static void handleNowInput(KnobEvent ev, int32_t d) {
@@ -252,13 +299,42 @@ static void handleRoomsInput(KnobEvent ev, int32_t d) {
 void uiInit() {
   buildNowPlaying();
   buildRooms();
+  buildClock();
   lv_screen_load(s_scrNow);
   s_cur = Screen::NowPlaying;
+  s_lastEncBtn = lv_tick_get();
 }
 
 void uiTick() {
   KnobEvent ev = knobEvent();
   int32_t   d  = encoderDelta();
+
+  // Combined idle time across encoder/button (manual) and touch (LVGL indev).
+  uint32_t now = lv_tick_get();
+  if (d != 0 || ev != KnobEvent::None) s_lastEncBtn = now;
+  uint32_t idle = lv_display_get_inactive_time(NULL);
+  uint32_t encBtnIdle = now - s_lastEncBtn;
+  if (encBtnIdle < idle) idle = encBtnIdle;
+
+  // Screensaver: any input while dimmed just wakes (and is consumed, not acted on).
+  if (s_cur == Screen::Clock) {
+    if (idle < 250) {
+      backlightSet(kFullBright);
+      uiShow(s_prevScreen);
+    } else {
+      updateClock();
+    }
+    lv_timer_handler();
+    return;
+  }
+  if (idle > kSaverMs) {
+    s_prevScreen = s_cur;
+    updateClock();
+    uiShow(Screen::Clock);
+    backlightSet(kSaverBright);
+    lv_timer_handler();
+    return;
+  }
 
   if (s_cur == Screen::NowPlaying) {
     handleNowInput(ev, d);
@@ -277,11 +353,8 @@ void uiTick() {
 
 void uiShow(Screen s) {
   if (s == s_cur) return;
-  if (s == Screen::Rooms) {
-    populateRooms();
-    lv_screen_load(s_scrRooms);
-  } else {
-    lv_screen_load(s_scrNow);
-  }
+  if (s == Screen::Rooms)       { populateRooms(); lv_screen_load(s_scrRooms); }
+  else if (s == Screen::Clock)  { lv_screen_load(s_scrClock); }
+  else                          { lv_screen_load(s_scrNow); }
   s_cur = s;
 }

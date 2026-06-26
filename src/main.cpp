@@ -14,6 +14,8 @@
 #include "sonos/soap_client.h"
 #include "ui/screens.h"
 #include "ui/album_art.h"
+#include "net/ota.h"
+#include "settings.h"
 
 #ifdef PHASE0_BRINGUP
 #include "hw/bringup.h"
@@ -22,9 +24,14 @@
 #include "net/phase1_test.h"
 #endif
 
-// Optional: pin a default room via include/secrets.h (#define SONOS_DEFAULT_ROOM "Name").
+// Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
 #if __has_include("secrets.h")
 #include "secrets.h"
+#endif
+
+// POSIX timezone for the clock screensaver (DST handled automatically).
+#ifndef CLOCK_TZ
+#define CLOCK_TZ "PST8PDT,M3.2.0,M11.1.0"   // US Pacific
 #endif
 
 // --- FreeRTOS tasks (mutex-guarded shared PlayerState) ---
@@ -57,6 +64,7 @@ static bool selectZoneByIp(const String &ip) {
       g_player.artUri.clear();
       stateUnlock();
     }
+    settingsSetRoom(z.name);   // persist so the pick survives reboot
     Serial.printf("[zone] switched to %s @ %s (coord %s)\n",
                   s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
     return true;
@@ -70,17 +78,22 @@ static bool selectZoneByIp(const String &ip) {
 static bool selectZone() {
   const std::vector<sonos::Zone> &zs = sonos::zones();
   if (zs.empty()) return false;
-  size_t idx = 0;
+  // Preference order: saved room (NVS) -> SONOS_DEFAULT_ROOM -> first discovered.
+  String want = settingsRoom();
 #ifdef SONOS_DEFAULT_ROOM
-  bool found = false;
-  for (size_t i = 0; i < zs.size(); ++i)
-    if (zs[i].name == SONOS_DEFAULT_ROOM) { idx = i; found = true; break; }
-  if (!found) {
-    Serial.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
-                  SONOS_DEFAULT_ROOM, (unsigned)zs.size());
-    return false;
-  }
+  if (want.length() == 0) want = SONOS_DEFAULT_ROOM;
 #endif
+  size_t idx = 0;
+  if (want.length()) {
+    bool found = false;
+    for (size_t i = 0; i < zs.size(); ++i)
+      if (zs[i].name == want) { idx = i; found = true; break; }
+    if (!found) {
+      Serial.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
+                    want.c_str(), (unsigned)zs.size());
+      return false;
+    }
+  }
   s_zoneName = zs[idx].name;
   s_zoneIp   = zs[idx].ip;
   s_coordIp  = sonos::coordinatorIpFor(s_zoneName);
@@ -110,6 +123,7 @@ void setup() {
 
   // Phase 0 — bring-up. Gate everything on flicker-free redraw while WiFi is active.
   playerStateInit();
+  settingsInit();       // NVS (persisted room, etc.)
   if (!pcf8574Init()) Serial.println("[boot] PCF8574 not responding — check I2C wiring");
   if (!displayInit()) Serial.println("[boot] display init FAILED");  // ST7701 RGB + LVGL
   touchInit();
@@ -119,7 +133,9 @@ void setup() {
 
   // Phase 1 — network + Sonos discovery.
   wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
-  sonos::ssdpDiscover();  // SSDP once -> cache IPs/UUIDs in NVS; cache-first on boot (§3)
+  configTzTime(CLOCK_TZ, "pool.ntp.org", "time.nist.gov");  // clock screensaver time
+  otaBegin();             // OTA listener (sonos-nest.local) — Phase 4
+  sonos::ssdpDiscover();  // SSDP seed -> ZoneGroupTopology -> room list (§3)
   selectZone();
 
   // Launch tasks. UI pinned to core 1; network work on core 0.
@@ -129,8 +145,9 @@ void setup() {
 }
 
 void loop() {
-  // All work happens in tasks. Nothing here.
-  vTaskDelay(portMAX_DELAY);
+  // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
+  otaHandle();
+  vTaskDelay(pdMS_TO_TICKS(20));
 }
 
 static void uiTask(void *) {
@@ -145,6 +162,8 @@ static void netTask(void *) {
   uint32_t lastVolCmd = 0;
   uint32_t lastCoordRefresh = 0;
   for (;;) {
+    if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
+
     // If discovery failed at boot, keep retrying until we have a zone.
     if (s_zoneIp.length() == 0) {
       if (sonos::ssdpDiscover()) selectZone();
@@ -212,6 +231,8 @@ static void netTask(void *) {
 static void artTask(void *) {
   String last;
   for (;;) {
+    if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
+
     String cur;
     if (stateLock()) { cur = g_player.artUri; stateUnlock(); }
     if (cur != last) {

@@ -31,6 +31,7 @@
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_28 1
+#define LV_FONT_MONTSERRAT_48 1   // clock screensaver
 
 // --- Default theme ---
 #define LV_USE_THEME_DEFAULT 1

@@ -300,11 +300,17 @@ Screens / state machine (LVGL):
 - Select → (playlists: clear queue, add, Play index 0) / (radio: SetAVTransportURI + Play).
 
 ### Phase 4 — Polish (ongoing)
-- ROOMS zone switcher, group/ungroup.
-- Clock screensaver on inactivity.
-- OTA updates (stable/nightly).
-- LRCLIB time-synced lyrics.
-- Settings persistence (NVS), reconnect/error states, screen dim/sleep.
+- ✅ **ROOMS zone switcher** — topology-based room list (deduped, alphabetical), long-press
+  to open, twist=scroll, press=select, touch row to pick. (group/ungroup still TODO)
+- ✅ **Clock screensaver** — 30s idle → dimmed NTP clock (TZ via `CLOCK_TZ`, default
+  Pacific); any input wakes. Idle = min(encoder/button, touch) inactivity.
+- ✅ **Settings persistence (NVS)** — picked room saved via Preferences; boot preference is
+  saved room → `SONOS_DEFAULT_ROOM` → first discovered.
+- ✅ **OTA updates** — ArduinoOTA as `sonos-nest` (`pio run -e ota -t upload`). NOTE: the
+  build host must reach the device's LAN IP; from the current WSL PC the Sonos/ESP WiFi
+  segment is unreachable (VLAN/client isolation), so OTA needs a host on that network.
+- LRCLIB time-synced lyrics. (TODO)
+- reconnect/error states, screen dim/sleep, brightness setting. (TODO)
 - Optional: encoder acceleration, favorites radial, MQTT/HA.
 
 ### Effort note
