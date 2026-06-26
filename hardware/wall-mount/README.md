@@ -68,14 +68,28 @@ Smaller `ring_h` = closer to the wall; keep `ring_h` a couple mm above
 
 ## Printing
 
-- **Material:** PETG/ASA preferred (sits near warm electronics / a sunny wall).
-  PLA works but can creep with heat.
-- **Cradle:** print skirt-down (bayonet slots need no supports that way); the
-  center web may want light supports.
-- **Plate:** disc flat on the bed, ring up — no supports.
-- **Walls/infill:** 3+ perimeters, 30–40% infill (the lugs take the load).
-- **Fit:** if the cradle won't twist on, loosen `ring_fit`; if the twist is
-  loose, lower `slot_w` or raise `lug_protrude` in `bayonet_params.py`.
+> **Validation:** the 1:1 paper templates (`templates.pdf`) were checked against
+> the physical unit — screw pattern and diameters line up. The models are
+> print-ready. Always print the templates at **100% / Actual Size** and confirm
+> the 100 mm calibration bar before trusting a measurement.
+
+**Settings (validated):**
+
+| Setting | Value |
+|---|---|
+| Material | PETG or ASA (sits near warm electronics / wall). PLA can creep with heat. |
+| Cradle orientation | **Skirt-down** — bayonet J-slots print support-free; center web may want light supports. |
+| Plate orientation | Disc flat on the bed, ring up — no supports. |
+| Perimeters / infill | 3+ perimeters, 30–40% infill (the lugs carry the load). |
+| Layer height | 0.2 mm is fine; the bayonet tolerances assume ~0.4 mm nozzle. |
+| Screws (display) | 3 × short **M3** into the rear hub (Ø4 holes are clearance; ~6–8 mm length to pass the ~3 mm web + bite the threads). |
+| Screws (wall) | 2 × ~#8 / M4 into anchors or a stud (heads countersink flush, inside the ring). |
+
+- **Print the cradle first** as a single first-article: confirm the display
+  seats, the 3 screws thread into the hub, and the twist-lock engages — *before*
+  committing to the plate.
+- **Fit tuning** (`bayonet_params.py`): cradle won't twist on → loosen
+  `ring_fit`; twist too loose → lower `slot_w` or raise `lug_protrude`.
 
 ## Assembly
 
@@ -86,12 +100,10 @@ Smaller `ring_h` = closer to the wall; keep `ring_h` a couple mm above
 3. Offer the cradle to the plate so the lugs meet the axial slots, push, and
    **twist to lock**. A dab of hot glue at one lug makes it twist-proof.
 
-## ⚠️ Still to confirm against the physical unit
-- [ ] **USB-C routing.** The reference cup has a *solid* lower wall (no side
-  port cutout) — it assumes the cable enters through the back/center, which the
-  Ø11 pass-through handles. If your port is on the **side edge**, a side cutout
-  is needed (easy to add).
-- [ ] **Screw spec.** Holes are Ø4 clearance; use short screws (~M3) long enough
-  to pass the ~3 mm web and bite the display's rear threads.
-- [ ] First-article print of the cradle to verify the display seats and the
-  screw holes line up before printing the plate.
+## Validation status
+- [x] **Screw pattern** — paper template lined up with the unit's rear holes.
+- [x] **Diameters** — Ø58 body / Ø79 bezel confirmed on the paper template.
+- [x] **USB-C routing** — port is on the **back**; the Ø11 center pass-through
+  + open back handle the cable. No side cutout needed.
+- [ ] **First-article print** of the cradle to confirm the display seats and the
+  screws thread before printing the plate.
