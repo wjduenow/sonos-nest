@@ -294,10 +294,14 @@ Screens / state machine (LVGL):
   - SSDP must do **multiple full rounds** (a single round misses speakers in a big household);
     pinned room (`SONOS_DEFAULT_ROOM`) only settles once that exact zone is discovered.
 
-### Phase 3 — Browse & select (3–4 days) — *the big one*
-- ContentDirectory `Browse` for `SQ:` (playlists) and `R:0`/`FV:2` (radio/favorites).
-- Parse DIDL-Lite → scrollable LVGL lists.
-- Select → (playlists: clear queue, add, Play index 0) / (radio: SetAVTransportURI + Play).
+### Phase 3 — Browse & select — ✅ DONE (2026-06-26), validated on hardware
+- ContentDirectory `Browse` for `SQ:` (playlists) and `FV:2` (favorites). ✅
+- DIDL-Lite list parser (`parseDidl`) → reusable `ListScreen` LVGL lists. ✅
+- MENU hub (long-press → Now Playing / Rooms / Playlists / Favorites). ✅
+- Select → playlist: clear queue, `AddURIToQueue`, transport to `x-rincon-queue:<coordUuid>#0`,
+  Play. Favorite: `SetAVTransportURI` + Play. ✅
+- Async: UI posts browse/play requests; `library::service` runs the SOAP on netTask (off UI).
+- TODO later: TuneIn radio (`R:0`) browse, nested container drill-down, music-library (`A:`).
 
 ### Phase 4 — Polish (ongoing)
 - ✅ **ROOMS zone switcher** — topology-based room list (deduped, alphabetical), long-press
