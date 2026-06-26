@@ -19,6 +19,11 @@ bool setAvTransportUri(const String& ip, const String& uri, const String& didlMe
 bool getTransportInfo(const String& ip, TransportState& out);
 bool getPositionInfo(const String& ip, PlayerState& out);   // track + pos + dur + DIDL
 
+// Grouping: join a speaker to a coordinator's group via
+//   setAvTransportUri(memberIp, "x-rincon:" + coordinatorUuid, "")
+// and ungroup (leave) a member with:
+bool becomeStandalone(const String& ip);   // BecomeCoordinatorOfStandaloneGroup
+
 // --- RenderingControl: /MediaRenderer/RenderingControl/Control (Channel=Master) ---
 bool getVolume(const String& ip, uint8_t& out);
 bool setVolume(const String& ip, uint8_t vol);

@@ -7,6 +7,9 @@
 #include "../hw/encoder.h"
 #include "../hw/pcf8574.h"
 #include "../hw/display.h"
+#include "../net/ota.h"
+#include "../settings.h"
+#include <WiFi.h>
 #include <lvgl.h>
 #include <vector>
 #include <time.h>
@@ -239,7 +242,13 @@ static void renderNow() {
 
 static void handleNowInput(KnobEvent ev, int32_t d) {
   if (d != 0 && stateLock()) {
-    int v = (int)g_player.volume + d;
+    // Encoder acceleration: faster spins move volume in bigger steps.
+    static uint32_t s_lastVolTick = 0;
+    uint32_t nowt = lv_tick_get();
+    uint32_t dt = nowt - s_lastVolTick;
+    s_lastVolTick = nowt;
+    int mult = (dt < 35) ? 6 : (dt < 70) ? 3 : (dt < 130) ? 2 : 1;
+    int v = (int)g_player.volume + d * mult;
     v = v < 0 ? 0 : (v > 100 ? 100 : v);
     g_player.volume = (uint8_t)v;
     g_pending.targetVolume = v;
@@ -264,20 +273,26 @@ static void handleNowInput(KnobEvent ev, int32_t d) {
 
 // ============================ MENU / ROOMS / BROWSE ============================
 
-static ListScreen s_menu, s_rooms, s_browse;
-static std::vector<String> s_roomIps;   // parallel to the rooms list rows
-static bool s_browseQueue = false;      // current browse: true=playlist queue flow
+static ListScreen s_menu, s_rooms, s_browse, s_group;
+static std::vector<String> s_roomIps;     // parallel to the rooms list rows
+static std::vector<String> s_groupIps;    // parallel to the group list rows
+static std::vector<bool>   s_groupInGroup, s_groupIsActive;
+static uint32_t s_groupGen = 0;           // last-seen g_zonesGen, to re-render on change
+static bool s_browseQueue = false;        // current browse: true=playlist queue flow
 
 // forward decls
 static void menuSelect(int idx);
 static void roomSelect(int idx);
 static void browseSelect(int idx);
+static void groupSelect(int idx);
 
 static void menuClickCb(lv_event_t *e)   { s_menu.sel   = (int)(intptr_t)lv_event_get_user_data(e); menuSelect(s_menu.sel); }
 static void roomClickCb(lv_event_t *e)   { s_rooms.sel  = (int)(intptr_t)lv_event_get_user_data(e); roomSelect(s_rooms.sel); }
 static void browseClickCb(lv_event_t *e) { s_browse.sel = (int)(intptr_t)lv_event_get_user_data(e); browseSelect(s_browse.sel); }
+static void groupClickCb(lv_event_t *e)  { s_group.sel  = (int)(intptr_t)lv_event_get_user_data(e); groupSelect(s_group.sel); }
 
-static const char *kMenuItems[] = {"Now Playing", "Rooms", "Playlists", "Favorites"};
+static const char *kMenuItems[] = {"Now Playing", "Rooms", "Group", "Playlists", "Favorites", "Settings"};
+static const int   kMenuCount   = 6;
 
 static void populateRooms() {
   std::vector<String> labels;
@@ -308,8 +323,10 @@ static void menuSelect(int idx) {
   switch (idx) {
     case 0: uiShow(Screen::NowPlaying); break;
     case 1: uiShow(Screen::Rooms); break;
-    case 2: enterBrowse("Playlists", "SQ:", true); break;
-    case 3: enterBrowse("Favorites", "FV:2", false); break;
+    case 2: uiShow(Screen::Group); break;
+    case 3: enterBrowse("Playlists", "SQ:", true); break;
+    case 4: enterBrowse("Favorites", "FV:2", false); break;
+    case 5: uiShow(Screen::Settings); break;
   }
 }
 
@@ -317,6 +334,38 @@ static void roomSelect(int idx) {
   if (idx < 0 || idx >= (int)s_roomIps.size()) return;
   if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
   uiShow(Screen::NowPlaying);
+}
+
+// GROUP: every room with a check if it shares the active room's group. Toggling joins a
+// room to / removes it from the active group (the active room is the anchor).
+static void populateGroup() {
+  std::vector<String> labels;
+  s_groupIps.clear(); s_groupInGroup.clear(); s_groupIsActive.clear();
+  String activeCoord, activeName;
+  if (stateLock()) { activeCoord = g_player.coordinatorUuid; activeName = g_player.zoneName; stateUnlock(); }
+  const std::vector<sonos::Zone> &zs = sonos::zones();
+  for (const auto &z : zs) {
+    bool inGroup  = (z.coordinatorUuid == activeCoord);
+    bool isActive = (z.name == activeName);
+    String label = String(inGroup ? LV_SYMBOL_OK " " : "   ") + z.name + (isActive ? " *" : "");
+    labels.push_back(label);
+    s_groupIps.push_back(z.ip);
+    s_groupInGroup.push_back(inGroup);
+    s_groupIsActive.push_back(isActive);
+  }
+  if (labels.empty()) labels.push_back("Searching" LV_SYMBOL_REFRESH);
+  listSet(s_group, labels, LV_SYMBOL_AUDIO, groupClickCb);
+}
+
+static void groupSelect(int idx) {
+  if (idx < 0 || idx >= (int)s_groupIps.size()) return;
+  if (s_groupIsActive[idx]) return;   // can't group/ungroup the anchor itself
+  if (stateLock()) {
+    if (s_groupInGroup[idx]) g_pending.groupLeaveIp = s_groupIps[idx];
+    else                     g_pending.groupJoinIp  = s_groupIps[idx];
+    stateUnlock();
+  }
+  // Stay on the screen; it re-populates when netTask re-discovers (g_zonesGen bumps).
 }
 
 static void browseSelect(int idx) {
@@ -377,16 +426,92 @@ static void updateClock() {
   lv_label_set_text(s_clkDate, dbuf);
 }
 
+// ============================ SETTINGS (brightness + OTA info) ============================
+
+static lv_obj_t *s_scrSettings, *s_setBright, *s_setArc, *s_setOta;
+static uint8_t   s_brightness = 100;
+
+static void buildSettings() {
+  s_scrSettings = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(s_scrSettings, lv_color_black(), 0);
+  lv_obj_remove_flag(s_scrSettings, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *hdr = lv_label_create(s_scrSettings);
+  lv_obj_set_style_text_color(hdr, lv_color_white(), 0);
+  lv_obj_set_style_text_font(hdr, &lv_font_montserrat_20, 0);
+  lv_label_set_text(hdr, "Settings");
+  lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, SH(12));
+
+  s_setArc = lv_arc_create(s_scrSettings);
+  lv_obj_set_size(s_setArc, SW(60), SH(60));
+  lv_obj_align(s_setArc, LV_ALIGN_CENTER, 0, -SH(4));
+  lv_arc_set_rotation(s_setArc, 135);
+  lv_arc_set_bg_angles(s_setArc, 0, 270);
+  lv_arc_set_range(s_setArc, 10, 100);
+  lv_obj_remove_flag(s_setArc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_remove_style(s_setArc, nullptr, LV_PART_KNOB);
+  lv_obj_set_style_arc_color(s_setArc, lv_palette_main(LV_PALETTE_AMBER), LV_PART_INDICATOR);
+
+  s_setBright = lv_label_create(s_scrSettings);
+  lv_obj_set_style_text_color(s_setBright, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_setBright, &lv_font_montserrat_28, 0);
+  lv_obj_align(s_setBright, LV_ALIGN_CENTER, 0, -SH(4));
+
+  s_setOta = lv_label_create(s_scrSettings);
+  lv_obj_set_style_text_color(s_setOta, lv_palette_main(LV_PALETTE_GREY), 0);
+  lv_obj_set_style_text_font(s_setOta, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_align(s_setOta, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(s_setOta, LV_ALIGN_CENTER, 0, SH(34));
+}
+
+static void showSettings() {
+  lv_label_set_text_fmt(s_setBright, LV_SYMBOL_SETTINGS " %d%%", s_brightness);
+  lv_arc_set_value(s_setArc, s_brightness);
+  lv_label_set_text_fmt(s_setOta, "OTA: sonos-nest\n%s", WiFi.localIP().toString().c_str());
+}
+
+static void settingsInput(int32_t d) {
+  if (d == 0) return;
+  int b = (int)s_brightness + d * 5;
+  b = b < 10 ? 10 : (b > 100 ? 100 : b);
+  s_brightness = (uint8_t)b;
+  backlightSet(s_brightness);
+  settingsSetBrightness(s_brightness);
+  lv_label_set_text_fmt(s_setBright, LV_SYMBOL_SETTINGS " %d%%", s_brightness);
+  lv_arc_set_value(s_setArc, s_brightness);
+}
+
+// ============================ OTA overlay ============================
+
+static lv_obj_t *s_scrOta, *s_otaLabel;
+
+static void buildOta() {
+  s_scrOta = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(s_scrOta, lv_color_black(), 0);
+  lv_obj_remove_flag(s_scrOta, LV_OBJ_FLAG_SCROLLABLE);
+  s_otaLabel = lv_label_create(s_scrOta);
+  lv_obj_set_style_text_color(s_otaLabel, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_otaLabel, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_align(s_otaLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(s_otaLabel, "Updating\n0%");
+  lv_obj_center(s_otaLabel);
+}
+
 // ============================ lifecycle ============================
 
 void uiInit() {
   buildNowPlaying();
   listBuild(s_menu, "Menu");
   listBuild(s_rooms, "Rooms");
+  listBuild(s_group, "Group");
   listBuild(s_browse, "Browse");
   buildClock();
+  buildSettings();
+  buildOta();
 
-  std::vector<String> menu(kMenuItems, kMenuItems + 4);
+  s_brightness = settingsBrightness();
+
+  std::vector<String> menu(kMenuItems, kMenuItems + kMenuCount);
   listSet(s_menu, menu, LV_SYMBOL_LIST, menuClickCb);
 
   lv_screen_load(s_scrNow);
@@ -395,6 +520,15 @@ void uiInit() {
 }
 
 void uiTick() {
+  // OTA overlay preempts everything during a firmware update.
+  if (otaActive()) {
+    if (lv_screen_active() != s_scrOta) { lv_screen_load(s_scrOta); backlightSet(100); }
+    int p = otaProgress();
+    lv_label_set_text_fmt(s_otaLabel, "Updating\n%d%%", p < 0 ? 0 : p);
+    lv_timer_handler();
+    return;
+  }
+
   KnobEvent ev = knobEvent();
   int32_t   d  = encoderDelta();
 
@@ -410,7 +544,7 @@ void uiTick() {
 
   if (s_cur == Screen::Clock) {
     if (idle < 250 || playing) {
-      backlightSet(kFullBright);
+      backlightSet(s_brightness);
       uiShow(playing ? Screen::NowPlaying : s_prevScreen);
     } else {
       updateClock();
@@ -459,6 +593,16 @@ void uiTick() {
       else if (ev == KnobEvent::Long) uiShow(Screen::Home);
       break;
     }
+    case Screen::Group:
+      if (g_zonesGen != s_groupGen) { s_groupGen = g_zonesGen; populateGroup(); }
+      if (d) listMove(s_group, d > 0 ? 1 : -1);
+      if (ev == KnobEvent::Short)     groupSelect(s_group.sel);
+      else if (ev == KnobEvent::Long) uiShow(Screen::Home);
+      break;
+    case Screen::Settings:
+      settingsInput(d);
+      if (ev == KnobEvent::Long) uiShow(Screen::Home);
+      break;
     default: break;
   }
 
@@ -470,7 +614,9 @@ void uiShow(Screen s) {
   switch (s) {
     case Screen::Home:      lv_screen_load(s_menu.scr);   break;
     case Screen::Rooms:     populateRooms(); lv_screen_load(s_rooms.scr); break;
+    case Screen::Group:     populateGroup(); s_groupGen = g_zonesGen; lv_screen_load(s_group.scr); break;
     case Screen::Playlists: lv_screen_load(s_browse.scr); break;
+    case Screen::Settings:  showSettings(); lv_screen_load(s_scrSettings); break;
     case Screen::Clock:     lv_screen_load(s_scrClock);   break;
     default:                lv_screen_load(s_scrNow);     break;
   }

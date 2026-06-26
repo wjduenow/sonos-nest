@@ -36,7 +36,13 @@ struct PendingCmds {
   bool   next         = false;
   bool   prev         = false;
   String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP
+  String groupJoinIp;         // join this speaker to the active group
+  String groupLeaveIp;        // remove this speaker from its group (become standalone)
 };
+
+// Bumped whenever the discovered zone list changes (after grouping ops / re-discovery) so
+// the UI can re-render the room/group lists.
+extern volatile uint32_t g_zonesGen;
 
 // Guard every read/write of the global PlayerState / PendingCmds with this mutex.
 extern SemaphoreHandle_t g_stateMutex;

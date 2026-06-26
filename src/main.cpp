@@ -130,6 +130,7 @@ void setup() {
   settingsInit();       // NVS (persisted room, etc.)
   if (!pcf8574Init()) Serial.println("[boot] PCF8574 not responding — check I2C wiring");
   if (!displayInit()) Serial.println("[boot] display init FAILED");  // ST7701 RGB + LVGL
+  backlightSet(settingsBrightness());   // restore saved brightness
   touchInit();
   encoderInit();
   uiInit();             // build LVGL screens
@@ -183,6 +184,21 @@ static void processPending() {
   else if (p.setPlay == 1) sonos::play(s_coordIp);
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
+
+  // Grouping: join a speaker to the active group, or split one off. Re-discover topology
+  // and refresh the active room's coordinator afterward, then signal the UI.
+  if (p.groupJoinIp.length()) {
+    sonos::setAvTransportUri(p.groupJoinIp, "x-rincon:" + s_coordUuid, "");
+    sonos::ssdpDiscover();
+    selectZoneByIp(s_zoneIp);
+    g_zonesGen++;
+  }
+  if (p.groupLeaveIp.length()) {
+    sonos::becomeStandalone(p.groupLeaveIp);
+    sonos::ssdpDiscover();
+    selectZoneByIp(s_zoneIp);
+    g_zonesGen++;
+  }
   // After a transport change the track/state (and art) update — poll again soon, once the
   // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.
   if (p.prev || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;

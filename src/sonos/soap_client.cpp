@@ -139,6 +139,11 @@ bool getTransportInfo(const String &ip, TransportState &out) {
   else if (s == "TRANSITIONING")   out = TransportState::Transitioning;
   return true;
 }
+bool becomeStandalone(const String &ip) {
+  String r;
+  return soapAction(ip, PATH_AVT, SVC_AVT, "BecomeCoordinatorOfStandaloneGroup",
+                    "<InstanceID>0</InstanceID>", r);
+}
 bool getPositionInfo(const String &ip, PlayerState &out) {
   String r;
   if (!soapAction(ip, PATH_AVT, SVC_AVT, "GetPositionInfo",

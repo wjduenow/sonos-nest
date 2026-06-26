@@ -310,12 +310,19 @@ Screens / state machine (LVGL):
   Pacific); any input wakes. Idle = min(encoder/button, touch) inactivity.
 - ✅ **Settings persistence (NVS)** — picked room saved via Preferences; boot preference is
   saved room → `SONOS_DEFAULT_ROOM` → first discovered.
-- ✅ **OTA updates** — ArduinoOTA as `sonos-nest` (`pio run -e ota -t upload`). NOTE: the
-  build host must reach the device's LAN IP; from the current WSL PC the Sonos/ESP WiFi
-  segment is unreachable (VLAN/client isolation), so OTA needs a host on that network.
+- ✅ **OTA updates** — ArduinoOTA as `sonos-nest` (`pio run -e ota -t upload`), with an
+  on-screen "Updating NN%" overlay. NOTE: the build host must reach the device's LAN IP.
+- ✅ **Group / ungroup** — Group screen lists rooms with a ✓ for current group members
+  (anchor = active room, marked *). Join = `SetAVTransportURI(member, x-rincon:<coordUuid>)`;
+  leave = `BecomeCoordinatorOfStandaloneGroup`. Re-discovers + re-renders after each op.
+- ✅ **Encoder acceleration** — fast volume spins move in larger steps (time-between-detents).
+- ✅ **Brightness setting** — Settings screen, twist to adjust backlight 10–100%, persisted
+  in NVS; restored at boot; screensaver wakes to it.
+- ✅ **NVS zone cache** — discovered zones cached; boot refreshes topology from a cached IP
+  (skips the ~3.6s SSDP multicast wait), falling back to full discovery if the net changed.
 - LRCLIB time-synced lyrics. (TODO)
-- reconnect/error states, screen dim/sleep, brightness setting. (TODO)
-- Optional: encoder acceleration, favorites radial, MQTT/HA.
+- Dedicated TuneIn radio (`R:0`) browse, music-library (`A:`) drill-down. (TODO)
+- reconnect/error states, OTA stable/nightly channels, MQTT/HA, favorites radial. (TODO)
 
 ### Effort note
 Direct control is ~2–3× the proxy-approach firmware effort, almost all of it in Phase 3

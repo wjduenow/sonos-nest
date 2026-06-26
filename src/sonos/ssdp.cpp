@@ -1,5 +1,6 @@
 #include "ssdp.h"
 #include "soap_client.h"
+#include "../settings.h"
 #include <Arduino.h>
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
@@ -64,6 +65,7 @@ static String attrOf(const String &s, const char *name) {
 // stereo-pair satellites (<Satellite> children) and invisible devices (bridges, hidden
 // subs) are excluded, so a paired room appears once — matching the Sonos app.
 static bool buildZonesFromTopology(const String &seedIp) {
+  s_zones.clear();
   String r;
   if (!soapAction(seedIp, "/ZoneGroupTopology/Control",
                   "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
@@ -151,18 +153,62 @@ static String ssdpSeed() {
   return seed;
 }
 
-// Discover the canonical rooms: SSDP to find any one speaker, then enumerate zones from its
-// group topology (deduped, satellites excluded).
-bool ssdpDiscover() {
+// Serialize/deserialize the zone list for the NVS cache (fast boot). One zone per line,
+// fields separated by US (0x1f): name | ip | uuid | coordinatorUuid | coordIp.
+static String serializeZones() {
+  String s;
+  for (auto &z : s_zones) {
+    s += z.name; s += '\x1f'; s += z.ip; s += '\x1f'; s += z.uuid; s += '\x1f';
+    s += z.coordinatorUuid; s += '\x1f'; s += z.coordIp; s += '\n';
+  }
+  return s;
+}
+static bool deserializeZones(const String &blob) {
   s_zones.clear();
-  String seed;
+  int pos = 0;
+  while (pos < (int)blob.length()) {
+    int eol = blob.indexOf('\n', pos);
+    if (eol < 0) break;
+    String line = blob.substring(pos, eol);
+    pos = eol + 1;
+    Zone z;
+    int field = 0, start = 0;
+    for (int i = 0; i <= (int)line.length(); ++i) {
+      if (i == (int)line.length() || line[i] == '\x1f') {
+        String v = line.substring(start, i);
+        start = i + 1;
+        switch (field++) {
+          case 0: z.name = v; break;
+          case 1: z.ip = v; break;
+          case 2: z.uuid = v; break;
+          case 3: z.coordinatorUuid = v; break;
+          case 4: z.coordIp = v; break;
+        }
+      }
+    }
+    if (z.name.length() && z.ip.length()) s_zones.push_back(z);
+  }
+  return !s_zones.empty();
+}
+
+// Discover the canonical rooms. Fast path: refresh topology from a CACHED speaker IP (no
+// SSDP multicast wait). Fallback: SSDP to find any speaker, then enumerate from topology.
+// Either way, the fresh list is cached to NVS for next boot.
+bool ssdpDiscover() {
 #ifdef SONOS_ZONE_IP
-  seed = SONOS_ZONE_IP;
-#else
-  seed = ssdpSeed();
+  if (buildZonesFromTopology(SONOS_ZONE_IP)) { settingsSetZones(serializeZones()); return true; }
 #endif
-  if (seed.length() == 0) return false;
-  return buildZonesFromTopology(seed);
+  // Fast path: a cached IP is usually still valid — one topology fetch, no 3.6s SSDP wait.
+  if (deserializeZones(settingsZones()) && s_zones.size()) {
+    String seed = s_zones[0].ip;
+    if (buildZonesFromTopology(seed)) { settingsSetZones(serializeZones()); return true; }
+  }
+  // Slow path: full SSDP discovery (network changed, or first boot).
+  String seed = ssdpSeed();
+  if (seed.length() == 0) { s_zones.clear(); return false; }
+  if (!buildZonesFromTopology(seed)) return false;
+  settingsSetZones(serializeZones());
+  return true;
 }
 
 const std::vector<Zone> &zones() { return s_zones; }

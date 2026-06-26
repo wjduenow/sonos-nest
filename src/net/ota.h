@@ -8,3 +8,4 @@
 void otaBegin();    // start the OTA listener (call after WiFi connects)
 void otaHandle();   // pump the OTA handler (call from loop())
 bool otaActive();   // true while an update is in progress (pause heavy tasks)
+int  otaProgress(); // 0..100 during an update, else -1
