@@ -72,9 +72,7 @@ bool displayInit() {
       LCD_HSYNC_FP, LCD_HSYNC_PW, LCD_HSYNC_BP,
       LCD_VSYNC_FP, LCD_VSYNC_PW, LCD_VSYNC_BP);
 
-  if (!s_gfx->begin()) {
-    return false;
-  }
+  s_gfx->begin();          // Arduino_ST7701_RGBPanel::begin() returns void in 1.3.1
   s_gfx->fillScreen(BLACK);
 
   // 4. LVGL: tick source, display, partial draw buffers (allocated below).

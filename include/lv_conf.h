@@ -4,10 +4,15 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-#include <stdint.h>
+// NOTE: lv_conf.h is also pulled in when LVGL's .S files are assembled, so it must be
+// assembly-safe — do not #include C headers (e.g. <stdint.h>) here unguarded.
 
 // --- Color: RGB565 to match the panel framebuffer ---
 #define LV_COLOR_DEPTH 16
+
+// --- We're on Xtensa (ESP32-S3): disable LVGL's ARM Helium/NEON assembly, otherwise its
+//     .S files are fed to the Xtensa assembler and fail to build. ---
+#define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
 
 // --- Memory: builtin allocator. Bump LV_MEM_SIZE as the UI (lists, image cache) grows. ---
 #define LV_USE_STDLIB_MALLOC  LV_STDLIB_BUILTIN

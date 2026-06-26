@@ -26,6 +26,13 @@ static void i2cScan() {
 void bringupRun() {
   Serial.println("\n===== Phase 0 bring-up =====");
 
+  // 0. Memory report — the 480x480x2 framebuffer (~460 KB) requires PSRAM. If PSRAM size
+  //    is 0, the OPI-PSRAM build config didn't take and the display will fail to allocate.
+  Serial.printf("[bringup] PSRAM: %u bytes total, %u free\n",
+                (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreePsram());
+  Serial.printf("[bringup] internal heap free: %u bytes\n", (unsigned)ESP.getFreeHeap());
+  if (ESP.getPsramSize() == 0) Serial.println("[bringup] WARNING: no PSRAM — display alloc will fail");
+
   // 1. PCF8574 expander (also brings up the I2C bus).
   bool pcfOk = pcf8574Init();
   Serial.printf("[bringup] PCF8574 @ 0x%02X: %s\n", PCF8574_ADDR,

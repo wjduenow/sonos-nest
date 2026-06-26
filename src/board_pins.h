@@ -25,7 +25,9 @@
 #define PCF_PIN_TOUCH_INT  2    // P2
 #define PCF_PIN_LCD_PWR    3    // P3
 #define PCF_PIN_LCD_RST    4    // P4
-#define PCF_PIN_KNOB_BTN   5    // P5  <-- play/pause button (active-low, pull-up)
+#define PCF_PIN_KNOB_BTN   5    // P5  <-- play/pause button (active-low, 10K pull-up R21)
+// Schematic: press is a separate tact switch K112 (not on the encoder body J1) -> P5.
+// Verified working on hardware; the switch is stiff and needs a firm, centered push.
 
 // --- CST816 capacitive touch ---
 #define TOUCH_ADDR         0x15

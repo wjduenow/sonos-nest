@@ -40,8 +40,8 @@ void setup() {
   uiInit();             // build LVGL screens
 
   // Phase 1 — network + Sonos discovery.
-  wifiConnect();        // NVS creds -> connect; else captive portal (TODO)
-  ssdpDiscover();       // SSDP once -> cache IPs/UUIDs in NVS; cache-first on boot (§3)
+  wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
+  sonos::ssdpDiscover();  // SSDP once -> cache IPs/UUIDs in NVS; cache-first on boot (§3)
 
   // Launch tasks. UI pinned to core 1; network work on core 0.
   xTaskCreatePinnedToCore(uiTask,   "ui",   8192, nullptr, 3, nullptr, 1);
