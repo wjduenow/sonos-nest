@@ -52,14 +52,19 @@ Skip this step entirely on a native Linux/macOS build host.
    (If you can't see the screen, the boot serial prints `[ota] ready as sonos-nest @ <ip>`.)
 
 3. **Upload over WiFi** — run espota directly on the already-built binary (avoids rebuilding
-   the separate `ota` env, which is more prone to the transient ICE):
+   the separate `ota` env, which is more prone to the transient ICE). This auto-passes the
+   OTA password if one is set in `include/secrets.h`:
    ```bash
    ESPOTA=$(find ~/.platformio/packages/framework-arduinoespressif32 -name espota.py | head -1)
-   python3 "$ESPOTA" -i <device-ip> -p 3232 -f .pio/build/crowpanel-rotary/firmware.bin -r
+   PASS=$(grep -oP '#define\s+OTA_PASSWORD\s+"\K[^"]+' include/secrets.h 2>/dev/null)
+   python3 "$ESPOTA" -i <device-ip> -p 3232 -f .pio/build/crowpanel-rotary/firmware.bin -r ${PASS:+-a "$PASS"}
    ```
-   - Add `-a <password>` if the device firmware sets `OTA_PASSWORD` (in `include/secrets.h`).
-   - Success ends with `100% Done...`; the device reboots into the new firmware.
-   - Equivalent (but slower/flakier build): `pio run -e ota -t upload --upload-port <device-ip>`.
+   - The device requires `OTA_PASSWORD` (set in `secrets.h`); a wrong/missing password fails
+     auth. The `${PASS:+-a ...}` above handles it automatically.
+   - Success ends with `100% Done...` then a `TimeoutError`/`NameError` from espota — that is
+     **benign**: the device reboots on completion before espota's final ack. The upload
+     succeeded if you saw `100% Done...`.
+   - Equivalent (but slower/flakier build): `pio run -e ota -t upload --upload-port <device-ip> --upload-flags="--auth=<password>"`.
 
 ## Notes & troubleshooting
 
