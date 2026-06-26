@@ -186,6 +186,9 @@ static void processPending() {
   }
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
+  // After a skip the track (and art) change — poll again soon, once the speaker has settled
+  // out of TRANSITIONING, rather than waiting up to a full second.
+  if (p.prev || p.next) s_lastPoll = millis() - 600;
 
   // Browse / play requests (ContentDirectory off the UI thread).
   library::service(s_coordIp, s_coordIp, s_coordUuid);
@@ -243,16 +246,23 @@ static void netTask(void *) {
 
 static void artTask(void *) {
   String last;
+  int    fails = 0;
   for (;;) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
 
     String cur;
     if (stateLock()) { cur = g_player.artUri; stateUnlock(); }
     if (cur != last) {
-      last = cur;
-      if (cur.length()) albumArtFetch(cur);  // GET + TJpg decode + cache (never on UI task)
-      else              albumArtClear();
+      if (cur.length() == 0) {
+        albumArtClear();  last = cur;  fails = 0;
+      } else if (albumArtFetch(cur)) {  // GET + TJpg decode + cache (never on UI task)
+        last = cur;  fails = 0;
+      } else if (++fails >= 4) {
+        last = cur;  fails = 0;         // give up after a few tries; don't spin forever
+      }
+      // else: leave `last` unchanged so the next loop retries this URL (fixes stale art on
+      // transient fetch failures during rapid track skipping).
     }
-    vTaskDelay(pdMS_TO_TICKS(300));
+    vTaskDelay(pdMS_TO_TICKS(250));
   }
 }
