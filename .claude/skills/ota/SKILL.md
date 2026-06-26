@@ -9,18 +9,30 @@ Push firmware to the running device over WiFi instead of USB. The device adverti
 `sonos-nest` and listens for ArduinoOTA on UDP **3232**. A failed/partial OTA is harmless —
 the running firmware is only overwritten after a transfer completes 100%.
 
-## Prerequisites (one-time per machine)
+## Step 0 — check the firewall (WSL2 only)
 
-The build host must reach the device **and accept the device's TCP connect-back** (OTA has
-the device connect back to push data).
+OTA has the device connect **back** to the build host to push data. On WSL2 with mirrored
+networking, inbound to WSL is blocked by the Hyper-V firewall by default, which makes
+uploads hang at 0%. Before uploading, test it (WSL can query Windows via `powershell.exe`):
 
-- **WSL2 (mirrored networking):** inbound to WSL is blocked by default. In an **admin
-  PowerShell**, allow it once:
+```bash
+powershell.exe -NoProfile -Command "(Get-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}').DefaultInboundAction" 2>/dev/null | tr -d '\r'
+```
+
+- Prints **`Allow`** → inbound is open, OTA can complete. Proceed.
+- Prints **`Block`** (or nothing / errors) → inbound is blocked. **Tell the user to open it**:
+  have them run this **once** in an **Administrator PowerShell** on Windows, then re-test:
   ```powershell
   Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow
   ```
-- Otherwise run `espota.py` from **Windows** directly (the host is on the LAN), pointing at
-  the WSL-built `.bin` via `\\wsl.localhost\...`.
+  (`Set-` needs admin and is why the user must run it; the read above usually works without
+  admin. To revert later: same command with `-DefaultInboundAction Block`.)
+
+If you can't/won't change the firewall, the alternative is to run `espota.py` from **Windows**
+directly (the host is on the LAN, so no inbound-to-WSL hop), pointing at the WSL-built `.bin`
+via `\\wsl.localhost\...`. A one-time Windows Firewall "allow" prompt may appear — accept it.
+
+Skip this step entirely on a native Linux/macOS build host.
 
 ## Procedure
 
