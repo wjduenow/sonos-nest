@@ -16,6 +16,9 @@
 #ifdef PHASE0_BRINGUP
 #include "hw/bringup.h"
 #endif
+#ifdef PHASE1_TEST
+#include "net/phase1_test.h"
+#endif
 
 // --- FreeRTOS tasks (mutex-guarded shared PlayerState) ---
 static void uiTask(void *arg);     // LVGL render + input (encoder, button, touch)
@@ -29,6 +32,9 @@ void setup() {
 
 #ifdef PHASE0_BRINGUP
   bringupRun();  // does not return — serial subsystem self-test
+#endif
+#ifdef PHASE1_TEST
+  phase1Run();   // does not return — WiFi + Sonos SOAP interactive test
 #endif
 
   // Phase 0 — bring-up. Gate everything on flicker-free redraw while WiFi is active.

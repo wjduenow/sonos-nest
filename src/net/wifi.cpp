@@ -2,6 +2,11 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
+// Dev credentials live in include/secrets.h (gitignored). Production stores them in NVS.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 // TODO Phase 1: load SSID/pass from NVS (or include/secrets.h during dev), connect.
 // TODO Phase 4: captive portal when no creds; persist on success.
 
