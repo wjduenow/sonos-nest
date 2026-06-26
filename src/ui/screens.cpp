@@ -290,6 +290,7 @@ static void populateRooms() {
     s_roomIps.push_back(zs[i].ip);
     if (zs[i].name == cur) s_rooms.sel = (int)i;
   }
+  if (labels.empty()) labels.push_back("Searching" LV_SYMBOL_REFRESH);  // discovery not done yet
   listSet(s_rooms, labels, LV_SYMBOL_AUDIO, roomClickCb);
 }
 
