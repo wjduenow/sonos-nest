@@ -38,6 +38,32 @@ static String s_zoneName;
 static String s_zoneIp;    // the selected speaker (volume target)
 static String s_coordIp;   // its group coordinator (transport/queue/now-playing target)
 
+// Switch the active zone to the speaker with this IP (from the ROOMS picker). Resets the
+// volume/transport/coordinator targets and updates the shared state. Returns false if the
+// IP isn't among the discovered zones.
+static bool selectZoneByIp(const String &ip) {
+  for (const auto &z : sonos::zones()) {
+    if (z.ip != ip) continue;
+    s_zoneName = z.name;
+    s_zoneIp   = z.ip;
+    s_coordIp  = sonos::coordinatorIpFor(z.name);
+    if (s_coordIp.length() == 0) s_coordIp = s_zoneIp;
+    if (stateLock()) {
+      g_player.zoneName        = z.name;
+      g_player.coordinatorIp   = s_coordIp;
+      g_player.coordinatorUuid = z.uuid;
+      // Clear stale now-playing so the UI doesn't show the previous room's track.
+      g_player.title.clear(); g_player.artist.clear(); g_player.album.clear();
+      g_player.artUri.clear();
+      stateUnlock();
+    }
+    Serial.printf("[zone] switched to %s @ %s (coord %s)\n",
+                  s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
+    return true;
+  }
+  return false;
+}
+
 // Pick the zone to control after discovery. With SONOS_DEFAULT_ROOM pinned (secrets.h),
 // only settle once that exact room is discovered — otherwise return false so netTask keeps
 // re-discovering (a single SSDP round can miss it). Without a pin, use the first zone.
@@ -140,6 +166,11 @@ static void netTask(void *) {
     PendingCmds p;
     if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
 
+    if (p.requestZoneIp.length()) {
+      selectZoneByIp(p.requestZoneIp);
+      lastPoll = 0;          // poll the new zone immediately
+      lastCoordRefresh = millis();
+    }
     if (p.targetVolume >= 0) { sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume); lastVolCmd = millis(); }
     if (p.playPause) {
       TransportState st = TransportState::Unknown;

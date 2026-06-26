@@ -21,5 +21,10 @@ void    pcfLcdPower(bool on);
 void    pcfLcdReset();              // pulse LCD reset low->high
 void    pcfTouchReset();           // pulse touch reset low->high
 
-bool    knobPressed();             // debounced edge: true once per physical press
+// Press classification: Short fires on release of a quick press; Long fires as soon as the
+// button has been held past the long-press threshold (no need to release first).
+enum class KnobEvent { None, Short, Long };
+KnobEvent knobEvent();             // consume the next queued press event
+
+bool    knobPressed();             // convenience: true once per Short press
 bool    knobDown();                // current debounced level (true while held)

@@ -31,10 +31,11 @@ struct PlayerState {
 // Commands posted by ui_task (input) and drained by net_task (SOAP). Volume coalesces:
 // only the latest target is sent. Guarded by g_stateMutex like PlayerState.
 struct PendingCmds {
-  int  targetVolume = -1;   // -1 = none; else 0..100 to apply
-  bool playPause    = false;
-  bool next         = false;
-  bool prev         = false;
+  int    targetVolume = -1;   // -1 = none; else 0..100 to apply
+  bool   playPause    = false;
+  bool   next         = false;
+  bool   prev         = false;
+  String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP
 };
 
 // Guard every read/write of the global PlayerState / PendingCmds with this mutex.

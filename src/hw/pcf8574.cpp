@@ -8,12 +8,15 @@
 static uint8_t s_shadow = 0xFF;
 static const uint8_t kInputMask = (1 << PCF_PIN_KNOB_BTN) | (1 << PCF_PIN_TOUCH_INT);
 
-// Button debounce state (active-low: pressed pulls the line to 0).
+// Button debounce + press-classification state (active-low: pressed pulls the line to 0).
 static bool     s_btnStable   = false;  // true = pressed
 static bool     s_btnLastRead = false;
 static uint32_t s_btnChangeMs = 0;
-static bool     s_pressLatch  = false;  // set on press edge, cleared by knobPressed()
+static uint32_t s_pressStart  = 0;      // when the current press began
+static bool     s_longFired   = false;  // Long already emitted for this press
+static KnobEvent s_event      = KnobEvent::None;
 static const uint32_t kDebounceMs = 25;
+static const uint32_t kLongMs    = 600;
 
 bool pcf8574Init() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -75,7 +78,8 @@ void pcfTouchReset() {
   delay(50);
 }
 
-// Call this frequently (UI tick). Debounces the active-low button and latches press edges.
+// Call this frequently (UI tick). Debounces the active-low button and classifies presses
+// into Short (quick press+release) and Long (held past kLongMs).
 static void pollButton() {
   bool raw = !pcfGetPin(PCF_PIN_KNOB_BTN);  // active-low -> pressed = true
   uint32_t now = millis();
@@ -84,15 +88,28 @@ static void pollButton() {
     s_btnChangeMs = now;
   } else if ((now - s_btnChangeMs) >= kDebounceMs && raw != s_btnStable) {
     s_btnStable = raw;
-    if (s_btnStable) s_pressLatch = true;  // rising edge = a fresh press
+    if (s_btnStable) {                       // press began
+      s_pressStart = now;
+      s_longFired = false;
+    } else if (!s_longFired) {               // released before long threshold -> Short
+      s_event = KnobEvent::Short;
+    }
+  }
+  // Fire Long while still held, for immediate feedback.
+  if (s_btnStable && !s_longFired && (now - s_pressStart) >= kLongMs) {
+    s_longFired = true;
+    s_event = KnobEvent::Long;
   }
 }
 
-bool knobPressed() {
+KnobEvent knobEvent() {
   pollButton();
-  if (s_pressLatch) { s_pressLatch = false; return true; }
-  return false;
+  KnobEvent e = s_event;
+  s_event = KnobEvent::None;
+  return e;
 }
+
+bool knobPressed() { return knobEvent() == KnobEvent::Short; }
 
 bool knobDown() {
   pollButton();
