@@ -1,4 +1,5 @@
 #include "ssdp.h"
+#include "soap_client.h"
 #include <Arduino.h>
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
@@ -115,11 +116,58 @@ bool ssdpDiscover() {
 
 const std::vector<Zone> &zones() { return s_zones; }
 
-String coordinatorIpFor(const String &zoneName) {
-  // TODO Phase 4: resolve the real group coordinator via ZoneGroupTopology. For now a zone
-  // maps to its own IP (correct for ungrouped speakers).
+static String unescapeXml(String s) {
+  s.replace("&lt;", "<");
+  s.replace("&gt;", ">");
+  s.replace("&quot;", "\"");
+  s.replace("&apos;", "'");
+  s.replace("&amp;", "&");  // last, so it doesn't double-decode the others
+  return s;
+}
+
+// The IP of the speaker that returned a zone's own IP (volume target fallback).
+static String zoneOwnIp(const String &zoneName) {
   for (auto &z : s_zones) if (z.name == zoneName) return z.ip;
   return s_zones.empty() ? String() : s_zones[0].ip;
+}
+
+String coordinatorIpFor(const String &zoneName) {
+  // Transport/queue commands must target the group coordinator (plan §3). Query
+  // ZoneGroupTopology, find the group containing this zone, and resolve its coordinator IP.
+  if (s_zones.empty()) return "";
+  String r;
+  if (!soapAction(s_zones[0].ip, "/ZoneGroupTopology/Control",
+                  "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
+                  "GetZoneGroupState", "", r)) {
+    return zoneOwnIp(zoneName);  // fallback: assume ungrouped
+  }
+
+  // <ZoneGroupState> wraps an escaped XML doc of <ZoneGroup Coordinator="RINCON_x" ...>
+  //   <ZoneGroupMember UUID="RINCON_y" Location="http://ip:1400/..." ZoneName="..."/> ... </ZoneGroup>
+  int gs = r.indexOf("<ZoneGroupState>");
+  int ge = r.indexOf("</ZoneGroupState>");
+  if (gs < 0 || ge < 0) return zoneOwnIp(zoneName);
+  String state = unescapeXml(r.substring(gs + 16, ge));
+
+  // Find this zone's member, then the nearest preceding group Coordinator UUID.
+  int pn = state.indexOf("ZoneName=\"" + zoneName + "\"");
+  if (pn < 0) return zoneOwnIp(zoneName);
+  int cg = state.lastIndexOf("Coordinator=\"", pn);
+  if (cg < 0) return zoneOwnIp(zoneName);
+  cg += 13;  // strlen("Coordinator=\"")
+  int ce = state.indexOf('"', cg);
+  if (ce < 0) return zoneOwnIp(zoneName);
+  String coordUuid = state.substring(cg, ce);
+
+  // Resolve the coordinator member's Location -> IP.
+  int pu = state.indexOf("UUID=\"" + coordUuid + "\"");
+  if (pu < 0) return zoneOwnIp(zoneName);
+  int pl = state.indexOf("Location=\"", pu);
+  if (pl < 0) return zoneOwnIp(zoneName);
+  pl += 10;  // strlen("Location=\"")
+  String loc = state.substring(pl, state.indexOf('"', pl));
+  String ip = ipFromLocation(loc);
+  return ip.length() ? ip : zoneOwnIp(zoneName);
 }
 
 }  // namespace sonos

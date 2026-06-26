@@ -13,6 +13,7 @@
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
 #include "ui/screens.h"
+#include "ui/album_art.h"
 
 #ifdef PHASE0_BRINGUP
 #include "hw/bringup.h"
@@ -31,11 +32,14 @@ static void uiTask(void *arg);     // LVGL render + input (encoder, button, touc
 static void netTask(void *arg);    // drain pending commands + poll transport/position/volume
 static void artTask(void *arg);    // on track change: fetch art -> TJpg decode -> cache
 
-// IP of the speaker (group coordinator) the knob currently controls.
-static String s_targetIp;
+// Volume + now-playing-room are the selected speaker; transport must hit its group
+// COORDINATOR (plan §3), which differs when the speaker is grouped.
+static String s_zoneName;
+static String s_zoneIp;    // the selected speaker (volume target)
+static String s_coordIp;   // its group coordinator (transport/queue/now-playing target)
 
 // Pick the zone to control after discovery. Defaults to the first discovered zone; set
-// -DSONOS_DEFAULT_ROOM=\"Living Room\" to pin a specific room. (ROOMS picker is Phase 4.)
+// SONOS_DEFAULT_ROOM in secrets.h to pin a specific room. (ROOMS picker is Phase 4.)
 static void selectZone() {
   const std::vector<sonos::Zone> &zs = sonos::zones();
   if (zs.empty()) {
@@ -47,14 +51,18 @@ static void selectZone() {
   for (size_t i = 0; i < zs.size(); ++i)
     if (zs[i].name == SONOS_DEFAULT_ROOM) { idx = i; break; }
 #endif
-  s_targetIp = zs[idx].ip;
+  s_zoneName = zs[idx].name;
+  s_zoneIp   = zs[idx].ip;
+  s_coordIp  = sonos::coordinatorIpFor(s_zoneName);
+  if (s_coordIp.length() == 0) s_coordIp = s_zoneIp;
   if (stateLock()) {
-    g_player.zoneName       = zs[idx].name;
-    g_player.coordinatorIp  = zs[idx].ip;
+    g_player.zoneName        = zs[idx].name;
+    g_player.coordinatorIp   = s_coordIp;
     g_player.coordinatorUuid = zs[idx].uuid;
     stateUnlock();
   }
-  Serial.printf("[boot] controlling %s @ %s\n", zs[idx].name.c_str(), s_targetIp.c_str());
+  Serial.printf("[boot] zone %s @ %s, coordinator @ %s\n",
+                s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
 }
 
 void setup() {
@@ -76,6 +84,7 @@ void setup() {
   touchInit();
   encoderInit();
   uiInit();             // build LVGL screens
+  if (!albumArtInit()) Serial.println("[boot] album art buffer alloc failed (no PSRAM?)");
 
   // Phase 1 — network + Sonos discovery.
   wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
@@ -103,25 +112,37 @@ static void uiTask(void *) {
 static void netTask(void *) {
   uint32_t lastPoll = 0;
   uint32_t lastVolCmd = 0;
+  uint32_t lastCoordRefresh = 0;
   for (;;) {
     // If discovery failed at boot, keep retrying until we have a zone.
-    if (s_targetIp.length() == 0) {
+    if (s_zoneIp.length() == 0) {
       if (sonos::ssdpDiscover()) selectZone();
-      if (s_targetIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+      if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+    }
+
+    // Re-resolve the coordinator periodically (grouping changes at runtime).
+    if (millis() - lastCoordRefresh > 5000) {
+      lastCoordRefresh = millis();
+      String c = sonos::coordinatorIpFor(s_zoneName);
+      if (c.length()) {
+        s_coordIp = c;
+        if (stateLock()) { g_player.coordinatorIp = c; stateUnlock(); }
+      }
     }
 
     // Drain pending commands (coalesced volume; latest wins).
+    // Volume -> the speaker itself; transport -> the group coordinator.
     PendingCmds p;
     if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
 
-    if (p.targetVolume >= 0) { sonos::setVolume(s_targetIp, (uint8_t)p.targetVolume); lastVolCmd = millis(); }
+    if (p.targetVolume >= 0) { sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume); lastVolCmd = millis(); }
     if (p.playPause) {
       TransportState st = TransportState::Unknown;
-      if (sonos::getTransportInfo(s_targetIp, st))
-        (st == TransportState::Playing) ? sonos::pause(s_targetIp) : sonos::play(s_targetIp);
+      if (sonos::getTransportInfo(s_coordIp, st))
+        (st == TransportState::Playing) ? sonos::pause(s_coordIp) : sonos::play(s_coordIp);
     }
-    if (p.prev) sonos::previous(s_targetIp);
-    if (p.next) sonos::next(s_targetIp);
+    if (p.prev) sonos::previous(s_coordIp);
+    if (p.next) sonos::next(s_coordIp);
 
     // Poll ~1 Hz.
     if (millis() - lastPoll > 1000) {
@@ -130,10 +151,10 @@ static void netTask(void *) {
       PlayerState np;                       // scratch for position + now-playing metadata
       uint8_t vol = 0;
       bool gotVol = false;
-      sonos::getTransportInfo(s_targetIp, st);
-      sonos::getPositionInfo(s_targetIp, np);
-      // Skip volume readback briefly after a local change so the UI doesn't snap back.
-      if (millis() - lastVolCmd > 1500) gotVol = sonos::getVolume(s_targetIp, vol);
+      sonos::getTransportInfo(s_coordIp, st);   // transport state lives on the coordinator
+      sonos::getPositionInfo(s_coordIp, np);
+      // Volume is per-speaker; skip readback briefly after a local change (no UI snap-back).
+      if (millis() - lastVolCmd > 1500) gotVol = sonos::getVolume(s_zoneIp, vol);
 
       if (stateLock()) {
         g_player.transport   = st;
@@ -153,9 +174,15 @@ static void netTask(void *) {
 }
 
 static void artTask(void *) {
+  String last;
   for (;;) {
-    // TODO Phase 2: on artUri change, fetch (plain HTTP), TJpg decode + downscale,
-    //               cache as an LVGL image. Never decode per poll.
-    vTaskDelay(pdMS_TO_TICKS(500));
+    String cur;
+    if (stateLock()) { cur = g_player.artUri; stateUnlock(); }
+    if (cur != last) {
+      last = cur;
+      if (cur.length()) albumArtFetch(cur);  // GET + TJpg decode + cache (never on UI task)
+      else              albumArtClear();
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
   }
 }
