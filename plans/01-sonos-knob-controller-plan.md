@@ -279,11 +279,20 @@ Screens / state machine (LVGL):
   envelopes). Keep both for the life of the project — they pay for themselves in Phase 3.
 - **Exit criteria:** the board can pause/resume real music on your Sonos.
 
-### Phase 2 — Now Playing (2–3 days)
-- Poll transport/position/volume; render title/artist/progress arc.
-- Inputs: twist→SetVolume, push→play/pause, touch/long-twist→next/prev.
-- Album art: fetch + `TJpg_Decoder` + downscale + **cache on track-change**.
-- Move network calls off the UI task (FreeRTOS) so the knob stays responsive.
+### Phase 2 — Now Playing (2–3 days) — ✅ DONE (2026-06-25)
+- Poll transport/position/volume; render title/artist/progress arc. ✅
+- Inputs: twist→SetVolume, push→play/pause, touch prev/next. ✅
+- Album art: fetch + `TJpg_Decoder` + downscale + **cache on track-change** (double-buffered). ✅
+- Network off the UI task: `netTask` (poll + coalesced commands), `artTask` (decode). ✅
+- **Gotchas hit & fixed on hardware** (all in git history):
+  - Transport must target the **group coordinator**, not the speaker (volume is per-speaker).
+    `coordinatorIpFor()` resolves it via `GetZoneGroupState`.
+  - `TrackMetaData` is **double-escaped** — the art URL's `&` survived as `&amp;` until the
+    field values were unescaped a second time.
+  - Album art HTTP is **chunked**; reading the raw stream leaked chunk framing into the JPEG.
+    Use `HTTPClient::writeToStream()` to de-chunk.
+  - SSDP must do **multiple full rounds** (a single round misses speakers in a big household);
+    pinned room (`SONOS_DEFAULT_ROOM`) only settles once that exact zone is discovered.
 
 ### Phase 3 — Browse & select (3–4 days) — *the big one*
 - ContentDirectory `Browse` for `SQ:` (playlists) and `R:0`/`FV:2` (radio/favorites).

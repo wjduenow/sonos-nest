@@ -38,18 +38,22 @@ static String s_zoneName;
 static String s_zoneIp;    // the selected speaker (volume target)
 static String s_coordIp;   // its group coordinator (transport/queue/now-playing target)
 
-// Pick the zone to control after discovery. Defaults to the first discovered zone; set
-// SONOS_DEFAULT_ROOM in secrets.h to pin a specific room. (ROOMS picker is Phase 4.)
-static void selectZone() {
+// Pick the zone to control after discovery. With SONOS_DEFAULT_ROOM pinned (secrets.h),
+// only settle once that exact room is discovered — otherwise return false so netTask keeps
+// re-discovering (a single SSDP round can miss it). Without a pin, use the first zone.
+static bool selectZone() {
   const std::vector<sonos::Zone> &zs = sonos::zones();
-  if (zs.empty()) {
-    Serial.println("[boot] no Sonos zones found — discovery will retry in netTask");
-    return;
-  }
+  if (zs.empty()) return false;
   size_t idx = 0;
 #ifdef SONOS_DEFAULT_ROOM
+  bool found = false;
   for (size_t i = 0; i < zs.size(); ++i)
-    if (zs[i].name == SONOS_DEFAULT_ROOM) { idx = i; break; }
+    if (zs[i].name == SONOS_DEFAULT_ROOM) { idx = i; found = true; break; }
+  if (!found) {
+    Serial.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
+                  SONOS_DEFAULT_ROOM, (unsigned)zs.size());
+    return false;
+  }
 #endif
   s_zoneName = zs[idx].name;
   s_zoneIp   = zs[idx].ip;
@@ -63,6 +67,7 @@ static void selectZone() {
   }
   Serial.printf("[boot] zone %s @ %s, coordinator @ %s\n",
                 s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
+  return true;
 }
 
 void setup() {

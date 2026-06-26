@@ -38,13 +38,17 @@ void parseNowPlaying(const String &trackMetaData, PlayerState &out) {
   out.artUri.clear();
   if (trackMetaData.length() == 0 || trackMetaData == "NOT_IMPLEMENTED") return;
 
+  // TrackMetaData is escaped twice: once for the SOAP response, and the DIDL field values
+  // (notably the art URL's '&') are escaped again. Unescape the DIDL layer, then unescape
+  // each extracted value to recover the real text/URL.
   String d = xmlUnescape(trackMetaData);
-  out.title  = between(d, "<dc:title>", "</dc:title>");
-  out.artist = between(d, "<dc:creator>", "</dc:creator>");
-  out.album  = between(d, "<upnp:album>", "</upnp:album>");
-  out.artUri = between(d, "<upnp:albumArtURI>", "</upnp:albumArtURI>");
+  out.title  = xmlUnescape(between(d, "<dc:title>", "</dc:title>"));
+  out.artist = xmlUnescape(between(d, "<dc:creator>", "</dc:creator>"));
+  out.album  = xmlUnescape(between(d, "<upnp:album>", "</upnp:album>"));
+  out.artUri = xmlUnescape(between(d, "<upnp:albumArtURI>", "</upnp:albumArtURI>"));
   // Streaming sources (radio) often have no dc:creator; fall back to the stream title.
-  if (out.title.length() == 0) out.title = between(d, "<r:streamContent>", "</r:streamContent>");
+  if (out.title.length() == 0)
+    out.title = xmlUnescape(between(d, "<r:streamContent>", "</r:streamContent>"));
 }
 
 size_t parseDidl(const String &, std::vector<DidlItem> &out) {

@@ -82,12 +82,14 @@ bool ssdpDiscover() {
       "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n"
       "\r\n";
 
-  for (int attempt = 0; attempt < 2 && s_zones.empty(); ++attempt) {
+  // Several full rounds, accumulating uniques — a single round routinely misses speakers
+  // in a large household, so do NOT stop at the first response.
+  for (int attempt = 0; attempt < 3; ++attempt) {
     udp.beginPacket(mcast, 1900);
     udp.write((const uint8_t *)msearch, strlen(msearch));
     udp.endPacket();
 
-    uint32_t deadline = millis() + 1500;
+    uint32_t deadline = millis() + 1200;
     while ((int32_t)(deadline - millis()) > 0) {
       int sz = udp.parsePacket();
       if (sz > 0) {

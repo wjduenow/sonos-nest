@@ -17,6 +17,24 @@ static lv_image_dsc_t s_dsc;
 static volatile bool s_changed = false;     // new art (or clear) pending for the UI
 static volatile bool s_hasArt  = false;
 
+// A Stream sink that appends into a fixed buffer. Lets HTTPClient::writeToStream() do the
+// chunked-transfer de-framing for us (reading the raw stream pointer does NOT de-chunk).
+class BufSink : public Stream {
+ public:
+  BufSink(uint8_t *b, size_t cap) : _b(b), _cap(cap) {}
+  size_t len = 0;
+  size_t write(uint8_t c) override { if (len < _cap) { _b[len++] = c; return 1; } return 0; }
+  size_t write(const uint8_t *d, size_t n) override {
+    size_t t = (len + n <= _cap) ? n : (_cap - len);
+    memcpy(_b + len, d, t); len += t; return t;
+  }
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+ private:
+  uint8_t *_b; size_t _cap;
+};
+
 // TJpgDec block callback: copy one decoded MCU block into the back buffer.
 static bool tjpgCb(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
   uint16_t *dst = s_buf[s_front ^ 1];
@@ -55,27 +73,21 @@ bool albumArtFetch(const String &url) {
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) return false;
-  if (http.GET() != 200) { http.end(); return false; }
-  int len = http.getSize();
-  WiFiClient *st = http.getStreamPtr();
-  size_t got = 0;
-  uint32_t deadline = millis() + 5000;
-  while (http.connected() && got < JPEG_MAX && (int32_t)(deadline - millis()) > 0) {
-    size_t avail = st->available();
-    if (avail) {
-      int r = st->readBytes(s_jpeg + got, min(avail, JPEG_MAX - got));
-      if (r > 0) got += r;
-    } else {
-      delay(1);
-    }
-    if (len >= 0 && got >= (size_t)len) break;
-  }
+  int code = http.GET();
+  if (code != 200) { Serial.printf("[art] HTTP %d\n", code); http.end(); return false; }
+  // writeToStream() de-chunks the body (the raw stream pointer would include chunk framing).
+  BufSink sink(s_jpeg, JPEG_MAX);
+  http.writeToStream(&sink);
+  size_t got = sink.len;
   http.end();
-  if (got < 100) return false;
+  if (got < 100) { Serial.printf("[art] short read (%u bytes)\n", (unsigned)got); return false; }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
   uint16_t w = 0, h = 0;
-  if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) return false;
+  if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) {
+    Serial.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
+    return false;
+  }
   uint8_t scale = 1;
   while ((max(w, h) / scale) > ART_MAX && scale < 8) scale <<= 1;
   TJpgDec.setJpgScale(scale);
@@ -83,7 +95,12 @@ bool albumArtFetch(const String &url) {
   s_decH = min((int)(h / scale), ART_MAX);
 
   memset(s_buf[s_front ^ 1], 0, ART_MAX * ART_MAX * 2);
-  if (TJpgDec.drawJpg(0, 0, s_jpeg, got) != JDR_OK) return false;
+  JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
+  if (jr != JDR_OK) {
+    Serial.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
+                  (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
+    return false;
+  }
 
   // Publish: swap buffers and update the descriptor under the lock.
   if (stateLock()) {
