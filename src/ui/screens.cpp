@@ -555,23 +555,28 @@ void uiInit() {
 void uiTick() {
   // OTA overlay preempts everything during a firmware update.
   if (otaActive()) {
-    if (lv_screen_active() != s_scrOta) { lv_screen_load(s_scrOta); backlightSet(100); }
     int p = otaProgress();
     if (p < 0) p = 0;
     uint32_t nowt = lv_tick_get();
-    // Stall safety: no progress for 20s (e.g. upload can't connect back) -> reboot into the
-    // still-valid firmware. And only repaint when the value changes, to avoid flicker.
-    static int      s_otaLastP   = -2;
+    static int      s_otaLastP   = -2;     // raw, for stall detection
     static uint32_t s_otaStallMs = 0;
-    if (p != s_otaLastP) {
-      s_otaLastP = p;
-      s_otaStallMs = nowt;
+    static int      s_otaShownP  = -100;   // last painted %
+    // Stall safety: no progress for 20s (e.g. upload can't connect back) -> reboot into the
+    // still-valid firmware.
+    if (p != s_otaLastP) { s_otaLastP = p; s_otaStallMs = nowt; }
+    else if (nowt - s_otaStallMs > 20000) ESP.restart();
+
+    bool first = (lv_screen_active() != s_scrOta);
+    if (first) { lv_screen_load(s_scrOta); backlightSet(100); }
+    // Repaint (one full refresh) only on entry or a >=2% step. Between repaints we never call
+    // lv_timer_handler, so the framebuffer stays static and the panel won't tear while the
+    // flash write keeps disrupting the CPU cache.
+    if (first || p >= 100 || p - s_otaShownP >= 2) {
+      s_otaShownP = p;
       lv_label_set_text_fmt(s_otaPct, "%d%%", p);
       lv_bar_set_value(s_otaBar, p, LV_ANIM_OFF);
-    } else if (nowt - s_otaStallMs > 20000) {
-      ESP.restart();
+      lv_timer_handler();
     }
-    lv_timer_handler();
     return;
   }
 
