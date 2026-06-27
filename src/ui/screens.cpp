@@ -496,18 +496,34 @@ static void settingsInput(int32_t d) {
 
 // ============================ OTA overlay ============================
 
-static lv_obj_t *s_scrOta, *s_otaLabel;
+static lv_obj_t *s_scrOta, *s_otaPct, *s_otaBar;
 
 static void buildOta() {
   s_scrOta = lv_obj_create(nullptr);
   lv_obj_set_style_bg_color(s_scrOta, lv_color_black(), 0);
   lv_obj_remove_flag(s_scrOta, LV_OBJ_FLAG_SCROLLABLE);
-  s_otaLabel = lv_label_create(s_scrOta);
-  lv_obj_set_style_text_color(s_otaLabel, lv_color_white(), 0);
-  lv_obj_set_style_text_font(s_otaLabel, &lv_font_montserrat_28, 0);
-  lv_obj_set_style_text_align(s_otaLabel, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_text(s_otaLabel, "Updating\n0%");
-  lv_obj_center(s_otaLabel);
+
+  lv_obj_t *t = lv_label_create(s_scrOta);   // static title — drawn once, never reflows
+  lv_obj_set_style_text_color(t, lv_color_white(), 0);
+  lv_obj_set_style_text_font(t, &lv_font_montserrat_28, 0);
+  lv_label_set_text(t, "Updating");
+  lv_obj_align(t, LV_ALIGN_CENTER, 0, -SH(14));
+
+  // Fixed-width, centre-aligned percent label so it never shifts as the number widens.
+  s_otaPct = lv_label_create(s_scrOta);
+  lv_obj_set_style_text_color(s_otaPct, lv_color_white(), 0);
+  lv_obj_set_style_text_font(s_otaPct, &lv_font_montserrat_28, 0);
+  lv_obj_set_width(s_otaPct, SW(60));
+  lv_obj_set_style_text_align(s_otaPct, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(s_otaPct, "0%");
+  lv_obj_align(s_otaPct, LV_ALIGN_CENTER, 0, -SH(2));
+
+  s_otaBar = lv_bar_create(s_scrOta);
+  lv_obj_set_size(s_otaBar, SW(58), SH(4));
+  lv_obj_align(s_otaBar, LV_ALIGN_CENTER, 0, SH(8));
+  lv_bar_set_range(s_otaBar, 0, 100);
+  lv_bar_set_value(s_otaBar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(s_otaBar, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
 }
 
 // ============================ lifecycle ============================
@@ -537,14 +553,20 @@ void uiTick() {
   if (otaActive()) {
     if (lv_screen_active() != s_scrOta) { lv_screen_load(s_scrOta); backlightSet(100); }
     int p = otaProgress();
-    // Stall safety: if a started OTA makes no progress for 20s (e.g. the upload can't
-    // connect back), reboot into the still-valid firmware instead of hanging.
+    if (p < 0) p = 0;
+    uint32_t nowt = lv_tick_get();
+    // Stall safety: no progress for 20s (e.g. upload can't connect back) -> reboot into the
+    // still-valid firmware. And only repaint when the value changes, to avoid flicker.
     static int      s_otaLastP   = -2;
     static uint32_t s_otaStallMs = 0;
-    uint32_t nowt = lv_tick_get();
-    if (p != s_otaLastP) { s_otaLastP = p; s_otaStallMs = nowt; }
-    else if (nowt - s_otaStallMs > 20000) { ESP.restart(); }
-    lv_label_set_text_fmt(s_otaLabel, "Updating\n%d%%", p < 0 ? 0 : p);
+    if (p != s_otaLastP) {
+      s_otaLastP = p;
+      s_otaStallMs = nowt;
+      lv_label_set_text_fmt(s_otaPct, "%d%%", p);
+      lv_bar_set_value(s_otaBar, p, LV_ANIM_OFF);
+    } else if (nowt - s_otaStallMs > 20000) {
+      ESP.restart();
+    }
     lv_timer_handler();
     return;
   }
