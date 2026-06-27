@@ -19,7 +19,7 @@ or display required.
 
 1. **Plate → wall:** countersunk holes on a bolt circle **inside the bayonet
    ring** (driven before the cradle goes on); flat-head screws into anchors/stud,
-   heads flush and hidden. A center hole + edge notch route the USB-C cable.
+   heads flush and hidden. A center hole + edge notch route the MX1.25/USB cable.
 2. **Unit → plate:** a **bayonet twist-lock**. The plate's ring + 3 lugs sit
    inside the cradle's skirt; push on so the lugs enter the axial slots, then
    **twist ~25° to lock**. The display itself fastens to the cradle's center
@@ -93,8 +93,8 @@ Smaller `ring_h` = closer to the wall; keep `ring_h` a couple mm above
 
 ## Assembly
 
-1. Screw the **plate** to the wall (level the screw pair). Feed USB-C through
-   the center hole.
+1. Screw the **plate** to the wall (level the screw pair). Feed the MX1.25/USB
+   cable through the center hole.
 2. Fasten the **display** to the cradle's center web with 3 short screws into
    its rear hub.
 3. Offer the cradle to the plate so the lugs meet the axial slots, push, and
@@ -103,7 +103,7 @@ Smaller `ring_h` = closer to the wall; keep `ring_h` a couple mm above
 ## Validation status
 - [x] **Screw pattern** — paper template lined up with the unit's rear holes.
 - [x] **Diameters** — Ø58 body / Ø79 bezel confirmed on the paper template.
-- [x] **USB-C routing** — port is on the **back**; the Ø11 center pass-through
-  + open back handle the cable. No side cutout needed.
+- [x] **Cable routing** — rear port is a **4-pin MX1.25 JST** (not USB-C), on the
+  **back**; the Ø11 center pass-through + open back clear the connector + cable.
 - [ ] **First-article print** of the cradle to confirm the display seats and the
   screws thread before printing the plate.
