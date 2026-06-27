@@ -18,7 +18,9 @@
 #define LV_USE_STDLIB_MALLOC  LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING  LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
-#define LV_MEM_SIZE (64U * 1024U)
+#define LV_MEM_SIZE (96U * 1024U)   // pool for LVGL objects + draw layers (clock scale,
+                                    // browse lists). 64K overflowed: queue buttons + the
+                                    // scaled clock's ~35K layer didn't both fit.
 
 // --- Tick: provided at runtime via lv_tick_set_cb(millis) in displayInit(). ---
 

@@ -45,6 +45,13 @@ void requestPlay(int index) {
   if (stateLock()) { s_reqPlay = index; stateUnlock(); }
 }
 
+void clearResults() {
+  if (stateLock()) {
+    std::vector<sonos::DidlItem>().swap(s_items);  // free, not just clear (release capacity)
+    stateUnlock();
+  }
+}
+
 void service(const String &browseIp, const String &coordIp, const String &coordUuid) {
   // 1) Browse request.
   String obj;

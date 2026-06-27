@@ -20,6 +20,8 @@
 //   inactivity -> CLOCK screensaver; any input wakes.
 
 static Screen s_cur = Screen::NowPlaying;
+static bool   s_reqClock    = false;  // swipe-down requested the clock
+static bool   s_clockManual = false;  // clock shown manually -> don't auto-leave while playing
 
 // ============================ generic list screen ============================
 
@@ -133,10 +135,11 @@ static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv
 
 static void enterBrowse(const char *title, const char *object, int mode);  // fwd decl
 
-// Swipe up on now-playing opens the live queue (tap a track to jump to it).
+// Now-playing gestures: swipe up = queue, swipe down = clock.
 static void nowGestureCb(lv_event_t *) {
-  if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP)
-    enterBrowse("Queue", "Q:0", library::PLAY_QUEUE);
+  lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+  if (dir == LV_DIR_TOP)         enterBrowse("Queue", "Q:0", library::PLAY_QUEUE);
+  else if (dir == LV_DIR_BOTTOM) s_reqClock = true;
 }
 
 static void buildNowPlaying() {
@@ -391,6 +394,7 @@ static void browseSelect(int idx) {
 static lv_obj_t *s_scrClock, *s_clkTime, *s_clkDate;
 static Screen    s_prevScreen = Screen::NowPlaying;
 static uint32_t  s_lastEncBtn = 0;
+static uint32_t  s_clockEnteredMs = 0;   // grace window so the entry touch doesn't wake it
 static const uint32_t kSaverMs    = 30000;
 static const uint8_t  kSaverBright = 12;
 static const uint8_t  kFullBright  = 100;
@@ -580,22 +584,45 @@ void uiTick() {
   uint32_t encBtnIdle = now - s_lastEncBtn;
   if (encBtnIdle < idle) idle = encBtnIdle;
 
-  // Screensaver only when nothing is playing; if music starts, leave the clock.
   bool playing = false;
   if (stateLock()) { playing = (g_player.transport == TransportState::Playing); stateUnlock(); }
 
+  // Manual clock via swipe-down on now-playing (works even while a track is playing).
+  if (s_reqClock) {
+    s_reqClock = false;
+    if (s_cur == Screen::NowPlaying) {
+      s_clockManual = true;
+      s_prevScreen = Screen::NowPlaying;
+      s_clockEnteredMs = now;
+      updateClock();
+      uiShow(Screen::Clock);
+      backlightSet(kSaverBright);
+      lv_timer_handler();
+      return;
+    }
+  }
+
   if (s_cur == Screen::Clock) {
-    if (idle < 250 || playing) {
+    // Wake on any input (after a short grace so the entry swipe doesn't wake it instantly).
+    if (idle < 250 && lv_tick_elaps(s_clockEnteredMs) > 600) {
       backlightSet(s_brightness);
+      s_clockManual = false;
       uiShow(playing ? Screen::NowPlaying : s_prevScreen);
+    } else if (!s_clockManual && playing) {
+      // Idle screensaver only: if music starts, leave the clock. (Manual clock stays.)
+      backlightSet(s_brightness);
+      uiShow(Screen::NowPlaying);
     } else {
       updateClock();
     }
     lv_timer_handler();
     return;
   }
+  // Idle screensaver — only when nothing is playing.
   if (idle > kSaverMs && !playing) {
     s_prevScreen = s_cur;
+    s_clockManual = false;
+    s_clockEnteredMs = now;
     updateClock();
     uiShow(Screen::Clock);
     backlightSet(kSaverBright);
@@ -654,6 +681,12 @@ void uiTick() {
 
 void uiShow(Screen s) {
   if (s == s_cur) return;
+  // Leaving the browse list: free its rows back to the LVGL pool and drop the cached items,
+  // so a big queue doesn't starve later allocations (e.g. the scaled clock's draw layer).
+  if (s_cur == Screen::Playlists && s != Screen::Playlists) {
+    lv_obj_clean(s_browse.list);
+    library::clearResults();
+  }
   switch (s) {
     case Screen::Home:      lv_screen_load(s_menu.scr);   break;
     case Screen::Rooms:     populateRooms(); lv_screen_load(s_rooms.scr); break;

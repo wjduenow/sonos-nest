@@ -17,6 +17,7 @@ void requestBrowse(const String &objectId, int playMode);   // FV:2 / SQ: / Q:0
 bool busy();                                                 // a browse is in flight
 bool takeResults(std::vector<String> &labelsOut);            // true once when new results land
 void requestPlay(int index);                                 // act on results[index] per mode
+void clearResults();                                         // free cached items (on leaving)
 
 // --- netTask side ---
 void service(const String &browseIp, const String &coordIp, const String &coordUuid);
