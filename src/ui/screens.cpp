@@ -131,10 +131,19 @@ static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv
   return b;
 }
 
+static void enterBrowse(const char *title, const char *object, int mode);  // fwd decl
+
+// Swipe up on now-playing opens the live queue (tap a track to jump to it).
+static void nowGestureCb(lv_event_t *) {
+  if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP)
+    enterBrowse("Queue", "Q:0", library::PLAY_QUEUE);
+}
+
 static void buildNowPlaying() {
   s_scrNow = lv_obj_create(nullptr);
   lv_obj_set_style_bg_color(s_scrNow, lv_color_black(), 0);
   lv_obj_remove_flag(s_scrNow, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_event_cb(s_scrNow, nowGestureCb, LV_EVENT_GESTURE, nullptr);
 
   s_arc = lv_arc_create(s_scrNow);
   lv_obj_set_size(s_arc, SW(98), SH(98));
@@ -197,6 +206,10 @@ static void buildNowPlaying() {
 
   makeNavBtn(s_scrNow, LV_SYMBOL_PREV, LV_ALIGN_LEFT_MID, prevCb);
   makeNavBtn(s_scrNow, LV_SYMBOL_NEXT, LV_ALIGN_RIGHT_MID, nextCb);
+
+  // Let gestures starting on the centre content bubble up to the screen handler.
+  for (lv_obj_t *o : {s_arc, s_art, s_title, s_artist, s_time, s_zone})
+    lv_obj_add_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE);
 
   s_ripple = lv_obj_create(s_scrNow);
   lv_obj_remove_flag(s_ripple, LV_OBJ_FLAG_CLICKABLE);
@@ -278,7 +291,7 @@ static std::vector<String> s_roomIps;     // parallel to the rooms list rows
 static std::vector<String> s_groupIps;    // parallel to the group list rows
 static std::vector<bool>   s_groupInGroup, s_groupIsActive;
 static uint32_t s_groupGen = 0;           // last-seen g_zonesGen, to re-render on change
-static bool s_browseQueue = false;        // current browse: true=playlist queue flow
+static int s_browseMode = library::PLAY_FAVORITE;  // how the current browse list plays
 
 // forward decls
 static void menuSelect(int idx);
@@ -309,14 +322,14 @@ static void populateRooms() {
   listSet(s_rooms, labels, LV_SYMBOL_AUDIO, roomClickCb);
 }
 
-static void enterBrowse(const char *title, const char *object, bool queueFlow) {
+static void enterBrowse(const char *title, const char *object, int mode) {
   lv_label_set_text(s_browse.title, title);
   s_browse.sel = 0;
-  s_browseQueue = queueFlow;
+  s_browseMode = mode;
   std::vector<String> loading = {"Loading"};
   listSet(s_browse, loading, LV_SYMBOL_REFRESH, browseClickCb);
-  library::requestBrowse(object, queueFlow);
-  uiShow(Screen::Playlists);   // shared browse list (playlists + favorites)
+  library::requestBrowse(object, mode);
+  uiShow(Screen::Playlists);   // shared browse list (playlists / favorites / queue)
 }
 
 static void menuSelect(int idx) {
@@ -324,8 +337,8 @@ static void menuSelect(int idx) {
     case 0: uiShow(Screen::NowPlaying); break;
     case 1: uiShow(Screen::Rooms); break;
     case 2: uiShow(Screen::Group); break;
-    case 3: enterBrowse("Playlists", "SQ:", true); break;
-    case 4: enterBrowse("Favorites", "FV:2", false); break;
+    case 3: enterBrowse("Playlists", "SQ:", library::PLAY_PLAYLIST); break;
+    case 4: enterBrowse("Favorites", "FV:2", library::PLAY_FAVORITE); break;
     case 5: uiShow(Screen::Settings); break;
   }
 }
@@ -597,7 +610,8 @@ void uiTick() {
       }
       if (d) listMove(s_browse, d > 0 ? 1 : -1);
       if (ev == KnobEvent::Short)     browseSelect(s_browse.sel);
-      else if (ev == KnobEvent::Long) uiShow(Screen::Home);
+      else if (ev == KnobEvent::Long)
+        uiShow(s_browseMode == library::PLAY_QUEUE ? Screen::NowPlaying : Screen::Home);
       break;
     }
     case Screen::Group:

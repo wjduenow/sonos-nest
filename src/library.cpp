@@ -6,16 +6,16 @@
 namespace library {
 
 static String s_reqObject;        // pending browse object id ("" = none)
-static bool   s_queueFlow = false; // play flow for the current list (true = playlist queue)
+static int    s_mode = PLAY_FAVORITE;  // how to act on a selection in the current list
 static bool   s_busy = false;
 static std::vector<sonos::DidlItem> s_items;
 static uint32_t s_gen = 0, s_consumed = 0;
 static int    s_reqPlay = -1;
 
-void requestBrowse(const String &objectId, bool queueFlow) {
+void requestBrowse(const String &objectId, int playMode) {
   if (stateLock()) {
     s_reqObject = objectId;
-    s_queueFlow = queueFlow;
+    s_mode = playMode;
     s_busy = true;
     stateUnlock();
   }
@@ -57,10 +57,16 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
   }
 
   // 2) Play request.
-  int idx = -1;
-  bool queueFlow = false;
-  if (stateLock()) { idx = s_reqPlay; s_reqPlay = -1; queueFlow = s_queueFlow; stateUnlock(); }
+  int idx = -1, mode = PLAY_FAVORITE;
+  if (stateLock()) { idx = s_reqPlay; s_reqPlay = -1; mode = s_mode; stateUnlock(); }
   if (idx < 0) return;
+
+  if (mode == PLAY_QUEUE) {
+    // Queue: jump to track (idx is 0-based; Seek TRACK_NR is 1-based) and play.
+    sonos::seekTrack(coordIp, (uint32_t)idx + 1);
+    sonos::play(coordIp);
+    return;
+  }
 
   sonos::DidlItem item;
   bool ok = false;
@@ -70,7 +76,7 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
   }
   if (!ok) return;
 
-  if (queueFlow) {
+  if (mode == PLAY_PLAYLIST) {
     // Sonos playlist: clear the queue, enqueue it, point transport at the queue, play.
     sonos::removeAllTracksFromQueue(coordIp);
     sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
