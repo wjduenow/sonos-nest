@@ -41,7 +41,11 @@ facts: device advertises as `sonos-nest` on UDP 3232; OTA needs **inbound-to-WSL
 required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfer is harmless
 (running firmware untouched, stall-reboots after 20s).
 
-## Hardware (verified from Elecrow schematic + source — see `src/board_pins.h`)
+## Hardware — electrical (verified from Elecrow schematic + source — see `src/board_pins.h`)
+
+> Physical/mechanical spec for designing mounts/cases (Ø79 rotating bezel, Ø58 rear
+> body, 3×M3 Ø12-BC rear holes, USB-C on back): **`hardware/crowpanel-2.1-physical-spec.md`**.
+
 - ESP32-S3R8: 240 MHz, **8 MB OPI PSRAM, 16 MB flash**.
 - Display: **ST7701** 480×480 RGB-parallel. **Arduino_GFX pinned to 1.3.1** (older API:
   `Arduino_ESP32RGBPanel(CS,SCK,SDA,…)` + `Arduino_ST7701_RGBPanel`). **Do NOT bump** it
