@@ -16,7 +16,9 @@ static uint32_t s_pressStart  = 0;      // when the current press began
 static bool     s_longFired   = false;  // Long already emitted for this press
 static KnobEvent s_event      = KnobEvent::None;
 static const uint32_t kDebounceMs = 25;
-static const uint32_t kLongMs    = 600;
+static const uint32_t kLongMs    = 1000;  // stiff K112 button: a firm select-press can take
+                                          // several hundred ms; keep Long well clear of it so
+                                          // selecting a list row isn't misread as back/menu.
 
 bool pcf8574Init() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
