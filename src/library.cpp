@@ -89,8 +89,15 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
     sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
     sonos::setAvTransportUri(coordIp, "x-rincon-queue:" + coordUuid + "#0", "");
     sonos::play(coordIp);
+  } else if (item.resUri.startsWith("x-rincon-cpcontainer:")) {
+    // Container favorite (e.g. a YouTube Music playlist/album): can't be set as the transport
+    // URI directly — enqueue it like a Sonos playlist, then point transport at the queue.
+    sonos::removeAllTracksFromQueue(coordIp);
+    sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
+    sonos::setAvTransportUri(coordIp, "x-rincon-queue:" + coordUuid + "#0", "");
+    sonos::play(coordIp);
   } else {
-    // Favorite / stream: set it as the source and play.
+    // Single stream/track favorite: set it as the source and play.
     sonos::setAvTransportUri(coordIp, item.resUri, item.metadata);
     sonos::play(coordIp);
   }

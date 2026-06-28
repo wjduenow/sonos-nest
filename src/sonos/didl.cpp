@@ -96,9 +96,16 @@ size_t parseDidl(const String &didlEscaped, std::vector<DidlItem> &out) {
       int re  = block.indexOf("</res>", rgt);
       if (rgt >= 0 && re > rgt) item.resUri = xmlUnescape(block.substring(rgt + 1, re));
     }
-    // Metadata for SetAVTransportURI / AddURIToQueue: the item wrapped in a DIDL-Lite
-    // envelope (kept singly-escaped; soapAction re-escapes it for transport).
-    item.metadata = String(DIDL_HDR) + block + "</DIDL-Lite>";
+    // Metadata for SetAVTransportURI / AddURIToQueue. Favorites (FV:2) wrap the real
+    // playable object in <r:resMD>: its content carries the correct upnp:class AND the
+    // <desc id="cdudn"> service-auth token. Passing the favorite wrapper instead (class
+    // object.itemobject.item.sonos-favorite, no token) makes the speaker reject the source.
+    // resMD is double-escaped here (one unescape happened on the Browse Result), so unescape
+    // once more to recover real DIDL; soapAction re-escapes it for transport. Non-favorite
+    // lists (playlists/queue) have no resMD — fall back to the item's own DIDL snippet.
+    String resMD = between(block, "<r:resMD>", "</r:resMD>");
+    item.metadata = resMD.length() ? xmlUnescape(resMD)
+                                   : String(DIDL_HDR) + block + "</DIDL-Lite>";
 
     if (item.title.length()) out.push_back(item);
   }
