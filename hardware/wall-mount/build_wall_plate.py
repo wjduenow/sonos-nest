@@ -35,10 +35,11 @@ def arc(r0,r1,z0,z1,a0,sweep,steps=48):
 def rot_z(m, deg):
     m=m.copy(); m.apply_transform(trimesh.transformations.rotation_matrix(np.radians(deg),[0,0,1])); return m
 
-def ring_with_lugs():
-    parts=[tube(B.ring_ir, B.ring_or, B.ring_h, disc_thk)]
+def collar_with_lugs():
+    # outer collar that wraps the cup; lugs point INWARD into the cup's J-slots
+    parts=[tube(B.collar_ir, B.collar_or, B.collar_h, disc_thk)]
     for i in range(B.lug_count):
-        l = arc(B.ring_or-0.1, B.ring_or+B.lug_protrude,
+        l = arc(B.collar_ir-B.lug_protrude, B.collar_ir+0.1,
                 disc_thk+B.lug_z-B.lug_h/2, disc_thk+B.lug_z+B.lug_h/2,
                 -B.lug_w_deg/2, B.lug_w_deg)
         parts.append(rot_z(l, i*360/B.lug_count))
@@ -53,8 +54,8 @@ def screw_hole():
     return union([shank,c], engine='manifold')
 
 def build_plate():
-    body = union([cyl(B.plate_dia/2, disc_thk), ring_with_lugs()], engine='manifold')
-    cuts = [cyl(B.cable_hole/2, disc_thk+B.ring_h+1, -0.1)]
+    body = union([cyl(B.plate_dia/2, disc_thk), collar_with_lugs()], engine='manifold')
+    cuts = [cyl(B.cable_hole/2, disc_thk+B.collar_h+1, -0.1)]
     for i in range(screw_count):   # screws at 0/180; cable notch is at 90 -> no clash
         h = screw_hole(); h.apply_translation([screw_bc/2,0,0])
         cuts.append(rot_z(h, i*360/screw_count))

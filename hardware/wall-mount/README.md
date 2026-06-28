@@ -5,24 +5,29 @@ A two-part wall mount for the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display*
 or display required.
 
 ```
-   wall                         cradle (twists onto plate)
-   │  ┌───────────┐             ┌──────────────┐
-   │  │ disc      │             │  ╱        ╲   │  ← Ø58 cup holds display body
-   │██│   ┌─────┐ │   bayonet   │ │  center   │ │  ← web: 3×Ø4 screws (Ø12 BC)
-   │  │   │ring │◄├─────────────┤ │  web      │ │     into the display's back hub
-   │  │   │+lugs│ │  twist-lock │  ╲________╱   │
-   │  └───────────┘             ├──────────────┤
-   └─ screws to wall             └─ skirt + J-slots
+   wall                          cradle (twists into the collar)
+   │  ┌──────────────┐           ┌──────────────┐
+   │  │ disc         │           │  ╱        ╲   │  ← Ø58 cup holds display body
+   │██│ ┌──────────┐ │  bayonet  │ │  center   │ │  ← web: 3×Ø4 screws (Ø12 BC)
+   │  │ │ collar   │─┼───────────┤ │  web      │ │     into the display's back hub
+   │  │ │ lugs ►    │ │twist-lock │  ╲________╱   │
+   │  └──────────────┘           └──────────────┘
+   └─ screws to wall              └─ J-slots in the cup's outer wall
 ```
+
+The bayonet engages on the **outside** of the cup: the wall plate's collar wraps
+the cup and its lugs point **inward** into J-slots on the cup's outer wall. (An
+inner ring would collide with the screw web in the slim cradle — no room below
+the web for one.)
 
 ## How it secures (the two jobs)
 
-1. **Plate → wall:** countersunk holes on a bolt circle **inside the bayonet
-   ring** (driven before the cradle goes on); flat-head screws into anchors/stud,
-   heads flush and hidden. A center hole + edge notch route the MX1.25/USB cable.
-2. **Unit → plate:** a **bayonet twist-lock**. The plate's ring + 3 lugs sit
-   inside the cradle's skirt; push on so the lugs enter the axial slots, then
-   **twist ~25° to lock**. The display itself fastens to the cradle's center
+1. **Plate → wall:** countersunk holes on a bolt circle **inside the collar**
+   (driven before the cradle goes on); flat-head screws into anchors/stud, heads
+   flush and hidden. A center hole + edge notch route the MX1.25/USB cable.
+2. **Unit → plate:** a **bayonet twist-lock**. The plate's **collar wraps the
+   cup from outside**; push on so its inward lugs enter the cup's axial slots,
+   then **twist ~25° to lock**. The display itself fastens to the cradle's center
    web with **3 small screws** into its rear hub — nothing touches the rotating
    front bezel.
 
@@ -42,7 +47,7 @@ wasted height behind the display is gone.
 
 | File | Role |
 |---|---|
-| `bayonet_params.py` | **Shared** bayonet dims (standoff lives here). Imported by both builders so the ring/lugs and skirt/slots can't drift apart. |
+| `bayonet_params.py` | **Shared** bayonet dims. Imported by both builders so the collar/lugs and cup/slots can't drift apart. |
 | `build_wall_plate.py` | Builds `wall_plate.stl` |
 | `build_cradle_from_reference.py` | Builds `cradle.stl` (grafts onto `reference_mount.stl`) |
 | `build_all.py` | Runs both builders |
@@ -58,9 +63,9 @@ cd hardware/wall-mount
 python3 build_all.py          # -> wall_plate.stl + cradle.stl
 ```
 
-Both parts come out **watertight**. Current sizes: plate **Ø61 × 12 mm**,
-cradle **Ø62 × 21.7 mm** — sized to the display's rear body (the Ø79 front bezel
-overhangs and hides the mount). Resize everything via `mount_od` in
+Both parts come out **watertight**. Current sizes: plate **Ø70 × 12 mm** (the
+collar adds width vs the cup), cradle **Ø62 × 21.7 mm** — both still hidden
+behind the Ø79 front bezel. Resize everything via `mount_od` in
 `bayonet_params.py`.
 
 ### Tuning the standoff

@@ -42,7 +42,7 @@ def rot_z(m, deg):
     m=m.copy(); m.apply_transform(trimesh.transformations.rotation_matrix(np.radians(deg),[0,0,1])); return m
 
 def jslot():
-    r0,r1 = B.cradle_ir-0.3, B.cradle_or+0.3
+    r0,r1 = B.cradle_ir-0.3, B.slot_or   # cut fully through the (Ø63) cup wall
     slot_ang = B.lug_w_deg+4; axial_top = B.lug_z+B.slot_w/2+0.6
     return union([arc(r0,r1,-0.2,axial_top,-slot_ang/2,slot_ang),
                   arc(r0,r1,B.lug_z-B.slot_w/2,B.lug_z+B.slot_w/2,-slot_ang/2,slot_ang+B.twist_deg)],

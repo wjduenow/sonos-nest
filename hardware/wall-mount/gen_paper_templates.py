@@ -78,7 +78,7 @@ def page_wallplate(pdf):
     fig, ax = new_page(pdf, 'Page 3 — Wall-Plate Drill Template')
     ruler(ax, (PW-100)/2, PH-30)
     cx, cy = PW/2, 150
-    ax.add_patch(plt.Circle((cx, cy), 61/2, fill=False, lw=1.0))              # outline
+    ax.add_patch(plt.Circle((cx, cy), 70.2/2, fill=False, lw=1.0))            # outline (collar Ø70)
     ax.add_patch(plt.Circle((cx, cy), 11/2, fill=False, lw=1.0, color='blue'))  # cable hole
     ax.text(cx, cy-11/2-1, 'Ø11 cable', ha='center', va='top', fontsize=7, color='blue')
     for sx in (-18, 18):
