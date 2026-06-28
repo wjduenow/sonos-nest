@@ -179,11 +179,13 @@ bool setMute(const String &ip, bool mute) {
 }
 
 // --- ContentDirectory ---
-bool browse(const String &ip, const String &objectId, String &didlOut) {
+bool browse(const String &ip, const String &objectId, String &didlOut,
+            uint32_t startIndex, uint32_t count) {
   String r;
   String args = "<ObjectID>" + xmlEscape(objectId) +
                 "</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>"
-                "<StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount>"
+                "<StartingIndex>" + String(startIndex) + "</StartingIndex>"
+                "<RequestedCount>" + String(count) + "</RequestedCount>"
                 "<SortCriteria></SortCriteria>";
   if (!soapAction(ip, PATH_CD, SVC_CD, "Browse", args, r)) return false;
   didlOut = extractTag(r, "Result");  // escaped DIDL-Lite; unescape/parse in didl.cpp

@@ -31,7 +31,10 @@ bool setMute(const String& ip, bool mute);
 
 // --- ContentDirectory: /MediaServer/ContentDirectory/Control ---
 // Returns raw DIDL-Lite XML for didl.h to parse. objectId e.g. "SQ:", "R:0", "FV:2".
-bool browse(const String& ip, const String& objectId, String& didlOut);
+// startIndex/count page the result — large lists (e.g. 69 favorites ≈ 116 KB) must be
+// fetched in chunks so a single response never has to fit in the tight SRAM heap.
+bool browse(const String& ip, const String& objectId, String& didlOut,
+            uint32_t startIndex = 0, uint32_t count = 100);
 
 // --- Playlist enqueue helpers (Flow B in plan §3) ---
 bool removeAllTracksFromQueue(const String& ip);
