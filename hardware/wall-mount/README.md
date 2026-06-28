@@ -32,9 +32,11 @@ The display-side of the cradle (the body-locating ring, center web, and the
 **3 × Ø4 screw holes on a Ø12 mm bolt circle**) is taken directly from
 `reference_mount.stl` — a known-good community mount for this exact display. The
 build script **trims off the reference's own mounting base** (the back floor /
-lower shell below the screw web — redundant now that our bayonet skirt does that
-job; controlled by `REF_CUT`) and grafts only the display-holding top onto our
-skirt. The proven display fit is preserved; the redundant middle layer is gone.
+lower shell below the screw web; controlled by `REF_CUT` / `SCREW_HEAD_GAP`,
+keeping only a few mm behind the web for the installed screw heads), then the
+**bayonet J-slots are cut into the cup's own lower wall** — there's no separate
+standoff skirt below the web. The proven display fit is preserved, and the
+wasted height behind the display is gone.
 
 ## Files
 
@@ -57,7 +59,7 @@ python3 build_all.py          # -> wall_plate.stl + cradle.stl
 ```
 
 Both parts come out **watertight**. Current sizes: plate **Ø61 × 12 mm**,
-cradle **Ø62 × 30.2 mm** — sized to the display's rear body (the Ø79 front bezel
+cradle **Ø62 × 21.7 mm** — sized to the display's rear body (the Ø79 front bezel
 overhangs and hides the mount). Resize everything via `mount_od` in
 `bayonet_params.py`.
 

@@ -17,8 +17,15 @@ from shapely.geometry import Polygon
 import bayonet_params as B
 
 REF       = 'reference_mount.stl'
-skirt_h   = 9.0      # cradle skirt (a bit taller than ring_h to cover the slot)
-bridge_thk = 3.0     # disc bridging the Ø86 skirt to the reference's Ø62 back
+# The bayonet skirt is CO-LOCATED with the cup's own lower wall (it just thickens
+# that wall to 3 mm and the J-slots are cut into it) -- so there's no separate
+# standoff below the screw web. Only a few mm is kept behind the web for the
+# installed screw heads. This roughly halves the structure behind the display.
+skirt_h        = 9.0   # height of the bayonet band (cut into the cup's lower wall)
+SCREW_HEAD_GAP = 4.0   # mm kept below the web for installed screw heads
+WEB_Z          = 3.0   # web's back face in reference-local coordinates
+# (The cable exits the 5V-IN edge connector with room through the reference's
+#  existing web openings, so no dedicated cable channel is needed.)
 SEG = B.SEG
 
 def cyl(r, h, z0=0.0):
@@ -42,22 +49,17 @@ def jslot():
                  engine='manifold')
 
 # --- build ---
-# The reference has its OWN mounting base (back floor + lower shell) BELOW the
-# screw web -- redundant now that our bayonet skirt does that job. Trim it off
-# and keep only the display-holding top (web + screws + body-locating ring).
-REF_CUT = 2.5     # keep reference geometry at z >= this (just under the web)
+# Drop the reference's back floor + excess lower shell, keeping only ~SCREW_HEAD_GAP
+# of wall below the web. The kept lower wall + the skirt band (co-located) form the
+# bayonet; the rest of the cup holds the display. No separate standoff, no bridge.
+REF_CUT = WEB_Z - SCREW_HEAD_GAP                 # ~ -1.0 in reference-local coords
 ref = trimesh.load(REF)                          # back at z=-10, opening toward +z
-ref = ref.slice_plane([0, 0, REF_CUT], [0, 0, 1], cap=True)   # drop redundant base
-shift = (skirt_h + bridge_thk) - ref.bounds[0][2]
-ref = ref.copy(); ref.apply_translation([0, 0, shift])
+ref = ref.slice_plane([0, 0, REF_CUT], [0, 0, 1], cap=True)
+ref = ref.copy(); ref.apply_translation([0, 0, -REF_CUT])    # cup bottom -> z=0
 
-skirt = tube(B.cradle_ir, B.cradle_or, skirt_h, 0)        # twist-lock skirt
-# OPEN ring (not a solid disc) joining the skirt to the reference's rim (now
-# the same Ø61). The centre stays open so you can reach the screw holes from the
-# back and route the cable. Inner radius overlaps the reference rim (~R29).
-bridge_ir = 22.0
-base  = tube(bridge_ir, B.cradle_or, bridge_thk, skirt_h)
-body  = union([skirt, base, ref], engine='manifold')
+# bayonet band: thickens the cup's lower wall to 3 mm; J-slots cut into it
+skirt = tube(B.cradle_ir, B.cradle_or, skirt_h, 0)
+body  = union([skirt, ref], engine='manifold')
 
 cuts  = [rot_z(jslot(), i*360/B.lug_count) for i in range(B.lug_count)]
 cradle = difference([body]+cuts, engine='manifold')
