@@ -61,6 +61,7 @@ static void listBuild(ListScreen &L, const char *titleText) {
   lv_obj_align(L.list, LV_ALIGN_CENTER, 0, SH(6));
   lv_obj_set_style_bg_opa(L.list, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(L.list, 0, 0);
+  lv_obj_add_flag(L.list, LV_OBJ_FLAG_EVENT_BUBBLE);   // forward edge-drag gestures to the screen
 }
 
 static void listSet(ListScreen &L, const std::vector<String> &labels, const char *icon,
@@ -68,6 +69,7 @@ static void listSet(ListScreen &L, const std::vector<String> &labels, const char
   lv_obj_clean(L.list);
   for (size_t i = 0; i < labels.size(); ++i) {
     lv_obj_t *btn = lv_list_add_button(L.list, icon, labels[i].c_str());
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_EVENT_BUBBLE);   // forward edge-drag gestures up to the list
     lv_obj_add_event_cb(btn, clickCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
   }
   if (L.sel >= (int)labels.size()) L.sel = 0;
@@ -125,6 +127,7 @@ static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv
   lv_obj_align(b, align, align == LV_ALIGN_LEFT_MID ? SW(7) : -SW(7), 0);
   lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_opa(b, LV_OPA_40, 0);
+  lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);   // let edge-drag gestures reach the screen
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
   lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);   // bigger arrow glyph
@@ -135,11 +138,13 @@ static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv
 
 static void enterBrowse(const char *title, const char *object, int mode);  // fwd decl
 
-// Now-playing gestures: swipe up = queue, swipe down = clock.
+// Now-playing gestures: drag from left (swipe right) = menu, swipe up = queue,
+// swipe down = clock.
 static void nowGestureCb(lv_event_t *) {
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
   if (dir == LV_DIR_TOP)         enterBrowse("Queue", "Q:0", library::PLAY_QUEUE);
   else if (dir == LV_DIR_BOTTOM) s_reqClock = true;
+  else if (dir == LV_DIR_RIGHT)  uiShow(Screen::Home);
 }
 
 static void buildNowPlaying() {
@@ -282,9 +287,8 @@ static void handleNowInput(KnobEvent ev, int32_t d) {
     g_player.transport = wasPlaying ? TransportState::Paused : TransportState::Playing;
     stateUnlock();
     pressPulse();   // subtle on-screen press feedback
-  } else if (ev == KnobEvent::Long) {
-    uiShow(Screen::Home);
   }
+  // Menu is reached by dragging in from the left edge (see nowGestureCb), not a long-press.
 }
 
 // ============================ MENU / ROOMS / BROWSE ============================
@@ -309,6 +313,12 @@ static void groupClickCb(lv_event_t *e)  { s_group.sel  = (int)(intptr_t)lv_even
 
 static const char *kMenuItems[] = {"Now Playing", "Rooms", "Group", "Playlists", "Favorites", "Settings"};
 static const int   kMenuCount   = 6;
+
+// Menu gesture: drag from the right edge (swipe left) returns to Now Playing.
+static void menuGestureCb(lv_event_t *) {
+  if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT)
+    uiShow(Screen::NowPlaying);
+}
 
 static void populateRooms() {
   std::vector<String> labels;
@@ -546,6 +556,7 @@ void uiInit() {
 
   std::vector<String> menu(kMenuItems, kMenuItems + kMenuCount);
   listSet(s_menu, menu, LV_SYMBOL_LIST, menuClickCb);
+  lv_obj_add_event_cb(s_menu.scr, menuGestureCb, LV_EVENT_GESTURE, nullptr);
 
   lv_screen_load(s_scrNow);
   s_cur = Screen::NowPlaying;
