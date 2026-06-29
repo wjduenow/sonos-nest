@@ -44,12 +44,21 @@ Skip this step entirely on a native Linux/macOS build host.
    A transient GCC "internal compiler error / Segmentation fault" in the Arduino_GFX or
    FrameworkArduino step is flaky — just re-run `pio run`. It is not a real error.
 
-2. **Find the device IP.** Read it off the on-device **Settings** screen (long-press the
-   knob → Settings, shown under "OTA: sonos-nest"). DHCP can change it. Confirm reachability:
+2. **Find the device IP via mDNS.** The device advertises ArduinoOTA over mDNS as
+   `sonos-nest._arduino._tcp`. WSL2 has no built-in mDNS resolver (`ping sonos-nest.local`
+   fails), so query the LAN directly with the bundled discovery script:
+   ```bash
+   python3 -c "import zeroconf" 2>/dev/null || pip install zeroconf --quiet
+   python3 .claude/skills/ota/find_device.py        # prints "sonos-nest <ip>"
+   ```
+   It browses for ~5s and prints `<name> <ip>` for each match (exit 1 if none found). Then
+   confirm reachability:
    ```bash
    ping -c1 -W2 <device-ip>
    ```
-   (If you can't see the screen, the boot serial prints `[ota] ready as sonos-nest @ <ip>`.)
+   Fallbacks if mDNS finds nothing (device just booted / multicast blocked): read the IP off
+   the on-device **Settings** screen (Menu → Settings, shown under "OTA: sonos-nest"), or
+   catch the boot serial line `[ota] ready as sonos-nest @ <ip>`. DHCP can change the IP.
 
 3. **Upload over WiFi** — run espota directly on the already-built binary (avoids rebuilding
    the separate `ota` env, which is more prone to the transient ICE). This auto-passes the
@@ -74,7 +83,8 @@ Skip this step entirely on a native Linux/macOS build host.
 - **Stalled OTA:** the device auto-reboots after ~20s of no progress into the still-valid
   firmware (stall safety in `src/ui/screens.cpp` OTA overlay). If the screen looks frozen
   mid-update, just tap **RST** — nothing was written.
-- **`ping` fails / IP wrong:** the IP changed (DHCP). Re-read it from the Settings screen.
+- **`ping` fails / IP wrong:** the IP changed (DHCP). Re-run the mDNS discovery script
+  (Step 2) to pick up the new address.
 - **Connect-back never completes (hangs at 0%):** the inbound-to-host path is blocked — do
   the firewall step above, or run espota from Windows.
 - **Fallback:** USB flashing via usbipd always works — see `docs/flashing-wsl.md`.
