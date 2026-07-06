@@ -1,5 +1,5 @@
 #include "display.h"
-#include "../board_pins.h"
+#include "pins.h"
 #include "pcf8574.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
@@ -21,7 +21,7 @@ static const uint8_t  kBacklightBits = 8;       // 0-255 duty
   static inline void blWrite(uint32_t duty) { ledcWrite(kBacklightCh, duty); }
 #endif
 
-// --- Arduino_GFX panel (RGB parallel + 3-wire SPI init bus), pins from board_pins.h ---
+// --- Arduino_GFX panel (RGB parallel + 3-wire SPI init bus), pins from pins.h ---
 static Arduino_ESP32RGBPanel *s_bus = nullptr;
 static Arduino_ST7701_RGBPanel *s_gfx = nullptr;
 

@@ -1,5 +1,5 @@
 #include "album_art.h"
-#include "../player_state.h"
+#include "core/player_state.h"
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>

@@ -7,12 +7,18 @@
 #include "secrets.h"
 #endif
 
+// Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Two units on one LAN
+// must differ or they collide on <name>.local.
+#ifndef DEVICE_HOSTNAME
+#define DEVICE_HOSTNAME "sonos-nest"
+#endif
+
 static volatile bool s_active = false;
 static volatile int  s_progress = -1;
 
 void otaBegin() {
   if (WiFi.status() != WL_CONNECTED) return;
-  ArduinoOTA.setHostname("sonos-nest");
+  ArduinoOTA.setHostname(DEVICE_HOSTNAME);
 #ifdef OTA_PASSWORD
   ArduinoOTA.setPassword(OTA_PASSWORD);
 #endif
@@ -24,7 +30,7 @@ void otaBegin() {
   });
   ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; Serial.printf("[ota] error %u\n", e); });
   ArduinoOTA.begin();
-  Serial.printf("[ota] ready as sonos-nest @ %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("[ota] ready as %s @ %s\n", DEVICE_HOSTNAME, WiFi.localIP().toString().c_str());
 }
 
 void otaHandle() { ArduinoOTA.handle(); }

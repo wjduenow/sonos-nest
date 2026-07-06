@@ -92,15 +92,15 @@ In **WSL**, from the project root:
 cd /home/wesd/Projects/sonos-nest
 
 # First build pulls the ESP32 platform + toolchain + libs (~hundreds of MB, needs internet).
-# This compiles the Phase-0 self-test (the `bringup` env).
-pio run -e bringup
+# This compiles the Phase-0 self-test (the `nest-bringup` env).
+pio run -e nest-bringup
 ```
 
 If it compiles clean, flash and open the serial monitor:
 
 ```bash
-pio run -e bringup -t upload --upload-port /dev/ttyACM0
-pio device monitor -e bringup -p /dev/ttyACM0 -b 115200
+pio run -e nest-bringup -t upload --upload-port /dev/ttyACM0
+pio device monitor -e nest-bringup -p /dev/ttyACM0 -b 115200
 ```
 
 Swap `/dev/ttyACM0` for `/dev/ttyUSB0` if that's what showed up. Prefix with `sudo` if you
@@ -117,16 +117,16 @@ The serial monitor prints the self-test, and the screen shows a test pattern. Ve
    fade down/up.
    - *Wrong/garbled colors* → RGB pin map issue.
    - *Red and blue swapped* → uncomment the `lv_draw_sw_rgb565_swap(...)` line in
-     `src/hw/display.cpp` (or flip the BGR flag).
+     `src/boards/crowpanel_rotary/display.cpp` (or flip the BGR flag).
 3. **Twist the knob** → `[encoder] delta=… total=…` (confirm direction + that one click =
-   one detent; tune `COUNTS_PER_DETENT` in `src/hw/encoder.cpp` if off).
+   one detent; tune `COUNTS_PER_DETENT` in `src/boards/crowpanel_rotary/encoder.cpp` if off).
 4. **Press the knob** → `[button ] PRESS` once per push.
 5. **Touch the screen** → `[touch  ] x=… y=…` in range 0–479.
 
 Once that all checks out, flash the real app to confirm the flicker-free-redraw gate:
 
 ```bash
-pio run -e crowpanel-rotary -t upload --upload-port /dev/ttyACM0
+pio run -e nest -t upload --upload-port /dev/ttyACM0
 ```
 
 You should get an animated spinner + "sonos-nest" that twisting/pressing updates live.

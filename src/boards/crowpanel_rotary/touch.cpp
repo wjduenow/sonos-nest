@@ -1,6 +1,6 @@
 #include "touch.h"
 #include "pcf8574.h"
-#include "../board_pins.h"
+#include "pins.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <lvgl.h>
@@ -39,7 +39,7 @@ static void lvglReadCb(lv_indev_t *, lv_indev_data_t *data) {
 }
 
 void touchInit() {
-  // Wire is already begun by pcf8574Init(); reset the controller via the expander.
+  // Wire is already begun by boardInit(); reset the controller via the expander.
   pcfTouchReset();
 
   lv_indev_t *indev = lv_indev_create();

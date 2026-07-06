@@ -1,10 +1,20 @@
 # sonos-nest — developer guide (read me first)
 
-Firmware for a **standalone physical Sonos controller** on an **ELECROW CrowPanel 2.1" HMI
-ESP32-S3 Rotary Display** (DHE03921D). It talks **directly** to Sonos speakers over the local
-UPnP/SOAP API — no server, no cloud. PlatformIO + Arduino + LVGL 9.
+Firmware for **standalone physical Sonos controllers** — ESP32-S3 appliances that talk
+**directly** to Sonos speakers over the local UPnP/SOAP API (no server, no cloud).
+PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **units**:
+
+- **sonos-nest** (`nest` env) — the original: ELECROW CrowPanel 2.1" round rotary display
+  (ST7701 480×480, EC11 encoder + knob, CST816 touch, PCF8574 expander).
+- **sonos-sleep-machine** (`sleep-machine` env) — **STUB**: rectangular 2.8" Hosyond/LCDWIKI
+  ES3C28P (ILI9341 240×320 SPI, FT6336 touch, microSD, mic, RGB-LED). Board driver + UX
+  are skeletons that compile; real design is deferred.
+
+Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
+`src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
 
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
+- Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - Flashing from WSL (USB): **`docs/flashing-wsl.md`**
 - Wireless flashing: the **`/ota` skill** (`.claude/skills/ota`)
 
@@ -13,11 +23,14 @@ UPnP/SOAP API — no server, no cloud. PlatformIO + Arduino + LVGL 9.
 `pio` lives at `~/.platformio/penv/bin` — prepend it to PATH first:
 ```bash
 export PATH="$PATH:$HOME/.platformio/penv/bin"
-pio run -e crowpanel-rotary            # build the app
-pio run -e crowpanel-rotary -t upload --upload-port /dev/ttyACMx   # USB flash
+pio run -e nest            # build the nest app (default env)
+pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
+pio run -e sleep-machine   # build the (stub) sleep-machine app
 ```
-Build envs: **`crowpanel-rotary`** (the app), **`bringup`** (`-DPHASE0_BRINGUP` hardware
-self-test), **`phase1`** (interactive SOAP test), **`ota`** (espota WiFi upload).
+Envs: **`nest`** / **`sleep-machine`** (the apps), **`nest-bringup`** (`-DPHASE0_BRINGUP`
+hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
+**`sleep-machine-ota`** (espota WiFi upload). Each env selects one board + one unit + the
+core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.
@@ -36,12 +49,13 @@ self-test), **`phase1`** (interactive SOAP test), **`ota`** (espota WiFi upload)
 ### OTA (wireless flash)
 Use the **`/ota` skill** — it checks the WSL firewall, finds the device IP (shown on the
 on-device **Settings** screen), and runs espota with the password from `secrets.h`. Key
-facts: device advertises as `sonos-nest` on UDP 3232; OTA needs **inbound-to-WSL allowed**
+facts: each unit advertises its `DEVICE_HOSTNAME` (`sonos-nest` / `sonos-sleep`) on UDP
+3232 — distinct names so two units don't collide; OTA needs **inbound-to-WSL allowed**
 (mirrored-networking Hyper-V firewall) so the device can connect back; an OTA password is
 required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfer is harmless
 (running firmware untouched, stall-reboots after 20s).
 
-## Hardware — electrical (verified from Elecrow schematic + source — see `src/board_pins.h`)
+## Hardware — electrical, nest board (verified from Elecrow schematic + source — see `src/boards/crowpanel_rotary/pins.h`)
 
 > Physical/mechanical spec for designing mounts/cases (Ø79 rotating bezel, Ø58 rear
 > body, 3×M3 Ø12-BC rear holes, USB-C on back):
@@ -50,7 +64,8 @@ required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfe
 - ESP32-S3R8: 240 MHz, **8 MB OPI PSRAM, 16 MB flash**.
 - Display: **ST7701** 480×480 RGB-parallel. **Arduino_GFX pinned to 1.3.1** (older API:
   `Arduino_ESP32RGBPanel(CS,SCK,SDA,…)` + `Arduino_ST7701_RGBPanel`). **Do NOT bump** it
-  without rewriting `display.cpp`.
+  without rewriting `boards/crowpanel_rotary/display.cpp`. (1.3.1 also ships
+  `Arduino_ESP32SPI` + `Arduino_ILI9341`, which the es3c28p board will use — no bump needed.)
 - Touch: **CST816 @ 0x15** (not GT911). Encoder: EC11 on **GPIO42/4** (hardware PCNT).
 - Knob press button: **PCF8574 expander @ 0x21, pin P5** (active-low). It's a stiff separate
   tact switch (K112) — needs a firm, centered push.
@@ -59,22 +74,41 @@ required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfe
 - Backlight: GPIO6 (LEDC). I2C: SDA 38 / SCL 39.
 
 ## Architecture
-FreeRTOS tasks (shared `g_player` + `g_pending` guarded by `g_stateMutex`; use
-`stateLock()`/`stateUnlock()`):
-- **uiTask** (core 1, prio 3): LVGL render + input (`src/ui/screens.cpp uiTick`).
+
+**Three layers, selected per-env by `build_src_filter`:** `src/core/` (device-agnostic,
+in every build) + one `src/boards/<board>/` (drivers, implements `core/board.h`) + one
+`src/units/<unit>/` (UX, implements `core/unit.h` = `uiInit`/`uiTick`). `src/main.cpp` is a
+thin wire-up: `boardInit()` → `uiInit()` → `appBoot()` → `appStartTasks()`, and `loop()`
+pumps `otaHandle()`. **The UI never calls Sonos/SOAP or board pins directly** — it uses the
+mutex-guarded globals `g_player`/`g_pending` and the `library::`/`sonos::`/`settings*` APIs,
+and reaches hardware only through `core/board.h` free functions (`backlightSet`,
+`encoderDelta`, `knobEvent`…; touch is a push-based LVGL indev registered in `boardInit()`).
+
+FreeRTOS tasks live in **`src/core/app.cpp`** (shared `g_player` + `g_pending` guarded by
+`g_stateMutex`; use `stateLock()`/`stateUnlock()`), created by `appStartTasks()`:
+- **uiTask** (core 1, prio 3): LVGL render + input — calls the unit's `uiTick()`
+  (`src/units/<unit>/screens.cpp`).
 - **netTask** (core 0): drains `g_pending` commands + polls transport/position/volume ~1 Hz.
   `processPending()` is interleaved between poll SOAP calls to keep input snappy.
 - **artTask** (core 0): album-art fetch + TJpg decode on track change.
 - **loop()**: hosts `ArduinoOTA.handle()`. The UI task backs off to 120 ms while `otaActive()`.
 
-Key modules:
-- `src/sonos/` — `soap_client` (SOAP over keep-alive HTTP), `ssdp` (discovery), `didl` (parse).
-- `src/library.{h,cpp}` — async ContentDirectory browse/play (Playlists `SQ:`, Favorites
+Key modules (all under `src/core/` — device-agnostic):
+- `core/app.{h,cpp}` — the controller: zone/coordinator selection, `processPending`, the
+  three tasks; exposes `appBoot()` (wifi/time/OTA/discovery/zone-pick) + `appStartTasks()`.
+- `core/sonos/` — `soap_client` (SOAP over keep-alive HTTP), `ssdp` (discovery), `didl` (parse).
+- `core/library.{h,cpp}` — async ContentDirectory browse/play (Playlists `SQ:`, Favorites
   `FV:2`, Queue `Q:0`); `PlayMode` selects favorite=SetURI / playlist=enqueue / queue=Seek.
-- `src/settings.{h,cpp}` — NVS (default room, brightness, cached zone IPs).
-- `src/net/` — `wifi`, `ota`. `src/hw/` — display, touch, encoder, pcf8574.
+- `core/settings.{h,cpp}` — NVS (default room, brightness, cached zone IPs).
+- `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
+- `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env).
+- `core/board.h` / `core/unit.h` — the HAL + UX contracts.
 
-UI screens (long-press knob = Menu hub): Now Playing (home), Rooms, Group, Playlists/
+Boards: `src/boards/crowpanel_rotary/` (display · touch · encoder · pcf8574 · pins.h ·
+bringup · phase1_test) and `src/boards/es3c28p/` (**stub**). Units: `src/units/sonos_nest/`
+(round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (**stub**).
+
+nest UI screens (long-press knob = Menu hub): Now Playing (home), Rooms, Group, Playlists/
 Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe down** = clock.
 
 ## Gotchas that cost real time (don't rediscover these)

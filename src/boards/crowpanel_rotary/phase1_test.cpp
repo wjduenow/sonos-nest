@@ -2,11 +2,11 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-#include "wifi.h"
-#include "../hw/pcf8574.h"
-#include "../hw/encoder.h"
-#include "../sonos/ssdp.h"
-#include "../sonos/soap_client.h"
+#include "core/net/wifi.h"
+#include "pcf8574.h"
+#include "encoder.h"
+#include "core/sonos/ssdp.h"
+#include "core/sonos/soap_client.h"
 
 static const char *transportName(TransportState s) {
   switch (s) {

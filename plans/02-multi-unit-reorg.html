@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sonos-nest → multi-unit reorg</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#2a3441; --accent:#4aa3ff; --accent2:#7ee787; --warn:#f0b429; --core:#4aa3ff;
+    --board:#f0883e; --unit:#bc8cff; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f8fa; --panel:#fff; --panel2:#f0f3f6; --ink:#1f2328; --muted:#5a636d;
+           --line:#d0d7de; --accent:#0969da; --accent2:#1a7f37; --core:#0969da; --board:#bc4c00; --unit:#8250df; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:40px 24px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:32px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:15px}
+  .tag{display:inline-block;font:600 11px/1 var(--mono);text-transform:uppercase;letter-spacing:.06em;
+    padding:5px 8px;border-radius:6px;margin:2px 6px 2px 0;border:1px solid var(--line)}
+  .tag.core{color:var(--core);border-color:color-mix(in srgb,var(--core) 45%,transparent)}
+  .tag.board{color:var(--board);border-color:color-mix(in srgb,var(--board) 45%,transparent)}
+  .tag.unit{color:var(--unit);border-color:color-mix(in srgb,var(--unit) 45%,transparent)}
+  h2{font-size:20px;margin:40px 0 14px;padding-top:8px}
+  h2 .n{color:var(--muted);font:600 14px/1 var(--mono);margin-right:8px}
+  p{margin:0 0 14px}
+  code{font-family:var(--mono);font-size:.9em;background:var(--panel2);padding:.1em .35em;border-radius:4px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+    overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.55;margin:0 0 18px}
+  pre .c{color:var(--muted)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:0 0 16px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+  ul{margin:0 0 14px;padding-left:22px} li{margin:4px 0}
+  .steps{list-style:none;padding:0;margin:0;counter-reset:s}
+  .steps>li{position:relative;padding:14px 16px 14px 56px;border:1px solid var(--line);
+    border-radius:10px;margin:0 0 10px;background:var(--panel)}
+  .steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:14px;
+    width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+    font:700 13px/1 var(--mono);color:var(--bg);background:var(--accent)}
+  .steps>li:first-child::before{content:"0"}
+  .steps b{font-weight:600}
+  .green{color:var(--accent2);font:600 12px/1 var(--mono)}
+  .key{color:var(--muted);font-size:14px}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:0 0 16px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .pill{font:600 11px/1 var(--mono);padding:3px 7px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .defer{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+  .note{border-left:3px solid var(--accent);background:var(--panel2);padding:12px 16px;border-radius:0 8px 8px 0;margin:0 0 16px;font-size:14.5px}
+  a{color:var(--accent)}
+  .foot{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Shared Sonos core + pluggable board/UX units</h1>
+  <div class="sub">Firmware reorganization plan — splitting one flat build into a reusable core with per-unit hardware &amp; UX layers.</div>
+  <div style="margin-top:14px">
+    <span class="tag core">core = shared</span>
+    <span class="tag board">boards = hardware</span>
+    <span class="tag unit">units = UX</span>
+  </div>
+</header>
+
+<h2>Context</h2>
+<p>Today the firmware is one flat tree hard-wired to a single product: the round 2.1″ rotary
+CrowPanel (<b>sonos-nest</b>). A second unit is coming — the rectangular 2.8″ <b>ES3C28P</b>
+(<b>sonos-sleep-machine</b>) — with a completely different board stack and a different UX. More
+form factors are expected after that.</p>
+
+<div class="grid">
+  <div class="card">
+    <div class="key" style="margin-bottom:8px"><b style="color:var(--ink)">sonos-nest</b> — current</div>
+    <ul style="margin:0">
+      <li>ST7701 480×480 RGB-parallel</li>
+      <li>CST816 touch @0x15</li>
+      <li>EC11 rotary encoder + knob button</li>
+      <li>PCF8574 expander (power/reset/button)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="key" style="margin-bottom:8px"><b style="color:var(--ink)">sonos-sleep-machine</b> — new <span class="pill defer">deferred</span></div>
+    <ul style="margin:0">
+      <li>ILI9341 240×320 4-wire SPI</li>
+      <li>FT6336G touch @0x38</li>
+      <li>no encoder · no expander</li>
+      <li>+ microSD · mic · RGB-LED</li>
+    </ul>
+  </div>
+</div>
+
+<div class="note">
+<b>Good news from exploration:</b> the device-agnostic Sonos logic is <b>already cleanly separated</b>.
+<code>sonos/*</code>, <code>library</code>, <code>player_state</code>, <code>settings</code>,
+<code>net/{wifi,ota}</code> have zero includes from <code>ui/</code> or <code>hw/</code>. The UI reaches
+core only through the mutex-guarded globals <code>g_player</code>/<code>g_pending</code>/<code>g_zonesGen</code>
+and the <code>library::</code>/<code>sonos::</code>/<code>settings*</code> APIs. The coupling that matters
+is concentrated in two files: <code>main.cpp</code> (mixes control logic with board bring-up) and
+<code>ui/screens.cpp</code> (round/rotary layout + encoder/knob input).
+</div>
+
+<p><b>This pass:</b> fully reorganize the existing nest firmware into a shared-core + per-board + per-unit
+layout, add per-unit PlatformIO envs, and <b>stub out</b> (compiles, does not implement) the
+<code>es3c28p</code> board and <code>sleep_machine</code> unit dirs. The real ILI9341/FT6336 driver and the
+sleep-machine UX are explicitly <span class="pill defer">deferred</span>. <code>pio run -e nest</code> stays
+green at every step; <code>pio run -e sleep-machine</code> must compile at the end to prove the seam.</p>
+
+<h2>Target layout</h2>
+<pre><span class="c">src/</span>
+  main.cpp            <span class="c">thin: playerStateInit → settingsInit → boardInit →</span>
+                      <span class="c">uiInit → albumArtInit → appBoot → appStartTasks</span>
+  core/               <span class="c">device-agnostic — compiled into EVERY env</span>
+    sonos/{didl,soap_client,ssdp}.{h,cpp}
+    library · player_state · settings · album_art
+    net/{wifi,ota}.{h,cpp}
+    app.{h,cpp}       <span class="c">NEW — extracted controller (zone select, poll tasks)</span>
+    board.h           <span class="c">NEW — HAL contract every board implements</span>
+    unit.h            <span class="c">NEW — UX contract every unit implements</span>
+  boards/
+    crowpanel_rotary/ <span class="c">display · touch · encoder · pcf8574 · board.cpp · pins.h</span>
+    es3c28p/          <span class="c">STUB — pins.h + board.cpp (ILI9341/FT6336 = TODO)</span>
+  units/
+    sonos_nest/       <span class="c">screens + ui_scale (round/rotary)</span>
+    sleep_machine/    <span class="c">STUB — placeholder screen + ui_scale (240×320)</span>
+platformio.ini        <span class="c">per-unit envs via build_src_filter + -DUNIT_* / -DDEVICE_HOSTNAME</span></pre>
+
+<h2>Key design decisions <span class="key">(validated)</span></h2>
+<ul>
+  <li><b>build_src_filter — exclude-then-include.</b> Setting the filter drops PlatformIO's implicit
+    <code>+&lt;*&gt;</code>, so start with <code>-&lt;*&gt;</code> then add exactly one board + one unit.
+    Two <code>boardInit</code>/<code>uiInit</code> definitions fail loudly at link — a good safety net.</li>
+  <li><b>Add <code>-I src</code></b> and rewrite <code>../foo.h</code> cross-package includes as root-relative
+    <code>core/foo.h</code> — the single biggest churn-reducer, done first.</li>
+  <li><b>No function renames.</b> Keep <code>backlightSet</code>/<code>encoderDelta</code>/<code>knobEvent</code>/
+    <code>knobPressed</code>/<code>knobDown</code>/<code>touchRead</code> as the <code>board.h</code> contract —
+    only relocate declarations. Encoder/knob return <code>0</code>/<code>None</code> on touch-only boards.</li>
+  <li><b><code>Wire.begin()</code> moves to <code>boardInit()</code></b> — today it's a hidden side effect of
+    <code>pcf8574Init()</code>; the ES3C28P has no expander, so the board must own the bus.</li>
+  <li><b>Touch stays an LVGL pointer indev; encoder + knob stay pull-based</b> (polled in <code>uiTick</code>).
+    Registered inside <code>boardInit()</code> after <code>lv_init()</code>.</li>
+  <li><b><code>app.cpp</code> extraction</b> pulls the zone statics, <code>selectZone*</code>,
+    <code>processPending</code>, and the net/art/ui tasks out of <code>main.cpp</code>; exposes only
+    <code>appBoot()</code> + <code>appStartTasks()</code>.</li>
+  <li><b>OTA hostname → <code>DEVICE_HOSTNAME</code> macro</b>, set per-env, so two units don't collide on
+    <code>sonos-nest.local</code>.</li>
+  <li><b>Arduino_GFX stays pinned at v1.3.1</b> — confirmed it already ships <code>Arduino_ESP32SPI</code> +
+    <code>Arduino_ILI9341</code> alongside the ST7701 driver, so the second board needs no version bump.
+    <code>lib_deps</code> stays in <code>[env]</code> (LDF <code>chain</code> mode skips uncompiled libs).</li>
+</ul>
+
+<h2>Migration order <span class="key">— build green at each step</span></h2>
+<ol class="steps">
+  <li><b>HTML plan doc + <code>-I src</code>.</b> Generate this file; add <code>-I src</code> to <code>[env]</code>. <span class="green">build ✓</span></li>
+  <li><b>Create <code>src/core/</code></b>, move the clean modules (sonos, library, player_state, settings, net/wifi, net/ota). Set the exclude-then-include filter; rewrite <code>../</code> includes root-relative. <span class="green">build ✓</span></li>
+  <li><b>Move <code>album_art.{h,cpp}</code> → core/</b>; fix its + screens.cpp includes. <span class="green">build ✓</span></li>
+  <li><b>Add <code>core/board.h</code> + <code>core/unit.h</code></b>; relocate <code>KnobEvent</code>. Thin <code>boards/crowpanel_rotary/board.cpp</code> wraps the existing init sequence; <code>main.cpp</code> bring-up block becomes one <code>boardInit()</code>. <span class="green">build ✓</span></li>
+  <li><b>Move <code>hw/*</code> → boards/crowpanel_rotary/</b>, <code>board_pins.h</code> → pins.h. Move <code>Wire.begin()</code> into <code>boardInit()</code>. Fix bringup/phase1 includes. <span class="green">build ✓</span></li>
+  <li><b>Extract <code>core/app.cpp</code></b>; move screens + ui_scale → units/sonos_nest/. <code>main.cpp</code> goes thin. <span class="green">last single-product checkpoint ✓</span></li>
+  <li><b>Split envs.</b> Rename to <code>nest</code> (final filter, <code>-DUNIT_NEST</code>, <code>-DDEVICE_HOSTNAME</code>); rebase bringup/phase1/ota. <code>pio run -e nest</code> <span class="green">✓</span></li>
+  <li><b>Stubs last.</b> <code>boards/es3c28p/</code> + <code>units/sleep_machine/</code> + <code>[env:sleep-machine]</code>. <code>pio run -e sleep-machine</code> compiles; nest stays green.</li>
+</ol>
+
+<h2>platformio.ini env shape</h2>
+<pre><span class="c">[env]</span>              <span class="c">; memory_type qio_opi, 16MB, default_16MB.csv, lib_deps</span>
+build_flags = ... -I include <b>-I src</b> -DLV_CONF_INCLUDE_SIMPLE ...
+
+<span class="c">[env:nest]</span>
+build_flags = ${env.build_flags} -DUNIT_NEST -DDEVICE_HOSTNAME=\"sonos-nest\"
+build_src_filter = -&lt;*&gt; +&lt;main.cpp&gt; +&lt;core/&gt; +&lt;boards/crowpanel_rotary/&gt; +&lt;units/sonos_nest/&gt;
+
+<span class="c">[env:sleep-machine]</span>
+build_flags = ${env.build_flags} -DUNIT_SLEEP -DDEVICE_HOSTNAME=\"sonos-sleep\"
+build_src_filter = -&lt;*&gt; +&lt;main.cpp&gt; +&lt;core/&gt; +&lt;boards/es3c28p/&gt; +&lt;units/sleep_machine/&gt;
+
+<span class="c">[env:nest-ota]</span>    <span class="c">; extends = env:nest, espota, upload_port = sonos-nest.local</span></pre>
+
+<h2>Verification</h2>
+<table>
+  <tr><th>Check</th><th>How</th></tr>
+  <tr><td>Green at each step</td><td><code>pio run -e crowpanel-rotary</code> (0–5), then <code>pio run -e nest</code> (6–7). Transient GCC ICE → re-run.</td></tr>
+  <tr><td>Second seam compiles</td><td><code>pio run -e sleep-machine</code> links es3c28p + sleep_machine (compile-only, not a functional device).</td></tr>
+  <tr><td>No behavior change on nest</td><td>Flash to device; confirm now-playing, rooms/group, playlists/favorites, encoder + knob, touch gestures, clock, brightness, OTA — all unchanged.</td></tr>
+  <tr><td>Hostname</td><td>nest advertises <code>sonos-nest</code>; sleep advertises <code>sonos-sleep</code>.</td></tr>
+  <tr><td>hardware/ untouched</td><td>Firmware-only reorg; user owns <code>hardware/</code>. Commit separately, only when asked.</td></tr>
+</table>
+
+<div class="foot">
+  Companion to <code>plans/01-sonos-knob-controller-plan.md</code>. Generated as step 0 of the reorg.
+</div>
+</div>
+</body>
+</html>

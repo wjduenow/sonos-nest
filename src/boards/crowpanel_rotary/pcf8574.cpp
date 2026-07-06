@@ -1,5 +1,5 @@
 #include "pcf8574.h"
-#include "../board_pins.h"
+#include "pins.h"
 #include <Arduino.h>
 #include <Wire.h>
 
@@ -21,9 +21,7 @@ static const uint32_t kLongMs    = 1000;  // stiff K112 button: a firm select-pr
                                           // selecting a list row isn't misread as back/menu.
 
 bool pcf8574Init() {
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(400000);
-
+  // I2C bus (Wire.begin / setClock) is brought up by boardInit() before this runs.
   Wire.beginTransmission(PCF8574_ADDR);
   if (Wire.endTransmission() != 0) {
     return false;  // no ACK — wrong address or wiring

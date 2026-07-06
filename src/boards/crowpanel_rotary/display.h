@@ -1,6 +1,6 @@
 // ST7701 480x480 RGB-parallel panel + LVGL 9 init.
 // ⚠️ Phase-0 GATE: sustained flicker-free redraw WHILE WiFi is active (plan §2).
-// Pins/timings verified from Elecrow's RotaryScreen_2_1.ino — see board_pins.h.
+// Pins/timings verified from Elecrow's RotaryScreen_2_1.ino — see pins.h.
 #pragma once
 
 #include <stdint.h>

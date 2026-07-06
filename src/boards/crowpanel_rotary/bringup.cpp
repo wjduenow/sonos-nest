@@ -1,5 +1,5 @@
 #include "bringup.h"
-#include "../board_pins.h"
+#include "pins.h"
 #include "display.h"
 #include "encoder.h"
 #include "pcf8574.h"

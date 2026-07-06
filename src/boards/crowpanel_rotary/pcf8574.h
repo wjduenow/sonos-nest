@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "core/board.h"   // KnobEvent + knobEvent/knobPressed/knobDown are the board HAL
 
 bool    pcf8574Init();              // returns false if the expander doesn't ACK on I2C
 uint8_t pcf8574Read();              // raw port byte (input pins reflect external level)
@@ -21,10 +22,5 @@ void    pcfLcdPower(bool on);
 void    pcfLcdReset();              // pulse LCD reset low->high
 void    pcfTouchReset();           // pulse touch reset low->high
 
-// Press classification: Short fires on release of a quick press; Long fires as soon as the
-// button has been held past the long-press threshold (no need to release first).
-enum class KnobEvent { None, Short, Long };
-KnobEvent knobEvent();             // consume the next queued press event
-
-bool    knobPressed();             // convenience: true once per Short press
-bool    knobDown();                // current debounced level (true while held)
+// The knob-press API (KnobEvent / knobEvent / knobPressed / knobDown) is declared in the
+// board HAL (core/board.h); pcf8574.cpp provides this board's implementation.

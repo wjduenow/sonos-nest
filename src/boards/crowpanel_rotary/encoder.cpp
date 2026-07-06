@@ -1,5 +1,5 @@
 #include "encoder.h"
-#include "../board_pins.h"
+#include "pins.h"
 #include <ESP32Encoder.h>
 
 // Most detent encoders emit 4 quadrature counts per physical click. We read the raw

@@ -39,7 +39,7 @@ Skip this step entirely on a native Linux/macOS build host.
 1. **Build** the app firmware:
    ```bash
    export PATH="$PATH:$HOME/.platformio/penv/bin"
-   pio run -e crowpanel-rotary
+   pio run -e nest        # or: pio run -e sleep-machine (advertises sonos-sleep)
    ```
    A transient GCC "internal compiler error / Segmentation fault" in the Arduino_GFX or
    FrameworkArduino step is flaky — just re-run `pio run`. It is not a real error.
@@ -66,14 +66,14 @@ Skip this step entirely on a native Linux/macOS build host.
    ```bash
    ESPOTA=$(find ~/.platformio/packages/framework-arduinoespressif32 -name espota.py | head -1)
    PASS=$(grep -oP '#define\s+OTA_PASSWORD\s+"\K[^"]+' include/secrets.h 2>/dev/null)
-   python3 "$ESPOTA" -i <device-ip> -p 3232 -f .pio/build/crowpanel-rotary/firmware.bin -r ${PASS:+-a "$PASS"}
+   python3 "$ESPOTA" -i <device-ip> -p 3232 -f .pio/build/nest/firmware.bin -r ${PASS:+-a "$PASS"}
    ```
    - The device requires `OTA_PASSWORD` (set in `secrets.h`); a wrong/missing password fails
      auth. The `${PASS:+-a ...}` above handles it automatically.
    - Success ends with `100% Done...` then a `TimeoutError`/`NameError` from espota — that is
      **benign**: the device reboots on completion before espota's final ack. The upload
      succeeded if you saw `100% Done...`.
-   - Equivalent (but slower/flakier build): `pio run -e ota -t upload --upload-port <device-ip> --upload-flags="--auth=<password>"`.
+   - Equivalent (but slower/flakier build): `pio run -e nest-ota -t upload --upload-port <device-ip> --upload-flags="--auth=<password>"`.
 
 ## Notes & troubleshooting
 
