@@ -78,16 +78,15 @@ a.add_patch(Rectangle((sy0, 0), sy1-sy0, P.GRILLE_T, fc='none', ec='#639', hatch
 a.annotate('', xy=((sy0+sy1)/2, -P.FOOT_H+0.5), xytext=((sy0+sy1)/2, 0.5),
            arrowprops=dict(arrowstyle='-|>', color='#639', lw=1.4))
 a.text(sy0-1, P.SPK_T/2+1, 'speaker\n(down-fire)', color='#639', fontsize=7, ha='right', va='center')
-# cable route (schematic, projected into y-z): plug -> down the -X face -> back -> rear
-pu = w(-P.PCB_W/2, P.USB_Y, -P.PCB_T/2)
-route = [(pu[1]-6, pu[2]), (pu[1], pu[2]), (pu[1]*0.3, 2.5), (P.BACK_Y+3, 2.5)]
-a.plot([p[0] for p in route], [p[1] for p in route], color='#e07000', lw=2.0,
-       ls='--', zorder=6)
-a.plot(pu[1]-6, pu[2], marker='o', color='#e07000', ms=5, zorder=6)
-for cy in P.CLIP_YS:                                    # snap-in clip positions
-    a.plot(cy, 2.5, marker='v', color='#0a0', ms=6, zorder=7)
-a.text(P.CLIP_YS[1], -2.4, 'clips', color='#0a0', fontsize=7, ha='center', va='top')
-a.text(P.BACK_Y-2, 5.0, 'cable: down & back → rear', color='#e07000', fontsize=7, ha='right')
+# rear panel-mount USB-C jack + internal ribbon route (schematic, y-z)
+pu = w(-P.PCB_W/2, P.USB_Y, -P.PCB_T/2)                 # board USB (side edge)
+a.add_patch(Rectangle((P.BACK_Y-1, P.PANEL_Z-P.PANEL_FLANGE_H/2), 3.0, P.PANEL_FLANGE_H,
+                      fc='#c33', ec='#900', lw=0.8, zorder=6))
+a.text(P.BACK_Y+3, P.PANEL_Z, 'USB-C jack\n(back panel)', color='#c33', fontsize=7, ha='left', va='center')
+route = [(P.BACK_Y-1, P.PANEL_Z), (P.PANEL_ROUTE_Y0+3, P.PANEL_Z), (pu[1]+3, pu[2])]
+a.plot([p[0] for p in route], [p[1] for p in route], color='#e07000', lw=1.6, ls='--', zorder=6)
+a.plot(pu[1]+3, pu[2], marker='o', color='#e07000', ms=5, zorder=6)
+a.text((P.PANEL_ROUTE_Y0+P.BACK_Y)/2, P.PANEL_Z+3.5, 'ribbon', color='#e07000', fontsize=7, ha='center')
 a.set_aspect("equal"); a.set_xlim(-10, P.BACK_Y+6); a.set_ylim(-8, 70); a.axis('off')
 a.legend(loc='upper right', fontsize=7, framealpha=0.9)
 
@@ -107,8 +106,8 @@ for sx in (-1, 1):
         a.add_patch(Circle((sx*P.POST_X, sy*P.POST_Y), 3.0, fc='none', ec='#a0f', lw=1.0))
 a.text(0, P.POST_Y+2.4, 'board screws ● / bezel screws ○ (into rim)', color='#555', fontsize=6, ha='center')
 a.plot([-P.PCB_W/2, -P.PCB_W/2], [P.USB_Y-P.USB_SLOT_Y/2, P.USB_Y+P.USB_SLOT_Y/2], color='#c33', lw=3)
-a.annotate('USB-C', xy=(-P.PCB_W/2, P.USB_Y), xytext=(-P.PCB_W/2-10, P.USB_Y),
-           color='#c33', fontsize=8, ha='right', va='center', arrowprops=dict(arrowstyle='->', color='#c33'))
+a.annotate('board USB-C\n(→ back jack)', xy=(-P.PCB_W/2, P.USB_Y), xytext=(-P.PCB_W/2-10, P.USB_Y),
+           color='#c33', fontsize=7, ha='right', va='center', arrowprops=dict(arrowstyle='->', color='#c33'))
 a.add_patch(Circle((P.MIC_X, P.MIC_Y), P.MIC_HOLE_D/2+0.6, fc='#0aa', ec='#066', lw=1.0))
 a.annotate('mic hole\n(bezel)', xy=(P.MIC_X, P.MIC_Y), xytext=(P.MIC_X+11, P.MIC_Y),
            color='#088', fontsize=7, ha='left', va='center', arrowprops=dict(arrowstyle='->', color='#088'))

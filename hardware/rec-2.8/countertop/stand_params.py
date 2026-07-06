@@ -102,15 +102,25 @@ SD_WIN_Z    = 12.0
 # cable management: the USB-C plug enters the -X side, then the cable is routed
 # DOWN the -X face and BACK under the base to exit at the rear.  Suits a right-angle
 # USB-C cable best; a straight plug sticks out ~18 mm then drops into the down groove.
-CABLE_W     = 7.0      # open channel width (fits a USB-C cable, not the plug)
-CABLE_D     = 5.0      # channel depth into the wall / groove height
-
-# snap-in cable clips: nubs that bulge in from each channel wall at the opening so a
-# ~4 mm cable presses past them and is retained (gap = CABLE_W - 2*CLIP_NUB).
-CLIP_NUB    = 1.75     # inward protrusion per side  -> 3.5 mm retained gap
-CLIP_LEN    = 3.0      # clip length along the channel (Y)
-CLIP_H      = 1.4      # clip height up from the base bottom
-CLIP_YS     = (11.0, 24.0, 36.0)   # clip positions along the channel
+# Rear panel-mount USB-C jack (JUXINICE-style flat right-angle male -> female panel
+# mount).  The female bolts to the flat vertical back wall; the flat ribbon routes
+# through an internal cavity to the board's USB-C on the -X edge.  Dims from the
+# product drawing:  flange 25.2 x 8.2 (racetrack), 2x Ø2.5 screws @ 17 mm,
+# receptacle opening 9 x 3.5.  *** confirm against the actual connector ***
+PANEL_X         = -28.0  # jack centre X: shifted to the -X side to sit near the board's
+                         # own USB-C (x=-43) -> short ribbon run; also clear of the SD window
+PANEL_Z         = 32.0   # jack centre height, ~level with the board USB-C (z=32)
+PANEL_FLANGE_W  = 25.2   # female flange width  (x)
+PANEL_FLANGE_H  = 8.2    # female flange height (z)
+PANEL_RECESS_D  = 1.3    # flush recess for the flange, into the back face
+PANEL_SCREW_DX  = 17.0   # screw centre-to-centre (matches the flange holes)
+PANEL_SCREW_PILOT = 2.1  # pilot for M2.5 self-tapping screws
+# body/ribbon pocket behind the flange -- narrow (x) so the 17 mm screws keep solid
+# columns, tall so the ribbon drops down, deep so it reaches the board cavity.
+PANEL_ROUTE_W   = 12.0   # pocket width  (x)  -> ~1.5 mm solid beside each screw pilot
+PANEL_ROUTE_H   = 17.0   # pocket height (z)
+PANEL_ROUTE_UP  = 4.0    # pocket extends this far above the jack centre
+PANEL_ROUTE_Y0  = 13.0   # pocket reaches forward to here (into the board cavity)
 
 # microphone port: MEMS mic ports through the FRONT (bare PCB strip near the +X short
 # edge, opposite the connectors) -> small hole through the BEZEL.  Position est. from

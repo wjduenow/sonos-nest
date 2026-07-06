@@ -38,13 +38,17 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   top is level with the glass, so there's no gap). 4 countersunk screws (M2.5/M3) land
   in the top/bottom rim band. Bezel outer == shell face outline, so the edges align.
   Screen opening exposes the viewing area (VA + 0.7 mm/side).
-- **USB-C + cable routing:** slot through the short-edge wall for the plug, then an
-  open **cable channel** carries the cable **down the −X face and back under the base**
-  to exit at the **rear** (keeps it off the nightstand surface). Best with a right-angle
-  USB-C plug; a straight plug protrudes ~18 mm then drops into the channel. Rotate the
-  UI 180° in firmware to put the cable edge on whichever side faces your outlet.
-- **Cable clips:** 3 snap-in nub pairs along the channel bulge in from the walls so a
-  ~4 mm cable presses past and is retained (3.5 mm gap). Print-in-place, no support.
+- **Rear panel-mount USB-C jack:** a flat right-angle USB-C male (JUXINICE-style) plugs
+  into the board's USB-C on the −X edge, and its short flat ribbon routes through an
+  internal pocket to a **female panel-mount jack bolted to the back wall** — a clean,
+  fixed plug-in port facing the rear. Back-wall features: a flush **25.2 × 8.2 mm flange
+  recess** and **2 × Ø2.1 pilots at 17 mm** for the connector's M2.5 mounting screws,
+  with a body/ribbon pocket behind that drops down and forward into the board cavity.
+  The jack sits on the **−X side of the back, ~level with the board's USB-C** — a short
+  ribbon run and clear of the microSD window; the pocket is kept **12 mm wide** so the
+  17 mm screws bite full plastic.
+  (The board's own USB-C stays on the −X edge with a clearance slot for the right-angle
+  plug.)
 - **Microphone hole:** Ø2 mm port through the bezel over the board's front-facing MEMS
   mic (near the +X edge, opposite the connectors), with a Ø4.5 **funnel countersink** on
   the visible face for cleaner sound pickup.
@@ -71,7 +75,8 @@ positions of the **USB-C, RESET, and microSD** are **estimated from the board ph
 each is a one-line parameter in `stand_params.py`:
 
 ```
-USB_Y, USB_SLOT_Y/Z        # USB-C centre + slot size on the -X short edge
+USB_Y, USB_SLOT_Y/Z        # board USB-C slot on the -X edge (right-angle male clearance)
+PANEL_Z, PANEL_*           # rear panel-mount jack: position, flange, cutout, screws
 RESET_X, RESET_Y           # RESET button, back face
 SD_X, SD_Y, SD_WIN_X/Z     # microSD socket + rear window
 MIC_X, MIC_Y               # front MEMS mic port (bezel hole)
@@ -111,7 +116,7 @@ for the shell; the bezel is ~10 g / ~25 min. There's no need to hollow the model
 infill handles the weight.
 
 - **shell:** print base-down (as modeled, on the feet). The reclined face self-supports;
-  the boss pilots and cable channel print cleanly. The **speaker pocket** is a rear-loaded
+  the boss pilots and jack cutout print cleanly. The **speaker pocket** is a rear-loaded
   cavity — its ceiling bridges ~15 mm, so enable bridging (or a little support) for that
   one region. The rear reset/microSD/speaker openings exit low on the back.
 - **bezel:** print flat, face-down; the countersinks are on the up-face.

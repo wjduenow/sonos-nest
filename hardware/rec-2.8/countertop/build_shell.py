@@ -118,22 +118,38 @@ def usb_cut():
     return lbox((16.0, P.USB_SLOT_Y, P.USB_SLOT_Z),
                 (x_out + 8.0 - 1.0, P.USB_Y, -P.PCB_T / 2 - 0.5))
 
-def cable_channel():
-    """Route the cable DOWN the -X face then BACK under the base to the rear.
-    The -X side wall is thin, so the routing lives in the SOLID base: an open-bottom
-    groove that runs from a front-corner entry notch straight back to a rear exit.
-    Cable presses in (no threading); best with a right-angle USB-C plug.
-    World frame, since the -X side and the base are world-aligned planes."""
-    xw = -P.W_OUT / 2                              # -X exterior face plane
-    cx = xw + P.CABLE_W / 2 + 1.5                  # channel just inboard of the -X face
+def _yprism(w, h, depth, xc, y0, zc, corner=1.0):
+    """A (rounded) rectangular prism, w (x) x h (z), extruded along +Y by `depth`
+    from y0.  Used for the back-wall panel-mount features (back wall is a flat y-plane)."""
+    poly = rrect(w / 2, h / 2, corner)                 # 2D in XY -> (x, z_of_wall)
+    m = extrude_polygon(poly, depth)                   # extruded along +Z (the depth = Y)
+    Pm = np.array([[1, 0, 0, xc], [0, 0, 1, y0], [0, 1, 0, zc], [0, 0, 0, 1]], float)
+    m.apply_transform(Pm)                              # -> (x, y=y0..y0+depth, z)
+    return m
+
+def panel_mount():
+    """Rear panel-mount USB-C jack on the flat vertical back wall (y = BACK_Y):
+    a flush flange recess, a body/ribbon pocket behind it (narrow in x so the two
+    17 mm screws keep SOLID columns; dropping down + forward to the board cavity), and
+    the two screw pilots."""
+    x, z = P.PANEL_X, P.PANEL_Z
     cuts = []
-    # underside groove (open at bottom z<0 and at the rear y>BACK_Y)
-    y0, y1 = 2.0, P.BACK_Y + 1.0
-    cuts.append(box(extents=(P.CABLE_W, y1 - y0, 2 * P.CABLE_D),
-                    transform=translation_matrix([cx, (y0 + y1) / 2, 0.0])))
-    # front-corner entry notch: opens the -X-bottom-front so the cable turns in
-    cuts.append(box(extents=(2 * (P.CABLE_W), P.CABLE_W, 2 * P.CABLE_D),
-                    transform=translation_matrix([xw + P.CABLE_W, 4.0, 0.0])))
+    # flush racetrack recess for the female flange, opening at the back face
+    cuts.append(_yprism(P.PANEL_FLANGE_W, P.PANEL_FLANGE_H, P.PANEL_RECESS_D + 0.2,
+                        x, P.BACK_Y - P.PANEL_RECESS_D, z, corner=P.PANEL_FLANGE_H / 2))
+    # connector-body + ribbon pocket: behind the recess floor -> forward to the board
+    # cavity.  Width 12 keeps x=±8.5 screw columns solid; tall + dropped for the ribbon.
+    pz1 = z + P.PANEL_ROUTE_UP
+    pz0 = pz1 - P.PANEL_ROUTE_H
+    depth = P.BACK_Y - P.PANEL_RECESS_D - P.PANEL_ROUTE_Y0
+    cuts.append(_yprism(P.PANEL_ROUTE_W, pz1 - pz0, depth,
+                        x, P.PANEL_ROUTE_Y0, (pz0 + pz1) / 2, corner=2.0))
+    # two screw pilots into the solid columns beside the pocket (M2.5 self-tap)
+    for sx in (-1, 1):
+        p = cylinder(radius=P.PANEL_SCREW_PILOT / 2, height=9.0, sections=SEG)
+        p.apply_transform(rotation_matrix(np.radians(90), [1, 0, 0]))   # axis -> Y
+        p.apply_translation([x + sx * P.PANEL_SCREW_DX / 2, P.BACK_Y - 4.5 + 0.1, z])
+        cuts.append(p)
     return cuts
 
 def _spk_y():
@@ -183,24 +199,10 @@ def speaker_cap_catches():
 def feet():
     out = []
     ov = 1.0                                               # overlap up into the base so it fuses
-    for x in (-33.0, 33.0):                                # inboard of the -X cable channel
+    for x in (-33.0, 33.0):
         for y in (6.0, P.BACK_Y - 5.0):
             out.append(box(extents=(P.FOOT, P.FOOT, P.FOOT_H + ov),
                            transform=translation_matrix([x, y, (ov - P.FOOT_H) / 2])))
-    return out
-
-def cable_clips():
-    """Snap-in nubs bulging from both channel walls near the opening; a ~4 mm cable
-    presses past them and is retained. Added back AFTER the channel is cut."""
-    xw = -P.W_OUT / 2
-    cx = xw + P.CABLE_W / 2 + 1.5              # channel centreline (matches cable_channel)
-    half = P.CABLE_W / 2
-    out = []
-    for y in P.CLIP_YS:
-        for side in (-1, 1):
-            xc = cx + side * (half - P.CLIP_NUB / 2)   # nub against the wall, protruding in
-            out.append(box(extents=(P.CLIP_NUB, P.CLIP_LEN, P.CLIP_H),
-                           transform=translation_matrix([xc, y, P.CLIP_H / 2])))
     return out
 
 # ---- back-face access -----------------------------------------------------------
@@ -230,13 +232,13 @@ def build_shell():
     cuts += [to_world(p) for p in rim_pilots()]
     cuts.append(to_world(reset_pin()))
     cuts.append(to_world(sd_window()))
-    cuts += cable_channel()                                        # already world-frame
+    cuts += panel_mount()                                          # rear USB-C jack (world-frame)
     cuts.append(speaker_pocket())
     cuts += speaker_grille()
     cuts.append(speaker_wire())
     cuts += speaker_cap_catches()
     body = difference([body] + cuts, engine='manifold')
-    body = union([body] + cable_clips() + feet(), engine='manifold')  # retention + feet
+    body = union([body] + feet(), engine='manifold')
     # drop zero-volume degenerate slivers the boolean engine leaves at coincident faces
     solids = [p for p in body.split(only_watertight=False) if p.volume > 1.0]
     return solids[0] if len(solids) == 1 else trimesh.util.concatenate(solids)
