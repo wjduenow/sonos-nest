@@ -78,7 +78,7 @@ def page_wallplate(pdf):
     fig, ax = new_page(pdf, 'Page 3 — Wall-Plate Drill Template')
     ruler(ax, (PW-100)/2, PH-30)
     cx, cy = PW/2, 150
-    ax.add_patch(plt.Circle((cx, cy), 70.2/2, fill=False, lw=1.0))            # outline (collar Ø70)
+    ax.add_patch(plt.Circle((cx, cy), 68.8/2, fill=False, lw=1.0))            # outline (lip Ø68.8)
     ax.add_patch(plt.Circle((cx, cy), 11/2, fill=False, lw=1.0, color='blue'))  # cable hole
     ax.text(cx, cy-11/2-1, 'Ø11 cable', ha='center', va='top', fontsize=7, color='blue')
     for sx in (-18, 18):
@@ -88,7 +88,7 @@ def page_wallplate(pdf):
         ax.text(x, cy+6, 'screw', ha='center', va='bottom', fontsize=7, color='red')
     ax.text(PW/2, 95,
             'Tape to the wall, level the two red screw marks, punch/drill them and\n'
-            'the center cable hole. (Screws sit inside the bayonet ring.)',
+            'the center cable hole. (Screws sit inside the magnet lip.)',
             ha='center', va='top', fontsize=9)
     pdf.savefig(fig); plt.close(fig)
 

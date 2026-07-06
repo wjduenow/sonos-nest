@@ -9,7 +9,7 @@ electrical pinout in `../CLAUDE.md` and `../src/board_pins.h`.
 
 > ⚠️ Elecrow publishes **no** mechanical drawing / STEP for this board. The
 > dimensions below were reverse-engineered from a community wall-mount STL
-> (`wall-mount/reference_mount.stl`) plus the published 79×79×30 envelope, and
+> (`wall/reference_mount.stl`) plus the published 79×79×30 envelope, and
 > **validated 1:1 against the physical unit** (paper templates — screw pattern
 > and Ø58/Ø79 diameters confirmed). Treat ✅ as verified, ◾ as published-only.
 
@@ -75,14 +75,14 @@ the hub threads. Screw length: enough to pass your bracket web (~3 mm) + bite.
 5. The **MX1.25 JST cable** exits the **back** — leave a center/rear opening for
    it (no side cutout needed; a small Ø11 hole clears the thin connector + cable).
 
-The existing wall mount in `wall-mount/` is a worked example of all of this:
+The existing wall mount in `wall/` is a worked example of all of this:
 a bayonet-coupled wall plate + a cradle that cups the body and screws to the hub.
-See `wall-mount/README.md`. Its display-fit geometry is reusable for other parts.
+See `wall/README.md`. Its display-fit geometry is reusable for other parts.
 
 ## Provenance / re-verification
-- Source of the screw pattern + cup: `wall-mount/reference_mount.stl` (a
-  community mount for this exact display), analyzed in `wall-mount/reference_holes.png`.
-- Validated with `wall-mount/templates.pdf` (1:1 paper templates) against the
+- Source of the screw pattern + cup: `wall/reference_mount.stl` (a
+  community mount for this exact display), analyzed in `wall/reference_holes.png`.
+- Validated with `wall/templates.pdf` (1:1 paper templates) against the
   physical unit — screw pattern ✅, Ø58 body ✅, Ø79 bezel ✅. Rear port confirmed
   as the **MX1.25 JST** (not USB-C) by the owner.
 - If a future unit revision differs, reprint `templates.pdf` (100% scale) and

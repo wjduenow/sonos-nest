@@ -44,7 +44,8 @@ required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfe
 ## Hardware — electrical (verified from Elecrow schematic + source — see `src/board_pins.h`)
 
 > Physical/mechanical spec for designing mounts/cases (Ø79 rotating bezel, Ø58 rear
-> body, 3×M3 Ø12-BC rear holes, USB-C on back): **`hardware/crowpanel-2.1-physical-spec.md`**.
+> body, 3×M3 Ø12-BC rear holes, USB-C on back):
+> **`hardware/round-nest-2.8/crowpanel-2.1-physical-spec.md`**.
 
 - ESP32-S3R8: 240 MHz, **8 MB OPI PSRAM, 16 MB flash**.
 - Display: **ST7701** 480×480 RGB-parallel. **Arduino_GFX pinned to 1.3.1** (older API:
@@ -102,5 +103,7 @@ Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe d
 
 ## Conventions
 - Commit/push only when asked. Branch `main`, remote `origin` (github.com/wjduenow/sonos-nest).
-- Keep `hardware/` (wall-mount) commits separate from firmware — the user owns that work.
+- Keep `hardware/` commits separate from firmware — the user owns that work. Layout:
+  `hardware/round-nest-2.8/` (original round CrowPanel unit: `wall/` mount) and
+  `hardware/rec-2.8/` (ES3C28P rectangular board: `countertop/` nightstand stand).
 - Test loop: build → flash (USB or `/ota`) → user confirms on device → commit + push.
