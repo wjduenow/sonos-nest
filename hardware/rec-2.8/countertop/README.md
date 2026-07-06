@@ -92,6 +92,12 @@ thread-forming screws** (for plastic: Plastite/PT or generic coarse-thread self-
 Pilot sizes are `BOSS_PILOT` / `POST_PILOT` / `PANEL_SCREW_PILOT` in `stand_params.py`;
 switch to M3 heat-set inserts + machine screws there if you prefer repeated disassembly.
 
+## Sourcing
+
+- **Board** (Hosyond ES3C28P 2.8" ESP32-S3): https://www.amazon.com/dp/B0FKG7WRWV
+- **Rear USB-C jack** (JUXINICE flat right-angle male → female panel mount, ships with its
+  2 mounting screws): https://www.amazon.com/JUXINICE-Type-C-Female-Adapter-Extension/dp/B0GTDF6D1Y
+
 ## ⚠️ Verify before the final print
 
 The board **outline, holes, glass, and thickness are exact**. But the in-plane

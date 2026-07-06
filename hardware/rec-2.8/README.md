@@ -5,6 +5,8 @@ ES3C28P** 2.8" ESP32-S3 display board — the variant with a **microSD slot** (f
 playing music straight off the card). Rectangular board, meant to sit on a
 nightstand / counter top.
 
+**Board:** https://www.amazon.com/dp/B0FKG7WRWV
+
 ## Board — verified spec (QDtech "LCM OUTLINE" drawing, V1.0 2025-06-11)
 
 - PCB **86.0 × 50.0 × 1.6 mm**, corner radius **R3.5**
