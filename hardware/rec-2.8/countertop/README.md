@@ -8,6 +8,7 @@ controller). Two printed parts:
 |------|------|-----------|
 | **shell** | `shell.stl` | wedge body; board drops into a reclined pocket and screws to 4 bosses |
 | **bezel** | `bezel.stl` | screwed-on front frame that covers the board edges + screws and frames the screen |
+| **speaker cap** | `speaker_cap.stl` | snap-in cap that closes the rear speaker load port and backs the speaker in |
 
 Orientation: **landscape** (86 mm wide, 50 mm tall), **reclined 20° from vertical**.
 
@@ -47,6 +48,13 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
 - **Microphone hole:** Ø2 mm port through the bezel over the board's front-facing MEMS
   mic (near the +X edge, opposite the connectors), with a Ø4.5 **funnel countersink** on
   the visible face for cleaner sound pickup.
+- **Speaker (kit's ~20×15 box, 8 Ω / ~1 W):** **downward-firing** pocket in the solid
+  back of the wedge, **loaded from the rear**, firing through an integral **grille** in
+  the base. Four **feet** lift the base 4 mm for the air gap. A wire channel connects the
+  pocket up to the board's SPEAKER header. The box speaker is self-enclosed, so no sealed
+  chamber is needed. The speaker sits at the front of the pocket; a **snap-in cap**
+  (`speaker_cap.stl`) closes the rear load port, backs the speaker in, and clicks into two
+  catch recesses in the pocket walls.
 - **RESET pin hole:** Ø3 channel bored straight back through the body to the RESET
   button — poke a paper-clip from the rear.
 - **microSD access:** rectangular window through the rear to the socket, to push-push /
@@ -65,6 +73,7 @@ USB_Y, USB_SLOT_Y/Z        # USB-C centre + slot size on the -X short edge
 RESET_X, RESET_Y           # RESET button, back face
 SD_X, SD_Y, SD_WIN_X/Z     # microSD socket + rear window
 MIC_X, MIC_Y               # front MEMS mic port (bezel hole)
+SPK_W, SPK_L, SPK_T        # included speaker box size (measure the real one)
 ```
 
 Also confirm the **mic is front-ported** (the outline drawing shows a front "MIC"
@@ -82,7 +91,7 @@ Uses the same Python CSG toolchain as `../../round-nest-2.8/wall` (trimesh + man
 machine that lives in the `img23d` conda env:
 
 ```bash
-conda run -n img23d python build_all.py       # -> shell.stl, bezel.stl
+conda run -n img23d python build_all.py       # -> shell.stl, bezel.stl, speaker_cap.stl
 conda run -n img23d python render_preview.py  # -> assembly_preview.png
 ```
 
@@ -93,15 +102,18 @@ so the two parts can't drift.
 ## Print notes
 
 **Infill:** not part of the STL — it's a slicer setting you pick at print time. The
-shell models as a *solid* ~137 cm³ block; the slicer fills the interior at whatever
+shell models as a *solid* ~133 cm³ block; the slicer fills the interior at whatever
 infill you choose. This is a static compression part, so **15 % is plenty** (20 % if you
 want extra heft/stability). At 15 %, ~3 walls, expect roughly **~65 g of PLA and ~2 h**
 for the shell; the bezel is ~10 g / ~25 min. There's no need to hollow the model —
 infill handles the weight.
 
-- **shell:** print base-down (as modeled, +Z up). The reclined face self-supports; the
-  boss pilots and cable channel print cleanly. The rear reset/microSD channels exit low
-  on the back at the recline angle.
+- **shell:** print base-down (as modeled, on the feet). The reclined face self-supports;
+  the boss pilots and cable channel print cleanly. The **speaker pocket** is a rear-loaded
+  cavity — its ceiling bridges ~15 mm, so enable bridging (or a little support) for that
+  one region. The rear reset/microSD/speaker openings exit low on the back.
 - **bezel:** print flat, face-down; the countersinks are on the up-face.
+- **speaker cap:** print plate-down (arms/hooks up); the hook ledge is a small overhang —
+  fine as a bridge, or a touch of support. Snap fit tuning lives in `CAP_CLR`.
 - PLA/PETG both fine. 0.2 mm layers. Screws: M3 self-tapping for the board/bosses,
   M2.5–M3 for the bezel.

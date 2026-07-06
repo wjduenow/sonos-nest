@@ -120,4 +120,31 @@ MIC_Y       = 12.0
 MIC_HOLE_D  = 2.0
 MIC_CSK_D   = 4.5      # funnel Ø on the visible bezel face (tapers to MIC_HOLE_D)
 
+# included kit speaker: enclosed ~20x15 box, 8Ω / ~1 W (FM8002E amp), DOWNWARD-firing.
+# Housed in the solid back of the wedge, loaded from the rear, firing down through a
+# grille; feet lift the base for the air gap.  *** SIZE ESTIMATED -- VERIFY the box ***
+SPK_W        = 20.0    # box footprint X
+SPK_L        = 15.0    # box footprint Y (rear insertion depth)
+SPK_T        = 11.0    # box thickness (Z)
+SPK_FIT      = 0.6     # pocket clearance
+SPK_CX       = 0.0     # pocket centre X (clear of the -X cable channel)
+GRILLE_T     = 1.5     # perforated floor thickness under the speaker
+GRILLE_HOLE  = 2.0     # grille hole Ø
+GRILLE_PITCH = 3.6     # grille hole spacing
+SPK_WIRE_D   = 8.0     # channel from the pocket up to the board cavity (speaker lead)
+FOOT         = 9.0     # foot pad size
+FOOT_H       = 4.0     # base lift for the downward-firing air gap
+
+# rear speaker load port + snap-in cap (separate part: speaker_cap.stl).  The speaker
+# sits at the FRONT of the pocket; the cap fills a rear zone, backs the speaker in, and
+# snaps into two catch recesses.  Snap fits often need per-printer tuning of CAP_CLR.
+SPK_CAP_ZONE = 5.0     # rear space behind the speaker for the cap arms/catches
+CAP_T        = 2.0     # cap face-plate thickness
+CAP_OVER     = 1.8     # plate overlap beyond the port on each side
+CAP_CLR      = 0.4     # snap/plug fit clearance
+CAP_ARM_X    = 2.4     # snap-arm thickness
+CAP_ARM_Z    = 8.0     # snap-arm height (within the port)
+CAP_HOOK     = 1.6     # hook outward protrusion into the catch recess
+CAP_CATCH_DEPTH = 2.0  # catch recess depth into the side wall
+
 SEG         = 96       # cylinder smoothness

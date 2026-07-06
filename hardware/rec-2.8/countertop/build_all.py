@@ -2,7 +2,7 @@
 """Regenerate both parts: shell.stl and bezel.stl."""
 import subprocess, sys, os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-for script in ("build_shell.py", "build_bezel.py"):
+for script in ("build_shell.py", "build_bezel.py", "build_speaker_cap.py"):
     print(f"== {script} ==")
     subprocess.run([sys.executable, script], check=True)
 print("All parts built.")

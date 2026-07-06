@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import stand_params as P
-import build_shell as S, build_bezel as B
+import build_shell as S, build_bezel as B, build_speaker_cap as C
 
 sT, cT = np.sin(np.radians(P.TILT_DEG)), np.cos(np.radians(P.TILT_DEG))
 _M = S._M
@@ -24,6 +24,7 @@ def w(x, y, z): return (_M @ np.array([x, y, z, 1.0]))[:3]
 
 shell = S.build_shell()
 bezel = B.build_bezel(world=True)
+cap = C.build_cap(world=True)
 
 fig = plt.figure(figsize=(15, 10))
 fig.suptitle("ES3C28P 2.8\" ESP32-S3 nightstand stand  —  landscape, 20° recline",
@@ -45,7 +46,7 @@ pcb   = lblock((P.PCB_W, P.PCB_H, P.PCB_T), (0, 0, -P.PCB_T/2))
 glass = lblock((P.GLASS_W, P.GLASS_H, P.GLASS_PROUD), (0, 0, P.GLASS_PROUD/2))
 scr   = lblock((P.AA_W, P.AA_H, 0.2), (0, 0, P.GLASS_PROUD+0.11))
 for m, hexc in ((shell, '#93b4dd'), (pcb, '#2a6b32'), (glass, '#111417'),
-                (scr, '#2d6ae0'), (bezel, '#e0b878')):
+                (scr, '#2d6ae0'), (bezel, '#e0b878'), (cap, '#7a5aa8')):
     a.add_collection3d(Poly3DCollection(m.triangles, facecolors=shaded(m, hexc),
                                         edgecolors='none', linewidths=0))
 a.set_xlim(-50, 50); a.set_ylim(-5, 55); a.set_zlim(0, 70)
@@ -66,8 +67,17 @@ seg(w(P.HOLE_DX/2, -P.PCB_H/2, 0), w(P.HOLE_DX/2, P.PCB_H/2, 0),
     color='#159', lw=2.4, zorder=4, label='PCB')
 seg(w(P.HOLE_DX/2, -P.GLASS_H/2, P.GLASS_PROUD), w(P.HOLE_DX/2, P.GLASS_H/2, P.GLASS_PROUD),
     color='#2a2', lw=2.0, zorder=4, label='glass')
-a.axhline(0, color='#777', lw=3, zorder=0)
-a.text(P.BACK_Y, -1.6, 'nightstand', fontsize=7, color='#555', ha='right', va='top')
+a.axhline(-P.FOOT_H, color='#777', lw=3, zorder=0)     # surface (stand rests on feet)
+a.text(P.BACK_Y, -P.FOOT_H-0.6, 'nightstand', fontsize=7, color='#555', ha='right', va='top')
+# feet + downward-firing speaker (schematic; speaker sits at x=0, feet at x=±33)
+for fy in (6.0, P.BACK_Y-5.0):
+    a.add_patch(Rectangle((fy-P.FOOT/2, -P.FOOT_H), P.FOOT, P.FOOT_H, fc='#c8c8c8', ec='#888', lw=0.6, zorder=1))
+sy0, sy1 = P.BACK_Y - P.SPK_L - P.SPK_FIT, P.BACK_Y
+a.add_patch(Rectangle((sy0, P.GRILLE_T), sy1-sy0, P.SPK_T, fc='#d9c8ee', ec='#639', lw=1.0, zorder=3))
+a.add_patch(Rectangle((sy0, 0), sy1-sy0, P.GRILLE_T, fc='none', ec='#639', hatch='||||', lw=0.5, zorder=3))
+a.annotate('', xy=((sy0+sy1)/2, -P.FOOT_H+0.5), xytext=((sy0+sy1)/2, 0.5),
+           arrowprops=dict(arrowstyle='-|>', color='#639', lw=1.4))
+a.text(sy0-1, P.SPK_T/2+1, 'speaker\n(down-fire)', color='#639', fontsize=7, ha='right', va='center')
 # cable route (schematic, projected into y-z): plug -> down the -X face -> back -> rear
 pu = w(-P.PCB_W/2, P.USB_Y, -P.PCB_T/2)
 route = [(pu[1]-6, pu[2]), (pu[1], pu[2]), (pu[1]*0.3, 2.5), (P.BACK_Y+3, 2.5)]
@@ -78,7 +88,7 @@ for cy in P.CLIP_YS:                                    # snap-in clip positions
     a.plot(cy, 2.5, marker='v', color='#0a0', ms=6, zorder=7)
 a.text(P.CLIP_YS[1], -2.4, 'clips', color='#0a0', fontsize=7, ha='center', va='top')
 a.text(P.BACK_Y-2, 5.0, 'cable: down & back → rear', color='#e07000', fontsize=7, ha='right')
-a.set_aspect('equal'); a.set_xlim(-10, P.BACK_Y+6); a.set_ylim(-6, 70); a.axis('off')
+a.set_aspect("equal"); a.set_xlim(-10, P.BACK_Y+6); a.set_ylim(-8, 70); a.axis('off')
 a.legend(loc='upper right', fontsize=7, framealpha=0.9)
 
 # ---- (3) front elevation --------------------------------------------------------

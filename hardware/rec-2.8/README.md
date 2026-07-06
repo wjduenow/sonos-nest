@@ -23,7 +23,8 @@ nightstand / counter top.
 
 - **`ES3C28P_Size.pdf`** — board mechanical drawing.
 - **`countertop/`** — the angled **nightstand stand** case (shell + screwed-on bezel,
-  cable channel + clips, RESET pin hole, microSD access, mic port).
+  cable channel + clips, RESET pin hole, microSD access, mic port, and a downward-firing
+  pocket for the kit's speaker).
 
 See `countertop/README.md` for the stand build. Note: USB-C / RESET / microSD / mic
 in-plane positions there are estimated from board photos — **caliper-verify before the

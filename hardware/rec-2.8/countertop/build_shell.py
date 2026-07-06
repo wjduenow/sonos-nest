@@ -136,6 +136,59 @@ def cable_channel():
                     transform=translation_matrix([xw + P.CABLE_W, 4.0, 0.0])))
     return cuts
 
+def _spk_y():
+    """(y0, y1, yc): pocket y-extent and the speaker/grille centre. The speaker sits at
+    the FRONT of the pocket; a rear zone (SPK_CAP_ZONE) is left for the snap cap."""
+    y1 = P.BACK_Y + 1.0                                       # opens through the back wall
+    y0 = P.BACK_Y - (P.SPK_L + P.SPK_FIT) - P.SPK_CAP_ZONE
+    yc = y0 + (P.SPK_L + P.SPK_FIT) / 2.0                     # speaker centre (front)
+    return y0, y1, yc
+
+def speaker_pocket():
+    y0, y1, _ = _spk_y()
+    z0, z1 = P.GRILLE_T, P.GRILLE_T + P.SPK_T + P.SPK_FIT
+    return box(extents=(P.SPK_W + 2 * P.SPK_FIT, y1 - y0, z1 - z0),
+               transform=translation_matrix([P.SPK_CX, (y0 + y1) / 2, (z0 + z1) / 2]))
+
+def speaker_grille():
+    _, _, yc = _spk_y()
+    holes, nx = [], int(P.SPK_W // P.GRILLE_PITCH)
+    ny = int(P.SPK_L // P.GRILLE_PITCH)
+    for i in range(-nx // 2, nx // 2 + 1):
+        for j in range(-ny // 2, ny // 2 + 1):
+            h = cylinder(radius=P.GRILLE_HOLE / 2, height=P.GRILLE_T + 1.0, sections=32)
+            h.apply_translation([P.SPK_CX + i * P.GRILLE_PITCH,
+                                 yc + j * P.GRILLE_PITCH, P.GRILLE_T / 2])
+            holes.append(h)
+    return holes
+
+def speaker_wire():
+    _, _, yc = _spk_y()
+    p0 = [P.SPK_CX, yc, P.GRILLE_T + P.SPK_T]              # pocket ceiling
+    p1 = (_M @ np.array([0.0, 0.0, -6.0, 1.0]))[:3]        # inside the board cavity
+    return cylinder(radius=P.SPK_WIRE_D / 2, segment=(p0, p1), sections=SEG)
+
+def speaker_cap_catches():
+    """Two recesses in the pocket side walls (rear zone) that the cap's hooks snap into."""
+    port_hx = P.SPK_W / 2 + P.SPK_FIT
+    zc = P.GRILLE_T + (P.SPK_T + P.SPK_FIT) / 2
+    cy0, cy1 = P.BACK_Y - 4.0, P.BACK_Y - 1.0              # within the rear cap zone
+    out = []
+    for sx in (-1, 1):
+        out.append(box(extents=(P.CAP_CATCH_DEPTH, cy1 - cy0, P.CAP_ARM_Z + 1.0),
+                       transform=translation_matrix(
+                           [sx * (port_hx + P.CAP_CATCH_DEPTH / 2), (cy0 + cy1) / 2, zc])))
+    return out
+
+def feet():
+    out = []
+    ov = 1.0                                               # overlap up into the base so it fuses
+    for x in (-33.0, 33.0):                                # inboard of the -X cable channel
+        for y in (6.0, P.BACK_Y - 5.0):
+            out.append(box(extents=(P.FOOT, P.FOOT, P.FOOT_H + ov),
+                           transform=translation_matrix([x, y, (ov - P.FOOT_H) / 2])))
+    return out
+
 def cable_clips():
     """Snap-in nubs bulging from both channel walls near the opening; a ~4 mm cable
     presses past them and is retained. Added back AFTER the channel is cut."""
@@ -178,9 +231,15 @@ def build_shell():
     cuts.append(to_world(reset_pin()))
     cuts.append(to_world(sd_window()))
     cuts += cable_channel()                                        # already world-frame
+    cuts.append(speaker_pocket())
+    cuts += speaker_grille()
+    cuts.append(speaker_wire())
+    cuts += speaker_cap_catches()
     body = difference([body] + cuts, engine='manifold')
-    body = union([body] + cable_clips(), engine='manifold')        # snap-in retention
-    return body
+    body = union([body] + cable_clips() + feet(), engine='manifold')  # retention + feet
+    # drop zero-volume degenerate slivers the boolean engine leaves at coincident faces
+    solids = [p for p in body.split(only_watertight=False) if p.volume > 1.0]
+    return solids[0] if len(solids) == 1 else trimesh.util.concatenate(solids)
 
 if __name__ == "__main__":
     m = build_shell(); m.export("shell.stl")
