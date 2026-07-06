@@ -67,6 +67,31 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   pull the card.
 - **20° recline** on a flat base for nightstand viewing.
 
+## Screws (BOM)
+
+Everything threads directly into printed plastic bosses — use **self-tapping /
+thread-forming screws** (for plastic: Plastite/PT or generic coarse-thread self-tappers).
+**No nuts or heat-set inserts** required.
+
+| Where | Qty | Screw | Length | Head |
+|-------|-----|-------|--------|------|
+| **Board → case** | 4 | M3 self-tapping | ~8 mm | Pan (≤5.4 mm OD) |
+| **Bezel → case** | 4 | M3 self-tapping | ~8–10 mm | Countersunk / flat |
+| **USB-C jack → case** | 2 | M2.5 self-tapping | ~5–6 mm | Pan — *usually included with the cable* |
+
+- **Board (4×):** PCB Ø3.2 corner holes → Ø2.6 boss pilots (M3). From the front through
+  the PCB (1.6 mm) into the boss (~6–7 mm bite); keep the head **≤5.4 mm** to stay inside
+  the board's Ø5.6 keep-out ring. Install *before* the bezel.
+- **Bezel (4×):** countersunk holes → Ø2.6 rim pilots (M3), flat head to sit flush. The
+  countersink is modeled Ø5.0, so a low-profile/90° flat head seats best (`BEZEL_SCREW_HEAD`
+  widens it if needed).
+- **USB-C jack (2×):** female flange Ø2.5 holes at 17 mm → Ø2.1 case pilots (M2.5). The
+  JUXINICE panel-mount cable ships with its two mounting screws — reuse those.
+- **No screws** for the speaker cap (snap-in) or the speaker (trapped by the cap).
+
+Pilot sizes are `BOSS_PILOT` / `POST_PILOT` / `PANEL_SCREW_PILOT` in `stand_params.py`;
+switch to M3 heat-set inserts + machine screws there if you prefer repeated disassembly.
+
 ## ⚠️ Verify before the final print
 
 The board **outline, holes, glass, and thickness are exact**. But the in-plane
