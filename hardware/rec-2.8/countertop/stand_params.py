@@ -86,9 +86,14 @@ BEZEL_SCREW_HEAD = 5.0                   # countersink head Ø
 
 # ---------------------------------------------------------------- cut-outs  (VERIFY!)
 # All in local board frame.  X is board width (USB edge at -X), Y is up the incline.
-USB_Y       = 0.0      # USB-C centre along the -X short edge (est.)
-USB_SLOT_Y  = 13.0     # cut-out width  (along Y) -- generous for cable overmold
-USB_SLOT_Z  = 7.0      # cut-out height (across the PCB thickness + connector)
+USB_Y       = 0.0      # board USB-C centre along the -X short edge (est.)
+# The board's USB-C is unused for external power (power comes from the rear panel jack).
+# The right-angle male still plugs into it internally, so we keep a BLIND clearance
+# pocket -- the -X exterior is CLOSED (no legacy side port).  Pre-plug the male before
+# dropping the board into the case.  Widen these / open the skin if the plug is deep.
+USB_SLOT_Y  = 18.0     # male-clearance pocket width  (along Y)
+USB_SLOT_Z  = 12.0     # male-clearance pocket height (Z: PCB + connector + body)
+USB_SKIN    = 1.5      # retained -X outer skin thickness (0 = reopen the side port)
 
 RESET_X     = -38.0    # RESET tact button, back face, near the -X edge (est.)
 RESET_Y     = 15.0

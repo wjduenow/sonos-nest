@@ -47,8 +47,11 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   The jack sits on the **−X side of the back, ~level with the board's USB-C** — a short
   ribbon run and clear of the microSD window; the pocket is kept **12 mm wide** so the
   17 mm screws bite full plastic.
-  (The board's own USB-C stays on the −X edge with a clearance slot for the right-angle
-  plug.)
+  The board's own USB-C (on the −X edge) is used only for this internal link — there is
+  **no external side port**; the −X exterior is closed (`USB_SKIN` skin) with a **blind
+  clearance pocket** inside for the right-angle plug. Pre-plug the male before dropping
+  the board in. It leaves ~**2.5 mm** of −X clearance past the board edge, so if the plug
+  is deeper, set `USB_SKIN = 0` to reopen a slim slot (or ask me to bump the −X wall out).
 - **Microphone hole:** Ø2 mm port through the bezel over the board's front-facing MEMS
   mic (near the +X edge, opposite the connectors), with a Ø4.5 **funnel countersink** on
   the visible face for cleaner sound pickup.

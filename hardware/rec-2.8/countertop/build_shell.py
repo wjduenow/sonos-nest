@@ -113,10 +113,13 @@ def rim_pilots():
     return out
 
 def usb_cut():
-    # slot through the -X short-edge wall (local), spanning the PCB thickness zone
-    x_out = -(P.PCB_W / 2) - 8.0
-    return lbox((16.0, P.USB_SLOT_Y, P.USB_SLOT_Z),
-                (x_out + 8.0 - 1.0, P.USB_Y, -P.PCB_T / 2 - 0.5))
+    """BLIND internal clearance for the right-angle male plug on the board's -X USB-C.
+    The -X exterior stays CLOSED (USB_SKIN skin) -- the legacy side port is removed;
+    power now enters via the rear panel jack.  Local frame (local x == world x)."""
+    x_out = -P.W_OUT / 2 + P.USB_SKIN          # inner edge of the retained outer skin
+    x_in = -P.PCB_W / 2 + 3.0                   # a few mm under the board edge
+    return lbox((x_in - x_out, P.USB_SLOT_Y, P.USB_SLOT_Z),
+                ((x_in + x_out) / 2, P.USB_Y, -P.USB_SLOT_Z / 2 + 1.5))
 
 def _yprism(w, h, depth, xc, y0, zc, corner=1.0):
     """A (rounded) rectangular prism, w (x) x h (z), extruded along +Y by `depth`
