@@ -27,12 +27,14 @@ def _lbox(ext, ctr):
     m = box(extents=ext); m.apply_translation(ctr); return m
 
 def _hook(sx):
-    """Ramped catch hook: flat retaining face toward the plate, ramp toward the tip."""
-    z_base = P.CAP_T + ARM_LEN - 2.5
+    """Arrow-profile catch hook: lead-in ramp on the tip AND a lead-OUT ramp on the
+    retaining face, so a firm pull cams the arm inward and the cap pops off."""
     z_tip = P.CAP_T + ARM_LEN
+    z_apex = z_tip - P.CAP_HOOK_RAMP                     # max outward protrusion
+    z_base = z_apex - P.CAP_HOOK_RAMP                    # ramps back to the arm (pry-release)
     x_in = sx * (PORT_HX - P.CAP_CLR)                    # meets the arm outer face
     x_out = sx * (PORT_HX - P.CAP_CLR + P.CAP_HOOK)      # into the catch recess
-    tri = Polygon([(x_in, z_base), (x_out, z_base), (x_in, z_tip)])
+    tri = Polygon([(x_in, z_base), (x_out, z_apex), (x_in, z_tip)])
     m = extrude_polygon(tri, P.CAP_ARM_Z)               # extruded along +Z (the arm height)
     # remap extrude axes (X=x, Y=z_insertion, Z=arm-height) -> local (x, y, z_insertion)
     Pm = np.array([[1, 0, 0, 0], [0, 0, 1, -P.CAP_ARM_Z / 2],
@@ -43,6 +45,8 @@ def _hook(sx):
 def build_cap(world=False):
     parts = [_lbox((2 * (PORT_HX + P.CAP_OVER), 2 * (PORT_HZ + P.CAP_OVER), P.CAP_T),
                    (0, 0, P.CAP_T / 2))]                 # face plate
+    parts.append(_lbox((P.CAP_PRY_W, P.CAP_PRY_LEN, P.CAP_T),   # bottom-edge pull tab
+                       (0, -(PORT_HZ + P.CAP_OVER) - P.CAP_PRY_LEN / 2, P.CAP_T / 2)))
     for sx in (-1, 1):
         parts.append(_lbox((P.CAP_ARM_X, P.CAP_ARM_Z, ARM_LEN),
                            (sx * (PORT_HX - P.CAP_CLR - P.CAP_ARM_X / 2), 0,

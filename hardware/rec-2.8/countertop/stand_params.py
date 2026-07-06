@@ -146,5 +146,8 @@ CAP_ARM_X    = 2.4     # snap-arm thickness
 CAP_ARM_Z    = 8.0     # snap-arm height (within the port)
 CAP_HOOK     = 1.6     # hook outward protrusion into the catch recess
 CAP_CATCH_DEPTH = 2.0  # catch recess depth into the side wall
+CAP_HOOK_RAMP = 1.5    # lead-out ramp height on the retaining face (bigger = easier pry)
+CAP_PRY_W    = 12.0    # fingernail pull-tab width on the cap's bottom edge
+CAP_PRY_LEN  = 3.0     # pull-tab reach past the plate (grab point)
 
 SEG         = 96       # cylinder smoothness

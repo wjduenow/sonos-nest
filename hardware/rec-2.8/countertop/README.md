@@ -54,7 +54,9 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   pocket up to the board's SPEAKER header. The box speaker is self-enclosed, so no sealed
   chamber is needed. The speaker sits at the front of the pocket; a **snap-in cap**
   (`speaker_cap.stl`) closes the rear load port, backs the speaker in, and clicks into two
-  catch recesses in the pocket walls.
+  catch recesses in the pocket walls. The hooks are **arrow-profiled (lead-out ramps)** and
+  the plate has a **fingernail pull-tab** on its bottom edge — hook a nail/spudger under
+  the tab and pull straight back to cam the hooks out and pop the cap off; press to reseat.
 - **RESET pin hole:** Ø3 channel bored straight back through the body to the RESET
   button — poke a paper-clip from the rear.
 - **microSD access:** rectangular window through the rear to the socket, to push-push /
@@ -113,7 +115,7 @@ infill handles the weight.
   cavity — its ceiling bridges ~15 mm, so enable bridging (or a little support) for that
   one region. The rear reset/microSD/speaker openings exit low on the back.
 - **bezel:** print flat, face-down; the countersinks are on the up-face.
-- **speaker cap:** print plate-down (arms/hooks up); the hook ledge is a small overhang —
-  fine as a bridge, or a touch of support. Snap fit tuning lives in `CAP_CLR`.
+- **speaker cap:** print plate-down (arms/hooks + pull-tab up). Fit/retention tuning:
+  `CAP_CLR` (looser = easier), `CAP_HOOK`/`CAP_HOOK_RAMP` (retention strength vs pry effort).
 - PLA/PETG both fine. 0.2 mm layers. Screws: M3 self-tapping for the board/bosses,
   M2.5–M3 for the bezel.
