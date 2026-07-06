@@ -32,6 +32,11 @@ struct ListScreen {
   int       sel   = 0;
 };
 
+// List rows are sized as finger touch targets (~2x a text line) with a large font. Tapping a
+// row selects it; dragging up/down scrolls the list (LVGL treats a press that moves past the
+// scroll threshold as a scroll, not a click).
+static const lv_font_t *LIST_FONT = &lv_font_montserrat_28;
+
 static void listHighlight(ListScreen &L) {
   uint32_t n = lv_obj_get_child_count(L.list);
   for (uint32_t i = 0; i < n; ++i) {
@@ -40,7 +45,7 @@ static void listHighlight(ListScreen &L) {
     lv_obj_set_style_bg_opa(b, s ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
     lv_obj_set_style_text_color(b, lv_color_white(), 0);
-    lv_obj_set_style_text_font(b, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(b, LIST_FONT, 0);
     if (s) lv_obj_scroll_to_view(b, LV_ANIM_ON);
   }
 }
@@ -70,6 +75,15 @@ static void listSet(ListScreen &L, const std::vector<String> &labels, const char
   for (size_t i = 0; i < labels.size(); ++i) {
     lv_obj_t *btn = lv_list_add_button(L.list, icon, labels[i].c_str());
     lv_obj_add_flag(btn, LV_OBJ_FLAG_EVENT_BUBBLE);   // forward edge-drag gestures up to the list
+    // Big finger-friendly row: ~2x a text line, roomy vertical padding, large font.
+    lv_obj_set_style_min_height(btn, SH(16), 0);
+    lv_obj_set_style_pad_top(btn, SH(3), 0);
+    lv_obj_set_style_pad_bottom(btn, SH(3), 0);
+    lv_obj_set_style_text_font(btn, LIST_FONT, 0);
+    // Immediate "selected" feedback while a finger is down; clears if the press becomes a
+    // scroll (drag) or on release, so dragging never mis-selects.
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, lv_palette_darken(LV_PALETTE_BLUE, 2), LV_STATE_PRESSED);
     lv_obj_add_event_cb(btn, clickCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
   }
   if (L.sel >= (int)labels.size()) L.sel = 0;
