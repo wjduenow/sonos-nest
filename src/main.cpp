@@ -5,6 +5,9 @@
 
 #include <Arduino.h>
 
+// The standalone bring-up modes (SD-as-USB, audio) replace the whole app and don't link the
+// core/board/unit — so skip the app headers (and their LVGL/TJpg deps) in those builds.
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP)
 #include "core/player_state.h"
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
@@ -12,6 +15,7 @@
 #include "core/settings.h"
 #include "core/net/ota.h"      // otaHandle()
 #include "core/app.h"          // appBoot(), appStartTasks()
+#endif
 
 #ifdef PHASE0_BRINGUP
 #include "boards/crowpanel_rotary/bringup.h"
@@ -21,6 +25,9 @@
 #endif
 #ifdef SD_MSC_MODE
 #include "boards/es3c28p/sd_msc.h"
+#endif
+#ifdef AUDIO_BRINGUP
+#include "boards/es3c28p/audio_test.h"
 #endif
 
 // Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Default keeps
@@ -41,8 +48,10 @@ void setup() {
   phase1Run();   // does not return — WiFi + Sonos SOAP interactive test
 #endif
 
-#ifdef SD_MSC_MODE
+#if defined(SD_MSC_MODE)
   sdMscRun();    // does not return — expose the SD card to the host as a USB drive
+#elif defined(AUDIO_BRINGUP)
+  audioTestRun();  // does not return — play the ocean MP3 from SD through the ES8311 speaker
 #else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
@@ -54,11 +63,11 @@ void setup() {
 
   appBoot();            // WiFi + time + OTA + Sonos discovery + zone selection
   appStartTasks();      // launch ui / net / art tasks
-#endif  // SD_MSC_MODE
+#endif  // bring-up modes
 }
 
 void loop() {
-#ifndef SD_MSC_MODE
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP)
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
 #endif
