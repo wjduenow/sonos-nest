@@ -91,15 +91,19 @@ def page_back(pdf):
     # mirror X (face-down): local -X -> page +X
     hole(ax, CX - P.RESET_X, cy + P.RESET_Y, 4.0, col='#c33')                          # RESET button
     ax.text(CX - P.RESET_X, cy + P.RESET_Y - 4, 'RESET', ha='center', va='top', fontsize=6.5, color='#c33')
-    ax.add_patch(Rectangle((CX - P.SD_X - P.SD_WIN_X / 2, cy + P.SD_Y - P.SD_WIN_Z / 2), P.SD_WIN_X, P.SD_WIN_Z, fill=False, ec='#33c', lw=1.2))
-    ax.text(CX - P.SD_X, cy + P.SD_Y, 'microSD\nsocket', ha='center', va='center', fontsize=6.5, color='#33c')
+    # microSD mouth is flush with the -Y long edge -> no case opening, nothing to align
+    ax.plot([CX - P.PCB_W / 2 + 8, CX + P.PCB_W / 2 - 8], [cy - P.PCB_H / 2, cy - P.PCB_H / 2], color='#33c', lw=3)
+    ax.text(CX, cy - P.PCB_H / 2 + 3, 'microSD mouth (flush with this edge) — no case access',
+            ha='center', va='bottom', fontsize=6, color='#33c')
     ax.plot([CX + P.PCB_W / 2, CX + P.PCB_W / 2], [cy - P.USB_SLOT_Y / 2, cy + P.USB_SLOT_Y / 2], color='#c33', lw=3)
     ax.text(CX + P.PCB_W / 2 + 2, cy, 'USB-C / RESET /\nBOOT edge', ha='left', va='center', fontsize=6.5, color='#c33')
     instructions(ax, cy - P.PCB_H / 2 - 12,
-        'These positions are ESTIMATES from board photos — this page is the point.\n'
-        'Lay your board face-down on the outline; check RESET ⊕ and microSD ▭ land on\n'
-        'the real button / socket. If off: measure each from the nearest corner and\n'
-        'tell me the numbers — they are one-line params (RESET_X/Y, SD_X/Y, MIC_X/Y).')
+        'RESET_Y is measured (7.0 mm centre-to-centre from its corner hole); RESET_X is\n'
+        'still a photo estimate. Lay your board face-down on the outline and check that\n'
+        'RESET ⊕ lands on the real button. If off: measure it from the nearest corner\n'
+        'hole and tell me — RESET_X/Y and MIC_X/Y are one-line params.\n'
+        'microSD needs no alignment: its mouth is flush with the bottom edge and the\n'
+        'case has no card opening — swap the card with the board out of the case.')
     pdf.savefig(fig); plt.close(fig)
 
 # ---- page 3: USB-C panel jack ---------------------------------------------------

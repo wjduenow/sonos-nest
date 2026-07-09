@@ -120,9 +120,10 @@ a.text(0, P.PCB_H/2+2, 'board rear', color='#555', fontsize=7, ha='center')
 a.add_patch(Circle((P.RESET_X, P.RESET_Y), P.RESET_PIN_D/2+1.2, fc='#fdd', ec='#c33', lw=1.2))
 a.add_patch(Circle((P.RESET_X, P.RESET_Y), P.RESET_PIN_D/2, fc='#c33', ec='k', lw=0.5))
 a.text(P.RESET_X, P.RESET_Y-3.5, 'RESET pin', color='#c33', fontsize=7, ha='center', va='top')
-a.add_patch(Rectangle((P.SD_X-P.SD_WIN_X/2, P.SD_Y-P.SD_WIN_Z/2), P.SD_WIN_X, P.SD_WIN_Z,
-                      fc='#ddf', ec='#33c', lw=1.2))
-a.text(P.SD_X, P.SD_Y, 'microSD\naccess', color='#33c', fontsize=7, ha='center', va='center')
+# microSD: no case opening -- card mouth is flush with the -Y edge, swapped board-out.
+a.plot([-P.PCB_W/2+8, P.PCB_W/2-8], [-P.PCB_H/2, -P.PCB_H/2], color='#33c', lw=2.5)
+a.text(0, -P.PCB_H/2-2, 'microSD mouth (flush, -Y edge) — no case access',
+       color='#33c', fontsize=6, ha='center', va='top')
 a.plot([-P.PCB_W/2, -P.PCB_W/2], [-P.PCB_H/2, P.PCB_H/2], color='#c33', lw=2.5)
 a.text(-P.PCB_W/2-1.5, 0, 'USB-C / button edge', color='#c33', fontsize=6, ha='right', va='center', rotation=90)
 a.set_aspect('equal'); a.set_xlim(-56, 56); a.set_ylim(-40, 40); a.axis('off')

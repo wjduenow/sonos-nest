@@ -26,8 +26,9 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
 - viewing area 43.60 × 58.05; active area 43.20 × 57.60
 - back components up to **4.70 mm**; total module thickness **10.60 mm**
 - USB-C + RESET + BOOT on **one short (50 mm) edge**; RESET/BOOT are back-face buttons
-- **microSD** is a push-push socket **mid-board on the back** → reached from the rear,
-  not from an edge
+- **microSD** is a push-push socket on the back whose card **mouth is flush with the
+  −Y (bottom, 86 mm) long edge** → the card enters from beyond that edge, sliding up
+  under the PCB. Not reachable from the rear.
 
 ## Features
 
@@ -45,7 +46,7 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   recess** and **2 × Ø2.1 pilots at 17 mm** for the connector's M2.5 mounting screws,
   with a body/ribbon pocket behind that drops down and forward into the board cavity.
   The jack sits on the **−X side of the back, ~level with the board's USB-C** — a short
-  ribbon run and clear of the microSD window; the pocket is kept **12 mm wide** so the
+  ribbon run; the pocket is kept **12 mm wide** so the
   17 mm screws bite full plastic.
   The board's own USB-C (on the −X edge) is used only for this internal link — there is
   **no external side port**; the −X exterior is closed (`USB_SKIN` skin) with a **blind
@@ -65,9 +66,14 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   the plate has a **fingernail pull-tab** on its bottom edge — hook a nail/spudger under
   the tab and pull straight back to cam the hooks out and pop the cap off; press to reseat.
 - **RESET pin hole:** Ø3 channel bored straight back through the body to the RESET
-  button — poke a paper-clip from the rear.
-- **microSD access:** rectangular window through the rear to the socket, to push-push /
-  pull the card.
+  button (7.0 mm centre-to-centre from its corner screw hole) — poke a paper-clip from
+  the rear.
+- **microSD: no case access — by design.** The socket's card mouth is flush with the
+  board's bottom long edge, so the card enters up-incline from underneath the PCB. That
+  path is unreachable from the rear and is blocked by the face's bottom lip, so the case
+  provides **no card opening** and the back wall stays solid. Swap the card with the
+  board out of the case. (Content is expected to be written once; the unit streams from
+  Sonos in normal use.)
 - **20° recline** on a flat base for nightstand viewing.
 
 ## Screws (BOM)
@@ -104,18 +110,21 @@ switch to M3 heat-set inserts + machine screws there if you prefer repeated disa
 ## ⚠️ Verify before the final print
 
 The board **outline, holes, glass, and thickness are exact**. But the in-plane
-positions of the **USB-C, RESET, and microSD** are **estimated from the board photos**
-(the outline drawing does not dimension them). The cut-outs are drawn generously, and
+positions of the **USB-C and RESET** are **estimated from the board photos** (the
+outline drawing does not dimension them). The cut-outs are drawn generously, and
 each is a one-line parameter in `stand_params.py`:
 
 ```
 USB_Y, USB_SLOT_Y/Z        # board USB-C slot on the -X edge (right-angle male clearance)
 PANEL_Z, PANEL_*           # rear panel-mount jack: position, flange, cutout, screws
-RESET_X, RESET_Y           # RESET button, back face
-SD_X, SD_Y, SD_WIN_X/Z     # microSD socket + rear window
+RESET_X                    # RESET button along the board width  (still estimated)
+RESET_Y                    # MEASURED: 7.0 mm c-to-c from the (-39,+21) corner hole
 MIC_X, MIC_Y               # front MEMS mic port (bezel hole)
 SPK_W, SPK_L, SPK_T        # included speaker box size (measure the real one)
 ```
+
+**microSD needs no verification** — the case has no card opening, so nothing has to
+line up with the socket.
 
 Also confirm the **mic is front-ported** (the outline drawing shows a front "MIC"
 port). If it turns out to be rear-ported, move the hole from `build_bezel.py` to the
@@ -152,7 +161,7 @@ infill handles the weight.
 - **shell:** print base-down (as modeled, on the feet). The reclined face self-supports;
   the boss pilots and jack cutout print cleanly. The **speaker pocket** is a rear-loaded
   cavity — its ceiling bridges ~15 mm, so enable bridging (or a little support) for that
-  one region. The rear reset/microSD/speaker openings exit low on the back.
+  one region. The rear reset/speaker openings exit low on the back.
 - **bezel:** print flat, face-down; the countersinks are on the up-face.
 - **speaker cap:** print plate-down (arms/hooks + pull-tab up). Fit/retention tuning:
   `CAP_CLR` (looser = easier), `CAP_HOOK`/`CAP_HOOK_RAMP` (retention strength vs pry effort).

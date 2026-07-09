@@ -9,7 +9,7 @@ Features:
   * 4 mounting bosses (pilot holes) at the 42 x 78 mm hole pattern
   * 4 bezel screw posts in the top/bottom face margins
   * USB-C slot through the -X short-edge wall
-  * RESET pin hole + microSD access window bored through the back wall
+  * RESET pin hole bored through the back wall  (no microSD access -- see below)
   * flat base for a stable 20deg stance
 
     python3 build_shell.py   # -> shell.stl
@@ -217,9 +217,10 @@ DEPTH = 44.0
 def reset_pin():
     return cyl(P.RESET_PIN_D / 2, DEPTH, -DEPTH - 1.0, P.RESET_X, P.RESET_Y)
 
-def sd_window():
-    return lbox((P.SD_WIN_X, P.SD_WIN_Z, DEPTH),
-                (P.SD_X, P.SD_Y, -DEPTH / 2 - 1.0))
+# No microSD access feature: the socket's card mouth is flush with the board's -Y
+# (bottom) edge, so the card enters up-incline from below the PCB -- unreachable from
+# the rear and blocked by the bottom lip.  The card is swapped with the board out of
+# the case; the back is left solid.
 
 # ---- assemble -------------------------------------------------------------------
 def build_shell():
@@ -234,7 +235,6 @@ def build_shell():
     cuts += [to_world(p) for p in boss_pilots()]
     cuts += [to_world(p) for p in rim_pilots()]
     cuts.append(to_world(reset_pin()))
-    cuts.append(to_world(sd_window()))
     cuts += panel_mount()                                          # rear USB-C jack (world-frame)
     cuts.append(speaker_pocket())
     cuts += speaker_grille()

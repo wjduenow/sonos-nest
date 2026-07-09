@@ -14,7 +14,8 @@ All board numbers below are taken straight from that drawing / the LCDWIKI wiki:
     back parts     up to 4.70 mm tall ; total module thickness 10.60 mm
     connectors     USB-C + RESET + BOOT on ONE short (50 mm) edge
     RESET / BOOT   tact buttons on the BACK face near that edge
-    microSD        push-push socket MID-BOARD on the back (NOT on a perimeter edge)
+    microSD        push-push socket on the back; its card MOUTH is flush with the -Y
+                   (bottom, 86 mm) long edge -- the card enters from beyond that edge
 
 MOUNTING: LANDSCAPE (86 mm wide, 50 mm tall), reclined 20deg from vertical.
 Screen faces up-and-out for reading on a nightstand.
@@ -28,11 +29,12 @@ the screen normal: z=0 is the PCB front plane (== the face surface), +z points o
 toward the viewer (glass lives here), -z goes back into the body (components here).
 
   !!! POSITIONS TO VERIFY WITH CALIPERS ON A REAL BOARD !!!
-  The USB-C / RESET / microSD in-plane positions (USB_Y, RESET_XY, SD_XY) are best
-  estimates from the board photos, NOT dimensioned on the outline drawing. The
-  cut-outs are drawn generously and are single-line parameters here -- measure the
-  actual board and nudge these before the final print.  render_preview.py plots
-  them on a board map so you can eyeball the alignment.
+  The USB-C / RESET / mic in-plane positions (USB_Y, RESET_X, MIC_XY) are best
+  estimates from the board photos, NOT dimensioned on the outline drawing.  (RESET_Y
+  IS measured: 7.0 mm centre-to-centre from the (-39, +21) corner hole.)  The cut-outs
+  are drawn generously and are single-line parameters here -- measure the actual board
+  and nudge these before the final print.  render_preview.py plots them on a board map
+  so you can eyeball the alignment.  microSD needs no verification: no case opening.
 """
 
 # ---------------------------------------------------------------- board (verified)
@@ -96,13 +98,14 @@ USB_SLOT_Z  = 12.0     # male-clearance pocket height (Z: PCB + connector + body
 USB_SKIN    = 1.5      # retained -X outer skin thickness (0 = reopen the side port)
 
 RESET_X     = -38.0    # RESET tact button, back face, near the -X edge (est.)
-RESET_Y     = 15.0
+RESET_Y     = 14.0718  # 7.0 mm centre-to-centre from the (-39, +21) corner hole
 RESET_PIN_D = 3.0      # back-face pin hole Ø (paper-clip / SIM pin)
 
-SD_X        = 6.0      # microSD socket centre, mid-board on the back (est.)
-SD_Y        = 9.0
-SD_WIN_X    = 15.0     # back access window size to reach/eject the card
-SD_WIN_Z    = 12.0
+# microSD: NO case access feature.  The socket's card mouth is flush with the board's
+# -Y (bottom) long edge, so the card enters up-incline from underneath the PCB -- it
+# cannot be reached from the rear, and the face's bottom lip blocks it anyway.  The
+# card is swapped with the board out of the case, so the back wall stays solid.
+# (SD_X / SD_Y / SD_WIN_X / SD_WIN_Z removed -- there is no window to size.)
 
 # cable management: the USB-C plug enters the -X side, then the cable is routed
 # DOWN the -X face and BACK under the base to exit at the rear.  Suits a right-angle
