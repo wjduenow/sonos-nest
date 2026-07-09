@@ -54,8 +54,11 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   the board in. It leaves ~**2.5 mm** of −X clearance past the board edge, so if the plug
   is deeper, set `USB_SKIN = 0` to reopen a slim slot (or ask me to bump the −X wall out).
 - **Microphone hole:** Ø2 mm port through the bezel over the board's front-facing MEMS
-  mic (near the +X edge, opposite the connectors), with a Ø4.5 **funnel countersink** on
-  the visible face for cleaner sound pickup.
+  mic, with a Ø4.5 **funnel countersink** on the visible face for cleaner sound pickup.
+  Viewed from the front with the USB edge on the **left**, the mic sits **low on the
+  right-hand bare-PCB strip** — 8 mm up from the board's bottom edge. The port lands
+  4.12 mm from the lower-right corner screw, leaving **0.42 mm** between the Ø2 port and
+  a max-size Ø5.4 screw head, so **don't oversize that screw head**.
 - **Speaker (kit's ~20×15 box, 8 Ω / ~1 W):** **downward-firing** pocket in the solid
   back of the wedge, **loaded from the rear**, firing through an integral **grille** in
   the base. Four **feet** lift the base 4 mm for the air gap. A wire channel connects the
@@ -119,7 +122,8 @@ USB_Y, USB_SLOT_Y/Z        # board USB-C slot on the -X edge (right-angle male c
 PANEL_Z, PANEL_*           # rear panel-mount jack: position, flange, cutout, screws
 RESET_X                    # RESET button along the board width  (still estimated)
 RESET_Y                    # MEASURED: 7.0 mm c-to-c from the (-39,+21) corner hole
-MIC_X, MIC_Y               # front MEMS mic port (bezel hole)
+MIC_X                      # mic across the board width          (still estimated)
+MIC_Y                      # MEASURED: 8.0 mm up from the PCB's bottom edge
 SPK_W, SPK_L, SPK_T        # included speaker box size (measure the real one)
 ```
 

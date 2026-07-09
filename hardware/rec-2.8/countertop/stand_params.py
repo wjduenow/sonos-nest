@@ -29,9 +29,10 @@ the screen normal: z=0 is the PCB front plane (== the face surface), +z points o
 toward the viewer (glass lives here), -z goes back into the body (components here).
 
   !!! POSITIONS TO VERIFY WITH CALIPERS ON A REAL BOARD !!!
-  The USB-C / RESET / mic in-plane positions (USB_Y, RESET_X, MIC_XY) are best
-  estimates from the board photos, NOT dimensioned on the outline drawing.  (RESET_Y
-  IS measured: 7.0 mm centre-to-centre from the (-39, +21) corner hole.)  The cut-outs
+  The USB-C / RESET / mic positions along X (USB_Y, RESET_X, MIC_X) are best estimates
+  from the board photos, NOT dimensioned on the outline drawing.  (RESET_Y and MIC_Y ARE
+  measured: RESET is 7.0 mm c-to-c from the (-39, +21) corner hole; the mic is 8.0 mm up
+  from the PCB's bottom (-Y) edge.)  The cut-outs
   are drawn generously and are single-line parameters here -- measure the actual board
   and nudge these before the final print.  render_preview.py plots them on a board map
   so you can eyeball the alignment.  microSD needs no verification: no case opening.
@@ -131,10 +132,13 @@ PANEL_ROUTE_UP  = 4.0    # pocket extends this far above the jack centre
 PANEL_ROUTE_Y0  = 13.0   # pocket reaches forward to here (into the board cavity)
 
 # microphone port: MEMS mic ports through the FRONT (bare PCB strip near the +X short
-# edge, opposite the connectors) -> small hole through the BEZEL.  Position est. from
-# the board photos -- VERIFY.  If the mic turns out rear-ported, move this to the shell.
+# edge, opposite the connectors) -> small hole through the BEZEL.
+# Viewed from the front with the USB edge on the LEFT, +X is right and +Y is up, so the
+# mic sits low on the right-hand bare strip.  MIC_Y is MEASURED: 8.0 mm up from the PCB's
+# bottom (-Y) edge.  MIC_X is still a photo estimate.
+# If the mic turns out rear-ported, move this hole to the shell instead.
 MIC_X       = 40.0
-MIC_Y       = 12.0
+MIC_Y       = -17.0    # = -PCB_H/2 + 8.0  -> 8 mm from the board's bottom edge
 MIC_HOLE_D  = 2.0
 MIC_CSK_D   = 4.5      # funnel Ø on the visible bezel face (tapers to MIC_HOLE_D)
 
