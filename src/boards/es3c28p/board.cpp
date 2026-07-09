@@ -2,11 +2,12 @@
 // drivers. Like the nest's board.cpp, this file only provides boardInit() (the one-call
 // bring-up) plus the no-op rotary/knob HAL — backlightSet lives in display.cpp.
 //
-// Status: display (ILI9341V over SPI + LVGL) is implemented. Touch (FT6336 @ 0x38), SD,
-// mic, and RGB-LED are not yet wired.
+// Status: display (ILI9341V over SPI + LVGL) and touch (FT6336 @ 0x38) are implemented.
+// SD, mic, and RGB-LED are not yet wired.
 #include "core/board.h"
 #include "pins.h"
 #include "display.h"
+#include "touch.h"
 #include <Arduino.h>
 #include <Wire.h>
 
@@ -15,12 +16,15 @@ bool boardInit() {
   // The board owns the shared I2C bus (FT6336 touch + ES8311 audio codec sit on it). Begin
   // it now so the upcoming touch driver can use it; the display is SPI and doesn't need it.
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(400000);
+  // 100 kHz, not 400 kHz: the FT6336 on this board ACKs its address at 400 kHz but its
+  // multi-byte register reads come back all-zeros — the bus routing/pull-ups can't sustain
+  // fast-mode reads. 100 kHz is rock-solid for both the touch chip and the ES8311 codec.
+  Wire.setClock(100000);
 
   if (!displayInit()) { Serial.println("[board] es3c28p display init FAILED"); ok = false; }
+  touchInit();     // registers the FT6336 as an LVGL pointer indev (needs LVGL up)
 
-  // TODO(next): touchInit() — register the FT6336 as an LVGL pointer indev (needs LVGL up).
-  Serial.println("[board] es3c28p: display up; touch/SD/mic/LED not yet implemented");
+  Serial.println("[board] es3c28p: display + touch up; SD/mic/LED not yet implemented");
   return ok;
 }
 
