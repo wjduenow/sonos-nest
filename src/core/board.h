@@ -26,3 +26,11 @@ enum class KnobEvent { None, Short, Long };
 KnobEvent knobEvent();             // next queued press event; None if no knob
 bool      knobPressed();           // true once per Short press; false if no knob
 bool      knobDown();              // true while the knob is held; false if no knob
+
+// --- Local audio (optional; boards without an onboard codec/speaker are no-ops) ---
+// Play a local audio file (e.g. off the SD card) through an onboard speaker. Async: playback
+// runs on a board-owned task, so this returns as soon as it has started. Returns false if the
+// board has no audio output or playback failed to start.
+bool localAudioPlay(const char *path);
+void localAudioStop();
+bool localAudioActive();           // true while a local file is playing

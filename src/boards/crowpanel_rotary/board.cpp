@@ -24,3 +24,8 @@ bool boardInit() {
   encoderInit();   // EC11 quadrature via PCNT
   return ok;
 }
+
+// No onboard audio codec/speaker on this board — local playback is a no-op here.
+bool localAudioPlay(const char * /*path*/) { return false; }
+void localAudioStop() {}
+bool localAudioActive() { return false; }

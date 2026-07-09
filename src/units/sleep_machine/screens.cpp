@@ -13,6 +13,7 @@
 #include "core/player_state.h"
 #include "core/library.h"
 #include "core/settings.h"
+#include "core/board.h"        // localAudioPlay/Stop/Active (option 3)
 #include "ui_scale.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -22,6 +23,9 @@
 static const char *TARGET_ROOM    = "Nursery";
 static const char *SLEEP_PLAYLIST = "Sleep";   // exact saved-playlist title (SQ:0)
 static const uint8_t SLEEP_VOLUME = 45;
+// The same ocean track copied onto the microSD (played locally for "Play on Device").
+static const char *LOCAL_OCEAN_FILE =
+    "/Ocean Waves Crashing - Relaxing Sounds - Calming Relaxation Music For Sleeping - 1 Hour.mp3";
 
 // Palette (deep-night theme, easy on the eyes in a dark nursery).
 static const uint32_t COL_BG     = 0x0A1428;   // near-black navy
@@ -34,9 +38,10 @@ enum UiState { ST_HOME, ST_STARTING, ST_PLAYING };
 static UiState  s_state        = ST_HOME;
 static uint32_t s_startMs       = 0;      // when the cloud sequence began (for timeout)
 static bool     s_playRequested = false;  // have we posted requestPlay for this attempt yet
+static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 
 static lv_obj_t *s_home, *s_starting, *s_playing;
-static lv_obj_t *s_playTitle, *s_playStatus;
+static lv_obj_t *s_playTitle, *s_playSub, *s_playStatus;
 static lv_obj_t *s_toast;
 static uint32_t  s_toastUntil = 0;
 
@@ -67,6 +72,7 @@ static String prettyTitle(const String &t) {
 static void gotoHome() {
   s_state = ST_HOME;
   s_playRequested = false;
+  s_localMode = false;
   showOnly(s_home);
 }
 
@@ -78,10 +84,22 @@ static void gotoStarting() {
 }
 
 static void gotoPlaying(const String &title, uint8_t vol) {
+  s_localMode = false;
   lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
+  lv_label_set_text(s_playSub, "Nursery");
   char buf[48];
   snprintf(buf, sizeof(buf), LV_SYMBOL_PLAY "  Playing   ·   Vol %u", (unsigned)vol);
   lv_label_set_text(s_playStatus, buf);
+  s_state = ST_PLAYING;
+  showOnly(s_playing);
+}
+
+// Local playback (option 3): ocean track off the SD card through the onboard speaker.
+static void gotoLocalPlaying() {
+  s_localMode = true;
+  lv_label_set_text(s_playTitle, "Ocean Waves");
+  lv_label_set_text(s_playSub, "On device");
+  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  Playing   ·   Local");
   s_state = ST_PLAYING;
   showOnly(s_playing);
 }
@@ -98,8 +116,18 @@ static void cloudCb(lv_event_t *) {
 }
 
 static void localCb(lv_event_t *)  { showToast("Play from Local — coming soon"); }
-static void deviceCb(lv_event_t *) { showToast("Play on Device — coming soon"); }
-static void stopCb(lv_event_t *)   { if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); } }
+
+// Play on Device: stream the ocean MP3 from the SD card through the onboard speaker. The first
+// tap lazily mounts the SD + brings up the codec, so it can block briefly.
+static void deviceCb(lv_event_t *) {
+  if (localAudioPlay(LOCAL_OCEAN_FILE)) gotoLocalPlaying();
+  else                                  showToast("No SD card / audio unavailable");
+}
+
+static void stopCb(lv_event_t *) {
+  if (s_localMode) { localAudioStop(); gotoHome(); }
+  else if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); }
+}
 
 // --- widget builders -------------------------------------------------------
 
@@ -165,7 +193,7 @@ void uiInit() {
   // PLAYING — live status + Stop.
   s_playing   = makePage(scr);
   s_playTitle = makeLabel(s_playing, "Ocean Waves", &lv_font_montserrat_28, lv_color_to_u32(lv_color_white()));
-  makeLabel(s_playing, "Nursery", &lv_font_montserrat_20, COL_SUBTLE);
+  s_playSub    = makeLabel(s_playing, "Nursery", &lv_font_montserrat_20, COL_SUBTLE);
   s_playStatus = makeLabel(s_playing, LV_SYMBOL_PLAY "  Playing", &lv_font_montserrat_20, COL_SUBTLE);
   makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
 
@@ -206,7 +234,8 @@ void uiTick() {
 
   switch (s_state) {
     case ST_HOME:
-      // Reflect playback started elsewhere (e.g. the Sonos app) so status stays honest.
+      // Reflect Sonos playback started elsewhere (e.g. the app) so status stays honest.
+      // (Don't do this while a local track is playing — that path owns ST_PLAYING.)
       if (tr == TransportState::Playing) gotoPlaying(title, vol);
       break;
 
@@ -228,8 +257,13 @@ void uiTick() {
     }
 
     case ST_PLAYING:
-      if (tr == TransportState::Stopped || tr == TransportState::Paused) gotoHome();
-      else gotoPlaying(title, vol);   // keep the live title/volume fresh
+      if (s_localMode) {
+        if (!localAudioActive()) gotoHome();   // local track ended or was stopped
+      } else if (tr == TransportState::Stopped || tr == TransportState::Paused) {
+        gotoHome();
+      } else {
+        gotoPlaying(title, vol);   // keep the live Sonos title/volume fresh
+      }
       break;
   }
 }
