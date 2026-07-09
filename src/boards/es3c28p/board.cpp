@@ -1,37 +1,28 @@
-// ES3C28P board — implements the board HAL (core/board.h). STUB.
+// ES3C28P board — implements the board HAL (core/board.h) by delegating to this board's
+// drivers. Like the nest's board.cpp, this file only provides boardInit() (the one-call
+// bring-up) plus the no-op rotary/knob HAL — backlightSet lives in display.cpp.
 //
-// Real bring-up is deferred: ILI9341V (4-wire SPI, 240x320) + FT6336G touch (I2C 0x38) +
-// microSD + MEMS mic + RGB-LED (IO42). For now boardInit() brings up just enough LVGL — a
-// headless display with a throwaway flush — so the sleep_machine unit compiles, links, and
-// its screens can be built. Nothing reaches a physical panel yet.
+// Status: display (ILI9341V over SPI + LVGL) is implemented. Touch (FT6336 @ 0x38), SD,
+// mic, and RGB-LED are not yet wired.
 #include "core/board.h"
 #include "pins.h"
+#include "display.h"
 #include <Arduino.h>
-#include <lvgl.h>
-
-// Small partial draw buffer (RGB565 => 2 bytes/px), matching the nest's ~1/16-screen size.
-static uint8_t s_buf[LCD_WIDTH * 20 * 2];
-
-static void flushCb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t * /*px*/) {
-  // TODO: push pixels to the ILI9341 over SPI (Arduino_GFX Arduino_ESP32SPI +
-  // Arduino_ILI9341, available on the pinned Arduino_GFX v1.3.1).
-  lv_display_flush_ready(disp);
-}
-
-static uint32_t tickCb() { return millis(); }
+#include <Wire.h>
 
 bool boardInit() {
-  lv_init();
-  lv_tick_set_cb(tickCb);
-  lv_display_t *disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
-  lv_display_set_flush_cb(disp, flushCb);
-  lv_display_set_buffers(disp, s_buf, nullptr, sizeof(s_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
-  // TODO: Wire.begin() + FT6336G touch as an LVGL pointer indev; backlight; SD; mic; LED.
-  Serial.println("[board] es3c28p STUB — display/touch not yet implemented");
-  return true;
-}
+  bool ok = true;
+  // The board owns the shared I2C bus (FT6336 touch + ES8311 audio codec sit on it). Begin
+  // it now so the upcoming touch driver can use it; the display is SPI and doesn't need it.
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(400000);
 
-void backlightSet(uint8_t /*pct*/) { /* TODO: LEDC PWM on the ES3C28P backlight pin */ }
+  if (!displayInit()) { Serial.println("[board] es3c28p display init FAILED"); ok = false; }
+
+  // TODO(next): touchInit() — register the FT6336 as an LVGL pointer indev (needs LVGL up).
+  Serial.println("[board] es3c28p: display up; touch/SD/mic/LED not yet implemented");
+  return ok;
+}
 
 // No rotary encoder / knob on this board — the touch-first UX drives everything.
 int32_t   encoderDelta() { return 0; }
