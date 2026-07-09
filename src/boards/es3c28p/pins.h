@@ -17,9 +17,15 @@
 //   - Extras:  microSD (SDIO 4-bit), addressable WS2812 RGB LED on IO42, battery ADC
 #pragma once
 
-// --- Panel geometry (portrait native; rotation set in the display driver) ---
+// --- Panel geometry (portrait NATIVE; the driver rotates to landscape) ---
 #define LCD_WIDTH   240
 #define LCD_HEIGHT  320
+
+// Display rotation (Arduino_GFX convention). The sleep-machine unit mounts LANDSCAPE in its
+// nightstand stand (86mm wide x 50mm tall — see hardware/rec-2.8/countertop/), so the panel
+// runs rotated: logical resolution is 320x240. Both display.cpp and touch.cpp key off this
+// so the touch axes track the image. Flip 1<->3 if the image/stand ends up upside down.
+#define DISPLAY_ROTATION  3
 // ILI9341V on this board is wired for inverted colors: the display init must enable
 // color inversion (Arduino_GFX: pass `true` for IPS/invert; ESPHome uses invert_colors:true).
 // If reds look cyan / the image is a photonegative, this is the flag to flip.

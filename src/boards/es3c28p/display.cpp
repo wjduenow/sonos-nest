@@ -31,10 +31,18 @@ static const uint8_t  kBacklightBits = 8;       // 0-255 duty
 static Arduino_DataBus *s_bus = nullptr;
 static Arduino_GFX     *s_gfx = nullptr;
 
+// Logical (rotated) resolution. At DISPLAY_ROTATION 1/3 the panel is landscape, so the LVGL
+// display and draw buffers are sized 320x240, not the native 240x320.
+#if (DISPLAY_ROTATION & 1)
+  static const uint16_t DISP_W = LCD_HEIGHT, DISP_H = LCD_WIDTH;   // landscape
+#else
+  static const uint16_t DISP_W = LCD_WIDTH,  DISP_H = LCD_HEIGHT;  // portrait
+#endif
+
 // --- LVGL draw buffers (partial; ~1/10 screen each, double-buffered) ---
 // RGB565 => 2 bytes/px. In LVGL 9 sizeof(lv_color_t)!=2, so size in raw bytes.
-static const uint32_t kBufLines = LCD_HEIGHT / 10;
-static const uint32_t kBufBytes = LCD_WIDTH * kBufLines * (LV_COLOR_DEPTH / 8);
+static const uint32_t kBufLines = DISP_H / 10;
+static const uint32_t kBufBytes = DISP_W * kBufLines * (LV_COLOR_DEPTH / 8);
 static uint8_t *s_buf1 = nullptr;
 static uint8_t *s_buf2 = nullptr;
 static lv_display_t *s_disp = nullptr;
@@ -61,7 +69,7 @@ bool displayInit() {
   //    chip reset (PIN_LCD_RST == -1 == GFX_NOT_DEFINED). Rotation 0 = portrait 240x320.
   //    Final arg is the ILI9341 "ips"/invert flag — this board needs color inversion on.
   s_bus = new Arduino_ESP32SPI(PIN_LCD_DC, PIN_LCD_CS, PIN_LCD_SCLK, PIN_LCD_MOSI, PIN_LCD_MISO);
-  s_gfx = new Arduino_ILI9341(s_bus, PIN_LCD_RST, 0 /* rotation */, LCD_INVERT_COLORS /* ips/invert */);
+  s_gfx = new Arduino_ILI9341(s_bus, PIN_LCD_RST, DISPLAY_ROTATION, LCD_INVERT_COLORS /* ips/invert */);
   s_gfx->begin();          // Arduino_GFX::begin() returns void in 1.3.1 (can't check it)
   s_gfx->fillScreen(BLACK);
 
@@ -77,7 +85,7 @@ bool displayInit() {
     return false;
   }
 
-  s_disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
+  s_disp = lv_display_create(DISP_W, DISP_H);
   lv_display_set_flush_cb(s_disp, flushCb);
   lv_display_set_buffers(s_disp, s_buf1, s_buf2, kBufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   return true;
@@ -90,7 +98,7 @@ void backlightSet(uint8_t pct) {
 
 void displayTestPattern() {
   if (!s_gfx) return;
-  int16_t hw = LCD_WIDTH / 2, hh = LCD_HEIGHT / 2;
+  int16_t hw = s_gfx->width() / 2, hh = s_gfx->height() / 2;
   s_gfx->fillRect(0,  0,  hw, hh, RED);
   s_gfx->fillRect(hw, 0,  hw, hh, GREEN);
   s_gfx->fillRect(0,  hh, hw, hh, BLUE);

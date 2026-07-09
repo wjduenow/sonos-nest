@@ -28,11 +28,20 @@ bool touchRead(uint16_t &x, uint16_t &y) {
   uint8_t d[5];
   if (!readRegs(FT6336_REG_TDSTATUS, d, sizeof(d))) return false;
   if ((d[0] & 0x0F) == 0) return false;  // no finger down
-  x = ((uint16_t)(d[1] & 0x0F) << 8) | d[2];
-  y = ((uint16_t)(d[3] & 0x0F) << 8) | d[4];
-  // Panel runs at rotation 0 (native 240x320), so the FT6336's coordinates map 1:1 —
-  // verified on hardware (center press -> ~120,160). If a future rotation change makes taps
-  // land mirrored/rotated, transform here to match (e.g. y = (LCD_HEIGHT-1)-y).
+  // Raw coordinates are in the panel's NATIVE portrait frame (x:0..239, y:0..319).
+  uint16_t xn = ((uint16_t)(d[1] & 0x0F) << 8) | d[2];
+  uint16_t yn = ((uint16_t)(d[3] & 0x0F) << 8) | d[4];
+  // Rotate to match the display's DISPLAY_ROTATION so taps line up with the image. The two
+  // landscape orientations (1 and 3) are 180° apart; if taps land inverted, flip the define.
+#if   DISPLAY_ROTATION == 1
+  x = yn;                     y = (LCD_WIDTH  - 1) - xn;   // 320x240 landscape
+#elif DISPLAY_ROTATION == 3
+  x = (LCD_HEIGHT - 1) - yn;  y = xn;                      // 320x240 landscape (flipped)
+#elif DISPLAY_ROTATION == 2
+  x = (LCD_WIDTH  - 1) - xn;  y = (LCD_HEIGHT - 1) - yn;   // 240x320 portrait (flipped)
+#else
+  x = xn;                     y = yn;                      // 240x320 portrait (native)
+#endif
   return true;
 }
 
