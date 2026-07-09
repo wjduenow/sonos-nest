@@ -19,6 +19,9 @@
 #ifdef PHASE1_TEST
 #include "boards/crowpanel_rotary/phase1_test.h"
 #endif
+#ifdef SD_MSC_MODE
+#include "boards/es3c28p/sd_msc.h"
+#endif
 
 // Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Default keeps
 // non-env builds working.
@@ -38,6 +41,9 @@ void setup() {
   phase1Run();   // does not return — WiFi + Sonos SOAP interactive test
 #endif
 
+#ifdef SD_MSC_MODE
+  sdMscRun();    // does not return — expose the SD card to the host as a USB drive
+#else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
 
@@ -48,10 +54,13 @@ void setup() {
 
   appBoot();            // WiFi + time + OTA + Sonos discovery + zone selection
   appStartTasks();      // launch ui / net / art tasks
+#endif  // SD_MSC_MODE
 }
 
 void loop() {
+#ifndef SD_MSC_MODE
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
+#endif
   vTaskDelay(pdMS_TO_TICKS(20));
 }
