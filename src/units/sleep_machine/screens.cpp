@@ -41,6 +41,7 @@ static UiState  s_state        = ST_HOME;
 static uint32_t s_startMs       = 0;      // when the cloud sequence began (for timeout)
 static bool     s_playRequested = false;  // have we posted requestPlay for this attempt yet
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
+static String   s_sonosTitle;             // known title for a local-stream-on-Sonos ("" = use live)
 
 static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks;
 static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
@@ -98,20 +99,27 @@ static void gotoHome() {
   s_state = ST_HOME;
   s_playRequested = false;
   s_localMode = false;
+  s_sonosTitle = "";
   showOnly(s_home);
+}
+
+// Title for the Sonos now-playing screen: the known local-stream track name (option 2) when
+// set, else the live Sonos-reported title (option 1 / playback started elsewhere).
+static String sonosDisplayTitle(const String &liveTitle) {
+  return s_sonosTitle.length() ? s_sonosTitle : prettyTitle(liveTitle);
 }
 
 static void gotoStarting(const String &what) {
   s_state = ST_STARTING;
   s_startMs = millis();
   s_playRequested = false;
-  lv_label_set_text(s_startingLabel, (String("Starting ") + what + "\xE2\x80\xA6").c_str());
+  lv_label_set_text(s_startingLabel, (String("Starting ") + what + "...").c_str());
   showOnly(s_starting);
 }
 
 static void gotoPlaying(const String &title, uint8_t vol) {
   s_localMode = false;
-  lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
+  lv_label_set_text(s_playTitle, sonosDisplayTitle(title).c_str());
   lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
@@ -134,6 +142,7 @@ static void cloudCb(lv_event_t *) {
   // 2) browse the saved playlists; uiTick picks "Sleep" from the results and plays it, which
   //    (PLAY_PLAYLIST) clears the queue, enqueues, and starts playback.
   library::requestBrowse("SQ:", library::PLAY_PLAYLIST);
+  s_sonosTitle = "";                 // cloud shows the live Sonos title (the Sleep playlist)
   gotoStarting("Ocean Waves");
 }
 
@@ -150,6 +159,7 @@ static void localCb(lv_event_t *) {
     g_pending.localStreamTitle = trackDisplayName();
     stateUnlock();
   }
+  s_sonosTitle = trackDisplayName();   // show the real track name (Sonos caches by URL)
   gotoStarting(trackDisplayName());
 }
 
@@ -299,7 +309,7 @@ static void openRooms() {
   String cur;
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
   const std::vector<sonos::Zone> &zs = sonos::zones();
-  if (zs.empty()) makeLabel(s_roomsList, "Searching\xE2\x80\xA6", &lv_font_montserrat_20, COL_SUBTLE);
+  if (zs.empty()) makeLabel(s_roomsList, "Searching...", &lv_font_montserrat_20, COL_SUBTLE);
   for (size_t i = 0; i < zs.size(); ++i) {
     lv_obj_t *b = makeButton(s_roomsList, zs[i].name.c_str(),
                              zs[i].name == cur ? COL_CLOUD : COL_SLATE, roomClickCb);
@@ -326,7 +336,7 @@ static void kbReadyCb(lv_event_t *) {
   if (stateLock()) { g_pending.wifiSsid = s_pickedSsid; g_pending.wifiPass = pw; stateUnlock(); }
   s_wifiConnecting = true;
   lv_obj_clean(s_wifiList);
-  makeLabel(s_wifiList, (String("Connecting to ") + s_pickedSsid + "\xE2\x80\xA6").c_str(),
+  makeLabel(s_wifiList, (String("Connecting to ") + s_pickedSsid + "...").c_str(),
             &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
   showOnly(s_wifi);
 }
@@ -401,7 +411,7 @@ void uiInit() {
   // STARTING — brief transitional state while playback is enqueued (label set per track).
   s_starting = makePage(scr);
   makeLabel(s_starting, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, COL_CLOUD);
-  s_startingLabel = makeLabel(s_starting, "Starting\xE2\x80\xA6", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  s_startingLabel = makeLabel(s_starting, "Starting...", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
   lv_obj_set_width(s_startingLabel, SW(92));
   lv_label_set_long_mode(s_startingLabel, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(s_startingLabel, LV_TEXT_ALIGN_CENTER, 0);
@@ -596,7 +606,7 @@ void uiTick() {
   if (s_wifiConnecting) {
     int r = wifiApplyResult();
     if (r == WIFI_APPLY_OK)   { s_wifiConnecting = false; showToast("Wi-Fi connected"); openSettings(); }
-    else if (r == WIFI_APPLY_FAIL) { s_wifiConnecting = false; showToast("Couldn\xE2\x80\x99t connect"); openWifi(); }
+    else if (r == WIFI_APPLY_FAIL) { s_wifiConnecting = false; showToast("Couldn't connect"); openWifi(); }
   }
 
   switch (s_state) {
@@ -615,11 +625,11 @@ void uiTick() {
             if (labels[i] == SLEEP_PLAYLIST) { idx = i; break; }
           }
           if (idx >= 0) { library::requestPlay(idx); s_playRequested = true; }
-          else          { showToast("\xE2\x80\x98Sleep\xE2\x80\x99 playlist not found"); gotoHome(); }
+          else          { showToast("'Sleep' playlist not found"); gotoHome(); }
         }
       }
       if (tr == TransportState::Playing)        gotoPlaying(title, vol);
-      else if (now - s_startMs > 20000)         { showToast("Couldn\xE2\x80\x99t start playback"); gotoHome(); }
+      else if (now - s_startMs > 20000)         { showToast("Couldn't start playback"); gotoHome(); }
       break;
     }
 
@@ -631,7 +641,7 @@ void uiTick() {
       } else {
         // Keep the live Sonos title fresh, and sync the slider to the speaker's volume —
         // but not while the user is dragging it or just did (so we don't fight the drag).
-        lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
+        lv_label_set_text(s_playTitle, sonosDisplayTitle(title).c_str());
         bool dragging = lv_obj_has_state(s_volSlider, LV_STATE_PRESSED);
         if (!dragging && now - s_volTouchedMs > 1500 &&
             lv_slider_get_value(s_volSlider) != vol) {
