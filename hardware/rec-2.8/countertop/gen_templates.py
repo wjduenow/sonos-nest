@@ -106,25 +106,26 @@ def page_back(pdf):
         'case has no card opening — swap the card with the board out of the case.')
     pdf.savefig(fig); plt.close(fig)
 
-# ---- page 3: USB-C panel jack ---------------------------------------------------
-def page_jack(pdf):
-    fig, ax = new_page('USB-C panel jack — connector fit check', 'hold the JUXINICE female end against this outline')
+# ---- page 3: USB-C side port -----------------------------------------------------
+def page_usb(pdf):
+    fig, ax = new_page('USB-C side port — plug fit check', 'hold your USB-C plug against this slot (it is on the -X / left wall)')
     ruler(ax, PH - 32); cy = 170
-    rrect(ax, CX, cy, P.PANEL_FLANGE_W, P.PANEL_FLANGE_H, P.PANEL_FLANGE_H / 2, fill=False, ec='#333', lw=1.2)
-    ax.text(CX, cy + P.PANEL_FLANGE_H / 2 + 2, f'flange {P.PANEL_FLANGE_W} × {P.PANEL_FLANGE_H}', ha='center', fontsize=7)
-    rrect(ax, CX, cy, 9.0, 3.5, 1.75, fill=False, ec='#000', lw=1.0)                    # receptacle 9x3.5
-    ax.text(CX, cy - 4.5, 'port 9 × 3.5', ha='center', va='top', fontsize=6.5)
-    for sx in (-1, 1):
-        hole(ax, CX + sx * P.PANEL_SCREW_DX / 2, cy, 2.5, col='#c33')
-    ax.text(CX, cy + 9, f'screws Ø2.5 @ {P.PANEL_SCREW_DX} mm', ha='center', fontsize=6.5, color='#c33')
-    instructions(ax, cy - 18,
-        'Hold the panel-mount (female) end of the JUXINICE cable here. The flange,\n'
-        'the 9 × 3.5 receptacle, and the two Ø2.5 holes at 17 mm should all match.\n'
-        'If they don\'t, tell me the real flange size / screw spacing (PANEL_* params).')
+    rrect(ax, CX, cy, P.USB_SLOT_Y, P.USB_SLOT_Z, 1.5, fill=False, ec='#e07000', lw=1.6)
+    ax.text(CX, cy + P.USB_SLOT_Z / 2 + 2,
+            f'slot {P.USB_SLOT_Y} (along the board) × {P.USB_SLOT_Z} (into the case)',
+            ha='center', fontsize=7, color='#e07000')
+    rrect(ax, CX, cy, 8.9, 2.6, 1.3, fill=False, ec='#000', lw=1.0)     # a bare USB-C plug tip
+    ax.text(CX, cy - 3.8, 'bare USB-C tip 8.9 × 2.6', ha='center', va='top', fontsize=6.5)
+    instructions(ax, cy - 16,
+        'The rear panel-mount jack is GONE — a normal USB-C cable now plugs straight\n'
+        'into the board through this slot in the left (-X) wall. Hold your actual plug\n'
+        'here, overmold and all: it must clear the outer rectangle, not just the tip.\n'
+        'A right-angle plug keeps the stand tight to the wall; a straight one sticks\n'
+        'out ~18 mm. If it fouls, widen USB_SLOT_Y / USB_SLOT_Z in stand_params.py.')
     pdf.savefig(fig); plt.close(fig)
 
 with PdfPages('templates.pdf') as pdf:
     page_front(pdf)
     page_back(pdf)
-    page_jack(pdf)
+    page_usb(pdf)
 print('wrote templates.pdf')

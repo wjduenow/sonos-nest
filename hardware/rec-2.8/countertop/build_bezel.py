@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
 Build bezel.stl -- the screwed-on front frame that covers the board edges + corner
-screws and frames the screen.  It rests on the glass front (glass is 4.30 mm proud
-of the PCB) and on 4 posts in the shell's face margins; 4 countersunk screws pull
-it down onto those posts, trapping the board.
+screws and frames the screen.
+
+The GLASS SITS FLUSH WITH THE BEZEL TOP.  The frame is exactly GLASS_PROUD thick and
+lands directly on the shell face (== the PCB front plane), so its top face ends level
+with the glass.  Its opening is the glass outline, so the screen passes THROUGH the
+frame; the frame lands on the bare PCB strips at |x| > GLASS_W/2, clamping the board.
 
   * outer: rounded rectangle matching the shell face top
-  * opening: viewing area + a small margin (exposes the screen, hides the glass rim)
-  * 4 countersunk screw holes over the shell's bezel posts
+  * opening: glass outline + GLASS_CLR per side (screen passes through, ends flush)
+  * 4 countersunk screw holes into the shell's face-margin pilots
+  * 4 blind reliefs in the underside for the proud board-screw heads
+  * mic port: through-hole + funnel countersink on the visible face
 
     python3 build_bezel.py   # -> bezel.stl  (exported lying flat for printing)
 
@@ -44,10 +49,13 @@ def countersink(head_d, shank_d, thk):
     return union([shank, c], engine='manifold')
 
 def build_bezel(world=False):
+    """Frame is BEZEL_T (== GLASS_PROUD) thick, sitting on the face at local z=0, so its
+    top face ends level with the glass.  The opening is the GLASS outline (+GLASS_CLR per
+    side) -- the screen passes through the frame rather than being capped by it."""
     outer = extrude_polygon(rrect(P.BEZEL_OUT_X, P.BEZEL_OUT_Y, P.BEZEL_R), P.BEZEL_T)
-    open_hx = P.VA_W / 2 + P.OPEN_MARGIN
-    open_hy = P.VA_H / 2 + P.OPEN_MARGIN
-    opening = extrude_polygon(rrect(open_hx, open_hy, 2.0), P.BEZEL_T + 1.0)
+    open_hx = P.GLASS_W / 2 + P.GLASS_CLR
+    open_hy = P.GLASS_H / 2 + P.GLASS_CLR
+    opening = extrude_polygon(rrect(open_hx, open_hy, 1.0), P.BEZEL_T + 1.0)
     opening.apply_translation([0, 0, -0.5])
     frame = difference([outer, opening], engine='manifold')
     cuts = []
@@ -56,14 +64,30 @@ def build_bezel(world=False):
             h = countersink(P.BEZEL_SCREW_HEAD, 3.2, P.BEZEL_T)
             h.apply_translation([sx * P.POST_X, sy * P.POST_Y, 0])
             cuts.append(h)
+    # blind reliefs in the UNDERSIDE for the 4 board-screw heads, which stand proud of
+    # the PCB front face and now sit under the frame (open at z=0, up to HEAD_RELIEF_DEPTH).
+    #
+    # NOTE: the lower-right relief (+39,-21) sits only 4.12 mm from the mic port (40,-17),
+    # leaving a 0.12 mm nominal wall between them.  That is below one extrusion width, so
+    # the two WILL merge when sliced.  It is harmless -- the port still lands over the mic
+    # (which is 4.12 mm out, well clear of the Ø6 relief) and the relief is open to the PCB
+    # anyway.  It cannot be designed out: with the mic 4 mm above the screw, a Ø5.4 head
+    # relief and a Ø2 port simply overlap.  If MIC_X turns out to be >= 41.65 (it is still
+    # a photo estimate) the wall grows past 0.8 mm and they separate cleanly.
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            r = cylinder(radius=P.HEAD_RELIEF_D / 2,
+                         height=P.HEAD_RELIEF_DEPTH + 1.0, sections=SEG)
+            r.apply_translation([sx * P.HOLE_DX / 2, sy * P.HOLE_DY / 2,
+                                 (P.HEAD_RELIEF_DEPTH + 1.0) / 2 - 1.0])
+            cuts.append(r)
     # microphone port: through-hole + a funnel countersink on the visible front face
     mic = countersink(P.MIC_CSK_D, P.MIC_HOLE_D, P.BEZEL_T)
     mic.apply_translation([P.MIC_X, P.MIC_Y, 0])
     cuts.append(mic)
     frame = difference([frame] + cuts, engine='manifold')
     if world:
-        # lift onto the glass plane (z_local = GLASS_PROUD) and place on the face
-        frame.apply_translation([0, 0, P.GLASS_PROUD])
+        # underside lands on the face plane (local z = 0) -> top is flush with the glass
         frame.apply_transform(_M)
     return frame
 

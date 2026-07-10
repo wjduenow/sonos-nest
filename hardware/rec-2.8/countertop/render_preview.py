@@ -77,16 +77,13 @@ a.add_patch(Rectangle((sy0, P.GRILLE_T), sy1-sy0, P.SPK_T, fc='#d9c8ee', ec='#63
 a.add_patch(Rectangle((sy0, 0), sy1-sy0, P.GRILLE_T, fc='none', ec='#639', hatch='||||', lw=0.5, zorder=3))
 a.annotate('', xy=((sy0+sy1)/2, -P.FOOT_H+0.5), xytext=((sy0+sy1)/2, 0.5),
            arrowprops=dict(arrowstyle='-|>', color='#639', lw=1.4))
-a.text(sy0-1, P.SPK_T/2+1, 'speaker\n(down-fire)', color='#639', fontsize=7, ha='right', va='center')
-# rear panel-mount USB-C jack + internal ribbon route (schematic, y-z)
+a.text(sy0-1, P.SPK_SLOT_H/2+1, 'speaker\n(down-fire)', color='#639', fontsize=7, ha='right', va='center')
+# open USB-C side port: the cable plugs straight into the board's own USB-C on the -X edge
 pu = w(-P.PCB_W/2, P.USB_Y, -P.PCB_T/2)                 # board USB (side edge)
-a.add_patch(Rectangle((P.BACK_Y-1, P.PANEL_Z-P.PANEL_FLANGE_H/2), 3.0, P.PANEL_FLANGE_H,
-                      fc='#c33', ec='#900', lw=0.8, zorder=6))
-a.text(P.BACK_Y+3, P.PANEL_Z, 'USB-C jack\n(back panel)', color='#c33', fontsize=7, ha='left', va='center')
-route = [(P.BACK_Y-1, P.PANEL_Z), (P.PANEL_ROUTE_Y0+3, P.PANEL_Z), (pu[1]+3, pu[2])]
-a.plot([p[0] for p in route], [p[1] for p in route], color='#e07000', lw=1.6, ls='--', zorder=6)
-a.plot(pu[1]+3, pu[2], marker='o', color='#e07000', ms=5, zorder=6)
-a.text((P.PANEL_ROUTE_Y0+P.BACK_Y)/2, P.PANEL_Z+3.5, 'ribbon', color='#e07000', fontsize=7, ha='center')
+a.plot(pu[1], pu[2], marker='o', color='#e07000', ms=6, zorder=6)
+a.annotate('USB-C side port\n(cable plugs in on -X)', xy=(pu[1], pu[2]), xytext=(pu[1]+14, pu[2]+9),
+           color='#e07000', fontsize=7, ha='left', va='center',
+           arrowprops=dict(arrowstyle='->', color='#e07000'))
 a.set_aspect("equal"); a.set_xlim(-10, P.BACK_Y+6); a.set_ylim(-8, 70); a.axis('off')
 a.legend(loc='upper right', fontsize=7, framealpha=0.9)
 
@@ -98,8 +95,9 @@ rect(0, 0, P.PCB_W, P.PCB_H, fc='none', ec='#159', lw=1.4)
 a.text(0, P.PCB_H/2+2, 'PCB 86×50', color='#159', fontsize=7, ha='center')
 rect(0, 0, P.GLASS_W, P.GLASS_H, fc='#dff0df', ec='#2a2', lw=0.8)
 rect(0, 0, P.VA_W, P.VA_H, fc='#111', ec='#111')
-rect(0, 0, P.VA_W+2*P.OPEN_MARGIN, P.VA_H+2*P.OPEN_MARGIN, fc='none', ec='#fa0', lw=1.6, ls='--')
-a.text(0, 0, 'screen\nopening', color='#fa0', fontsize=7, ha='center', va='center')
+rect(0, 0, P.GLASS_W+2*P.GLASS_CLR, P.GLASS_H+2*P.GLASS_CLR, fc='none', ec='#fa0', lw=1.6, ls='--')
+a.text(0, -P.VA_H/2-4, 'bezel opening = glass + 0.5/side (glass sits FLUSH)',
+       color='#fa0', fontsize=6.5, ha='center', va='top')
 for sx in (-1, 1):
     for sy in (-1, 1):
         a.add_patch(Circle((sx*P.HOLE_DX/2, sy*P.HOLE_DY/2), P.HOLE_D/2, fc='#bbb', ec='k', lw=0.6))

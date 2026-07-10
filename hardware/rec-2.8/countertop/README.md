@@ -7,7 +7,7 @@ controller). Two printed parts:
 | part | file | what it is |
 |------|------|-----------|
 | **shell** | `shell.stl` | wedge body; board drops into a reclined pocket and screws to 4 bosses |
-| **bezel** | `bezel.stl` | screwed-on front frame that covers the board edges + screws and frames the screen |
+| **bezel** | `bezel.stl` | screwed-on front frame; the glass sits **flush** with its top face |
 | **speaker cap** | `speaker_cap.stl` | snap-in cap that closes the rear speaker load port and backs the speaker in |
 
 Orientation: **landscape** (86 mm wide, 50 mm tall), **reclined 20° from vertical**.
@@ -19,10 +19,11 @@ Orientation: **landscape** (86 mm wide, 50 mm tall), **reclined 20° from vertic
 All numbers come from the QDtech **"LCM OUTLINE" drawing** (`ES3C28P_Size.pdf`,
 V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
 
-- PCB **86.0 × 50.0 × 1.6 mm**, corner radius **R3.5**
+- PCB **86.0 × 50.0 × 1.62 mm** (thickness measured), corner radius **R3.5**
 - **4× Ø3.2** mounting holes on a **42 × 78 mm** rectangle (4 mm in from each edge),
   Ø5.6 keep-out ring around each
-- front glass protrudes **4.30 mm**; glass 50 × 69.2 mm (full board width)
+- board + screen stack is **6.00 mm** back-face-to-glass, so the glass stands
+  **4.38 mm** proud of the PCB front; glass **70 × 50 mm** (full board height)
 - viewing area 43.60 × 58.05; active area 43.20 × 57.60
 - back components up to **4.70 mm**; total module thickness **10.60 mm**
 - USB-C + RESET + BOOT on **one short (50 mm) edge**; RESET/BOOT are back-face buttons
@@ -35,24 +36,24 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
 - **Board mount:** 4 self-tapping screws (M3, ~10 mm) from the front through the PCB
   corner holes into printed **bosses** (Ø2.6 pilot). Heads sit on the bare PCB corners,
   hidden by the bezel.
-- **Bezel:** sits **flush** on a continuous raised **rim** around the screen (the rim
-  top is level with the glass, so there's no gap). 4 countersunk screws (M2.5/M3) land
-  in the top/bottom rim band. Bezel outer == shell face outline, so the edges align.
-  Screen opening exposes the viewing area (VA + 0.7 mm/side).
-- **Rear panel-mount USB-C jack:** a flat right-angle USB-C male (JUXINICE-style) plugs
-  into the board's USB-C on the −X edge, and its short flat ribbon routes through an
-  internal pocket to a **female panel-mount jack bolted to the back wall** — a clean,
-  fixed plug-in port facing the rear. Back-wall features: a flush **25.2 × 8.2 mm flange
-  recess** and **2 × Ø2.1 pilots at 17 mm** for the connector's M2.5 mounting screws,
-  with a body/ribbon pocket behind that drops down and forward into the board cavity.
-  The jack sits on the **−X side of the back, ~level with the board's USB-C** — a short
-  ribbon run; the pocket is kept **12 mm wide** so the
-  17 mm screws bite full plastic.
-  The board's own USB-C (on the −X edge) is used only for this internal link — there is
-  **no external side port**; the −X exterior is closed (`USB_SKIN` skin) with a **blind
-  clearance pocket** inside for the right-angle plug. Pre-plug the male before dropping
-  the board in. It leaves ~**2.5 mm** of −X clearance past the board edge, so if the plug
-  is deeper, set `USB_SKIN = 0` to reopen a slim slot (or ask me to bump the −X wall out).
+- **Bezel — the screen sits flush with its top face.** The frame is exactly
+  `GLASS_PROUD` (4.38 mm) thick and lands **directly on the flat shell face**, which is
+  also the PCB front plane — so its top surface ends dead level with the glass. There is
+  **no raised rim** any more. The opening is the **glass outline + 0.5 mm/side**, so the
+  screen passes *through* the frame instead of being capped by it, and the frame lands on
+  the 7.5 mm bare-PCB strips at either end of the glass, clamping the board down.
+  4 countersunk screws (M2.5/M3) go into pilots in the top/bottom face margins.
+  Bezel outer == shell face outline, so the edges align.
+  Because the glass runs the full 50 mm board height, the frame only overlaps the board in
+  X — in Y the opening clears the pocket, so the board is held by its 4 screws, not by a lip.
+- **Board-screw reliefs:** the 4 board screws now sit *under* the bezel, and their heads
+  stand ~2.4 mm proud of the PCB. The bezel underside carries a blind **Ø6.0 × 2.6 mm
+  pocket** over each one, leaving 1.78 mm of frame above.
+- **USB-C side port (open):** a normal USB-C cable plugs **straight into the board's own
+  USB-C** through an **18 × 12 mm slot in the −X (left) wall**. The rear panel-mount jack
+  and its internal right-angle male are **removed**. A right-angle cable keeps the stand
+  tight to the wall; a straight plug stands ~18 mm off the side. Slot size is
+  `USB_SLOT_Y` / `USB_SLOT_Z`; set `USB_SKIN > 0` to close the wall again.
 - **Microphone hole:** Ø2 mm port through the bezel over the board's front-facing MEMS
   mic, with a Ø4.5 **funnel countersink** on the visible face for cleaner sound pickup.
   Viewed from the front with the USB edge on the **left**, the mic sits **low on the
@@ -94,28 +95,26 @@ thread-forming screws** (for plastic: Plastite/PT or generic coarse-thread self-
 
 | Where | Qty | Screw | Length | Head |
 |-------|-----|-------|--------|------|
-| **Board → case** | 4 | M3 self-tapping | ~8 mm | Pan (≤5.4 mm OD) |
+| **Board → case** | 4 | M3 self-tapping | ~8 mm | Pan (≤5.4 mm OD, ≤2.4 mm tall) |
 | **Bezel → case** | 4 | M3 self-tapping | ~8–10 mm | Countersunk / flat |
-| **USB-C jack → case** | 2 | M2.5 self-tapping | ~5–6 mm | Pan — *usually included with the cable* |
 
 - **Board (4×):** PCB Ø3.2 corner holes → Ø2.6 boss pilots (M3). From the front through
-  the PCB (1.6 mm) into the boss (~6–7 mm bite); keep the head **≤5.4 mm** to stay inside
-  the board's Ø5.6 keep-out ring. Install *before* the bezel.
-- **Bezel (4×):** countersunk holes → Ø2.6 rim pilots (M3), flat head to sit flush. The
+  the PCB (1.62 mm) into the boss (~6–7 mm bite); keep the head **≤5.4 mm OD** to stay
+  inside the board's Ø5.6 keep-out ring, **and ≤2.4 mm tall** — the bezel's Ø6.0 × 2.6 mm
+  underside reliefs are sized for that. Install *before* the bezel.
+- **Bezel (4×):** countersunk holes → Ø2.6 face pilots (M3), flat head to sit flush. The
   countersink is modeled Ø5.0, so a low-profile/90° flat head seats best (`BEZEL_SCREW_HEAD`
-  widens it if needed).
-- **USB-C jack (2×):** female flange Ø2.5 holes at 17 mm → Ø2.1 case pilots (M2.5). The
-  JUXINICE panel-mount cable ships with its two mounting screws — reuse those.
+  widens it if needed). The frame is 4.38 mm thick, so a real countersink fits.
 - **No screws** for the speaker cap (snap-in) or the speaker (trapped by the cap).
 
-Pilot sizes are `BOSS_PILOT` / `POST_PILOT` / `PANEL_SCREW_PILOT` in `stand_params.py`;
-switch to M3 heat-set inserts + machine screws there if you prefer repeated disassembly.
+Pilot sizes are `BOSS_PILOT` / `POST_PILOT` in `stand_params.py`; switch to M3 heat-set
+inserts + machine screws there if you prefer repeated disassembly.
 
 ## Sourcing
 
 - **Board** (Hosyond ES3C28P 2.8" ESP32-S3): https://www.amazon.com/dp/B0FKG7WRWV
-- **Rear USB-C jack** (JUXINICE flat right-angle male → female panel mount, ships with its
-  2 mounting screws): https://www.amazon.com/JUXINICE-Type-C-Female-Adapter-Extension/dp/B0GTDF6D1Y
+- **USB-C cable**: any normal cable — it plugs straight into the board through the side
+  port. A **right-angle** plug keeps the stand close to the wall.
 
 ## ⚠️ Verify before the final print
 
@@ -125,17 +124,25 @@ outline drawing does not dimension them). The cut-outs are drawn generously, and
 each is a one-line parameter in `stand_params.py`:
 
 ```
-USB_Y, USB_SLOT_Y/Z        # board USB-C slot on the -X edge (right-angle male clearance)
-PANEL_Z, PANEL_*           # rear panel-mount jack: position, flange, cutout, screws
+USB_Y, USB_SLOT_Y/Z        # open USB-C side port on the -X wall (plug clearance)
 RESET_X                    # RESET button along the board width  (still estimated)
 RESET_Y                    # MEASURED: 7.0 mm c-to-c from the (-39,+21) corner hole
-MIC_X                      # mic across the board width          (still estimated)
+MIC_X                      # mic across the board width  (still estimated — see below)
 MIC_Y                      # MEASURED: 8.0 mm up from the PCB's bottom edge
 SPK_W, SPK_L, SPK_T        # MEASURED: 38 x 26 x 8 speaker box
 ```
 
 **microSD needs no verification** — the case has no card opening, so nothing has to
 line up with the socket.
+
+**`MIC_X` is now the one number worth measuring.** The mic sits 4 mm above the lower-right
+board screw, so at the modeled `MIC_X = 40.0` the Ø2 mic port and that screw's Ø6.0 bezel
+relief are only 4.12 mm apart — a **0.12 mm wall**, below one extrusion width, so the two
+merge when sliced. That's harmless (the port still lands over the mic, 4.12 mm clear of the
+Ø6 relief, and the relief is open to the PCB anyway), and it **can't be designed out**: with
+the mic 4 mm above the screw, a Ø5.4 head relief and a Ø2 port necessarily overlap. But if
+you measure the mic and it's at `MIC_X ≥ 41.65`, the wall grows past 0.8 mm and the two
+features separate cleanly.
 
 Also confirm the **mic is front-ported** (the outline drawing shows a front "MIC"
 port). If it turns out to be rear-ported, move the hole from `build_bezel.py` to the
@@ -176,7 +183,9 @@ infill handles the weight.
   region**, or expect some ceiling droop. Droop there is cosmetic (it's a blind cavity
   behind the cap), but heavy droop eats into the 8 mm box clearance. The rear
   reset/speaker openings exit low on the back.
-- **bezel:** print flat, face-down; the countersinks are on the up-face.
+- **bezel:** print flat, **visible face up** — the screw countersinks and the mic funnel
+  then print cleanly on the top, and the 4 board-screw reliefs open downward onto the bed
+  (no bridging). It's 4.38 mm thick now, not 3.0.
 - **speaker cap:** print plate-down (arms/hooks + pull-tab up). Fit/retention tuning:
   `CAP_CLR` (looser = easier), `CAP_HOOK`/`CAP_HOOK_RAMP` (retention strength vs pry effort).
 - PLA/PETG both fine. 0.2 mm layers. Screws: M3 self-tapping for the board/bosses,

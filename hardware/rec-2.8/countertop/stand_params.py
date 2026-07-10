@@ -6,10 +6,11 @@ two parts can never drift apart.
 Board is the ES3C28P (SKU on the QDtech "LCM OUTLINE" drawing, V1.0 2025-06-11).
 All board numbers below are taken straight from that drawing / the LCDWIKI wiki:
 
-    PCB            86.0 (H) x 50.0 (W) x 1.6 mm, corner radius R3.5
+    PCB            86.0 (H) x 50.0 (W) x 1.62 mm (measured), corner radius R3.5
     mount holes    4x Ø3.2, on a 42 x 78 mm rectangle  -> 4.0 mm in from each edge
                    (Ø5.6 keep-out ring around each: screw heads <= ~5.6 are safe)
-    front glass    protrudes 4.30 mm above the PCB; glass 50.0 x 69.2 (full width)
+    front glass    protrudes 4.38 mm above the PCB (6.00 stack - 1.62 PCB, measured);
+                   glass 70.0 x 50.0 -- runs the full board height, edge to edge
     active area    43.20 x 57.60 ; viewing area 43.60 x 58.05
     back parts     up to 4.70 mm tall ; total module thickness 10.60 mm
     connectors     USB-C + RESET + BOOT on ONE short (50 mm) edge
@@ -41,16 +42,18 @@ toward the viewer (glass lives here), -z goes back into the body (components her
 # ---------------------------------------------------------------- board (verified)
 PCB_W       = 86.0     # X, landscape width
 PCB_H       = 50.0     # Y, landscape height (up the incline)
-PCB_T       = 1.6
+PCB_T       = 1.62     # MEASURED (drawing said 1.6)
 PCB_CORNER  = 3.5      # R3.5 board corner radius
 HOLE_D      = 3.2      # Ø3.2 mounting holes
 HOLE_DX     = 78.0     # hole spacing along X (the 86 mm axis)
 HOLE_DY     = 42.0     # hole spacing along Y (the 50 mm axis)
 HOLE_KEEPOUT = 5.6     # Ø5.6 no-component ring -> boss OD stays under this
 COMP_H      = 4.70     # tallest back-side component
-GLASS_PROUD = 4.30     # glass stack height above the PCB front face
-GLASS_W     = 69.2     # glass along X (landscape); flush to board in Y
-GLASS_H     = 50.0
+# MEASURED: board+screen stack is 6.00 from the PCB back face to the glass top, and the
+# PCB is 1.62 -> the glass stands 4.38 proud of the PCB front face.
+GLASS_PROUD = 6.00 - PCB_T             # = 4.38  (drawing said 4.30)
+GLASS_W     = 70.0     # MEASURED glass along X (landscape); drawing said 69.2
+GLASS_H     = 50.0     # glass runs the full board height in Y, edge to edge
 VA_W        = 58.05    # viewing area, landscape (X x Y)
 VA_H        = 43.60
 AA_W        = 57.60    # active area, landscape
@@ -78,29 +81,43 @@ FACE_LEN    = PCB_H + MB + MT           # 66 mm reclined front face length
 BOSS_OD     = 5.4                        # < Ø5.6 keep-out
 BOSS_PILOT  = 2.6                        # pilot for an M3 self-tapping screw
 BOARD_SCREW_HEAD = 5.4                   # keep heads within the keep-out ring
+BOARD_SCREW_HEAD_H = 2.4                 # head stand-off above the PCB front face
 
-# bezel (screwed-on front cover) + the raised rim it sits flush on
-BEZEL_T     = 3.0                        # bezel frame thickness
+# bezel (screwed-on front cover).  The GLASS SITS FLUSH WITH THE BEZEL TOP: the bezel is
+# exactly GLASS_PROUD thick and its opening is the glass outline (+GLASS_CLR/side), so the
+# screen passes through the frame and the two surfaces end level.  There is NO raised rim
+# any more -- the bezel lands directly on the shell face and on the bare PCB strips at
+# |x| > GLASS_W/2, which also clamps the board down.
+#
+#   z = GLASS_PROUD ---- bezel top == glass top (flush)
+#   z = 0 -------------- shell face == PCB front face == bezel underside
+#
+# The 4 board screws stand BOARD_SCREW_HEAD_H proud of the PCB front and now live UNDER
+# the bezel, so the bezel underside gets a blind relief pocket over each one.
+BEZEL_T     = GLASS_PROUD                # = 4.38 -> top is flush with the glass
 BEZEL_OUT_X = W_OUT / 2                  # bezel outer == shell face outer -> flush
 BEZEL_OUT_Y = FACE_LEN / 2
-BEZEL_R     = 4.0                        # bezel + rim outer corner radius
-RIM_H       = GLASS_PROUD                # raised rim height (== glass proud) -> flush cap
-OPEN_MARGIN = 0.7                        # screen opening = VA + this per side
-POST_X      = 39.0                       # bezel screws land in the top/bottom rim band
+BEZEL_R     = 4.0                        # bezel outer corner radius
+RIM_H       = 0.0                        # no raised rim (kept at 0 so pilots datum off it)
+GLASS_CLR   = 0.5                        # bezel opening = glass outline + this per side
+HEAD_RELIEF_D     = BOARD_SCREW_HEAD + 0.6   # Ø6.0 blind pocket over each board screw head
+HEAD_RELIEF_DEPTH = BOARD_SCREW_HEAD_H + 0.2  # 2.6 deep -> leaves 1.78 of bezel above it
+POST_X      = 39.0                       # bezel screws land in the top/bottom face margin
 POST_Y      = 30.0
 POST_PILOT  = 2.6                        # M2.5/M3 self-tapping bezel screws
+POST_DEPTH  = 7.0                        # pilot depth into the face (bottom posts sit
+                                         # close to the base -- 8.5 would nearly break out)
 BEZEL_SCREW_HEAD = 5.0                   # countersink head Ø
 
 # ---------------------------------------------------------------- cut-outs  (VERIFY!)
 # All in local board frame.  X is board width (USB edge at -X), Y is up the incline.
 USB_Y       = 0.0      # board USB-C centre along the -X short edge (est.)
-# The board's USB-C is unused for external power (power comes from the rear panel jack).
-# The right-angle male still plugs into it internally, so we keep a BLIND clearance
-# pocket -- the -X exterior is CLOSED (no legacy side port).  Pre-plug the male before
-# dropping the board into the case.  Widen these / open the skin if the plug is deep.
-USB_SLOT_Y  = 18.0     # male-clearance pocket width  (along Y)
-USB_SLOT_Z  = 12.0     # male-clearance pocket height (Z: PCB + connector + body)
-USB_SKIN    = 1.5      # retained -X outer skin thickness (0 = reopen the side port)
+# OPEN SIDE PORT: a normal USB-C cable plugs straight into the board through a slot in
+# the -X wall.  (The rear panel-mount jack + its internal right-angle male are gone.)
+USB_SLOT_Y  = 18.0     # side-port slot width  (along Y)
+USB_SLOT_Z  = 12.0     # side-port slot height (Z: PCB + connector + plug body)
+USB_SKIN    = 0.0      # 0 = the -X wall is cut through (open side port).  Set >0 to
+                       # retain that much outer skin and make the pocket blind again.
 
 RESET_X     = -38.0    # RESET tact button, back face, near the -X edge (est.)
 RESET_Y     = 14.0718  # 7.0 mm centre-to-centre from the (-39, +21) corner hole
@@ -112,28 +129,9 @@ RESET_PIN_D = 3.0      # back-face pin hole Ø (paper-clip / SIM pin)
 # card is swapped with the board out of the case, so the back wall stays solid.
 # (SD_X / SD_Y / SD_WIN_X / SD_WIN_Z removed -- there is no window to size.)
 
-# cable management: the USB-C plug enters the -X side, then the cable is routed
-# DOWN the -X face and BACK under the base to exit at the rear.  Suits a right-angle
-# USB-C cable best; a straight plug sticks out ~18 mm then drops into the down groove.
-# Rear panel-mount USB-C jack (JUXINICE-style flat right-angle male -> female panel
-# mount).  The female bolts to the flat vertical back wall; the flat ribbon routes
-# through an internal cavity to the board's USB-C on the -X edge.  Dims from the
-# product drawing:  flange 25.2 x 8.2 (racetrack), 2x Ø2.5 screws @ 17 mm,
-# receptacle opening 9 x 3.5.  *** confirm against the actual connector ***
-PANEL_X         = -28.0  # jack centre X: shifted to the -X side to sit near the board's
-                         # own USB-C (x=-43) -> short ribbon run; also clear of the SD window
-PANEL_Z         = 32.0   # jack centre height, ~level with the board USB-C (z=32)
-PANEL_FLANGE_W  = 25.2   # female flange width  (x)
-PANEL_FLANGE_H  = 8.2    # female flange height (z)
-PANEL_RECESS_D  = 1.3    # flush recess for the flange, into the back face
-PANEL_SCREW_DX  = 17.0   # screw centre-to-centre (matches the flange holes)
-PANEL_SCREW_PILOT = 2.1  # pilot for M2.5 self-tapping screws
-# body/ribbon pocket behind the flange -- narrow (x) so the 17 mm screws keep solid
-# columns, tall so the ribbon drops down, deep so it reaches the board cavity.
-PANEL_ROUTE_W   = 12.0   # pocket width  (x)  -> ~1.5 mm solid beside each screw pilot
-PANEL_ROUTE_H   = 17.0   # pocket height (z)
-PANEL_ROUTE_UP  = 4.0    # pocket extends this far above the jack centre
-PANEL_ROUTE_Y0  = 13.0   # pocket reaches forward to here (into the board cavity)
+# The rear panel-mount USB-C jack is REMOVED (PANEL_* params deleted).  Power now enters
+# through the open -X side port above, straight into the board's own USB-C.  A right-angle
+# USB-C cable keeps the stand tight to the wall; a straight plug sticks out ~18 mm.
 
 # microphone port: MEMS mic ports through the FRONT (bare PCB strip near the +X short
 # edge, opposite the connectors) -> small hole through the BEZEL.
@@ -154,7 +152,8 @@ MIC_CSK_D   = 4.5      # funnel Ø on the visible bezel face (tapers to MIC_HOLE
 SPK_W        = 38.0    # box footprint X  (across the case)
 SPK_L        = 26.0    # box footprint Y  (rear insertion depth)
 SPK_T        = 8.0     # box thickness (Z)
-SPK_FIT      = 0.6     # pocket clearance
+SPK_SLOT_H   = 10.0    # the slot the box slides into is 10.0 high (2.0 over the 8 mm box)
+SPK_FIT      = 0.6     # pocket clearance (X/Y only; Z is set by SPK_SLOT_H)
 SPK_CX       = 0.0     # pocket centre X (clear of the -X cable channel)
 GRILLE_T     = 1.5     # perforated floor thickness under the speaker
 GRILLE_HOLE  = 2.0     # grille hole Ø

@@ -20,7 +20,7 @@ from shapely.geometry import Polygon
 import stand_params as P
 
 PORT_HX = P.SPK_W / 2 + P.SPK_FIT
-PORT_HZ = (P.SPK_T + P.SPK_FIT) / 2
+PORT_HZ = P.SPK_SLOT_H / 2          # the port is the SPK_SLOT_H-high slot
 ARM_LEN = P.SPK_CAP_ZONE - 0.5
 
 def _lbox(ext, ctr):
@@ -54,7 +54,7 @@ def build_cap(world=False):
         parts.append(_hook(sx))                            # hook
     cap = union(parts, engine='manifold')
     if world:
-        zc = P.GRILLE_T + (P.SPK_T + P.SPK_FIT) / 2
+        zc = P.GRILLE_T + P.SPK_SLOT_H / 2
         M = np.array([[1, 0, 0, 0], [0, 0, -1, P.BACK_Y + P.CAP_T],
                       [0, 1, 0, zc], [0, 0, 0, 1]], float)
         cap.apply_transform(M)
