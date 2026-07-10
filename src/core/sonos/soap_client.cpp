@@ -127,6 +127,11 @@ bool setAvTransportUri(const String &ip, const String &uri, const String &didlMe
                 "</CurrentURIMetaData>";
   return soapAction(ip, PATH_AVT, SVC_AVT, "SetAVTransportURI", args, r);
 }
+bool setPlayMode(const String &ip, const String &mode) {
+  String r;  // NORMAL | REPEAT_ALL | REPEAT_ONE | SHUFFLE...
+  String args = "<InstanceID>0</InstanceID><NewPlayMode>" + mode + "</NewPlayMode>";
+  return soapAction(ip, PATH_AVT, SVC_AVT, "SetPlayMode", args, r);
+}
 bool getTransportInfo(const String &ip, TransportState &out) {
   String r;
   out = TransportState::Unknown;

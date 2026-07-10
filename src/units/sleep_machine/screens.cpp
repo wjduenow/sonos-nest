@@ -115,7 +115,19 @@ static void cloudCb(lv_event_t *) {
   gotoStarting();
 }
 
-static void localCb(lv_event_t *)  { showToast("Play from Local — coming soon"); }
+// Play from Local: serve the ocean MP3 off the SD card over HTTP and play it on the Nursery
+// Sonos (looped). netTask enqueues the URL + REPEAT_ALL; this is Sonos playback, so it lands
+// on the cloud now-playing screen (Sonos volume slider).
+static void localCb(lv_event_t *) {
+  const char *url = localFileUrl(LOCAL_OCEAN_FILE);
+  if (!url) { showToast("SD / network unavailable"); return; }
+  if (stateLock()) {
+    g_pending.targetVolume   = SLEEP_VOLUME;   // 45, bedtime
+    g_pending.localStreamUrl = url;
+    stateUnlock();
+  }
+  gotoStarting();
+}
 
 // Play on Device: stream the ocean MP3 from the SD card through the onboard speaker. The first
 // tap lazily mounts the SD + brings up the codec, so it can block briefly.

@@ -8,6 +8,7 @@
 // ES8311 shares the I2C bus (100 kHz) already begun by boardInit().
 #include "core/board.h"
 #include "pins.h"
+#include "sd_card.h"
 #include <Arduino.h>
 #include "SD_MMC.h"
 #include "AudioTools.h"
@@ -33,11 +34,7 @@ static TaskHandle_t  s_task   = nullptr;
 static bool ensureInit() {
   if (s_inited) return true;
 
-  SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
-  if (!SD_MMC.begin("/sdcard", false /*4-bit*/, false /*no format*/)) {
-    Serial.println("[audio] SD mount failed");
-    return false;
-  }
+  if (!sdEnsureMounted()) return false;
 
   // ES8311 @ 0x18 on the shared I2C bus (already begun at 100 kHz by boardInit()); I2S data.
   s_pins.addI2C(PinFunction::CODEC, PIN_I2C_SCL, PIN_I2C_SDA, I2S_ADDR_ES8311, 100000, Wire);

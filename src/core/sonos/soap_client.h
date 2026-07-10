@@ -16,6 +16,7 @@ bool next(const String& ip);
 bool previous(const String& ip);
 bool seekTrack(const String& ip, uint32_t trackNr);
 bool setAvTransportUri(const String& ip, const String& uri, const String& didlMeta);
+bool setPlayMode(const String& ip, const String& mode);   // NORMAL / REPEAT_ALL / REPEAT_ONE ...
 bool getTransportInfo(const String& ip, TransportState& out);
 bool getPositionInfo(const String& ip, PlayerState& out);   // track + pos + dur + DIDL
 

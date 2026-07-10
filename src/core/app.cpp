@@ -139,6 +139,27 @@ static void processPending() {
     selectZoneByIp(s_zoneIp);
     g_zonesGen++;
   }
+  // Play a locally-served file (the ES3C28P's HTTP media server) on the group coordinator,
+  // looped. Enqueue it with minimal DIDL so Sonos accepts the http mp3, switch the transport
+  // to the queue, set REPEAT_ALL, and play.
+  if (p.localStreamUrl.length()) {
+    String meta =
+        "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" "
+        "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+        "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
+        "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
+        "<dc:title>Ocean Waves</dc:title>"
+        "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+        "<res protocolInfo=\"http-get:*:audio/mpeg:*\">" + p.localStreamUrl + "</res>"
+        "</item></DIDL-Lite>";
+    sonos::removeAllTracksFromQueue(s_coordIp);
+    sonos::addUriToQueue(s_coordIp, p.localStreamUrl, meta);
+    sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
+    sonos::setPlayMode(s_coordIp, "REPEAT_ALL");
+    sonos::play(s_coordIp);
+    s_lastPoll = millis() - 600;
+  }
+
   // After a transport change the track/state (and art) update — poll again soon, once the
   // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.
   if (p.prev || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;

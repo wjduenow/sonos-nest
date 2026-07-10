@@ -30,3 +30,4 @@ bool localAudioPlay(const char * /*path*/) { return false; }
 void localAudioStop() {}
 bool localAudioActive() { return false; }
 void localAudioSetVolume(uint8_t /*pct*/) {}
+const char *localFileUrl(const char * /*path*/) { return nullptr; }

@@ -38,6 +38,7 @@ struct PendingCmds {
   String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP
   String groupJoinIp;         // join this speaker to the active group
   String groupLeaveIp;        // remove this speaker from its group (become standalone)
+  String localStreamUrl;      // non-empty: play this local HTTP file URL on the coordinator, looped
 };
 
 // Bumped whenever the discovered zone list changes (after grouping ops / re-discovery) so

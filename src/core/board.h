@@ -35,3 +35,9 @@ bool localAudioPlay(const char *path);
 void localAudioStop();
 bool localAudioActive();           // true while a local file is playing
 void localAudioSetVolume(uint8_t pct);   // 0..100; no-op on boards without audio
+
+// Serve a local file (e.g. off the SD card) over HTTP so a network player (Sonos) can stream
+// it, and return the URL to hand the player. Starts a small HTTP server on first use. Returns
+// nullptr if the board has no local storage/server or it couldn't start. The returned pointer
+// is owned by the board; copy it before the next call.
+const char *localFileUrl(const char *path);
