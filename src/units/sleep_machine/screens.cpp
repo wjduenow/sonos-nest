@@ -416,27 +416,34 @@ void uiInit() {
   lv_label_set_long_mode(s_startingLabel, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(s_startingLabel, LV_TEXT_ALIGN_CENTER, 0);
 
-  // PLAYING — status + Stop, with a volume slider anchored at the bottom (manual layout, not
-  // flex, so the slider can sit at the bottom edge).
+  // PLAYING — track name, Stop, and volume slider evenly spaced top-to-bottom (flex column).
   s_playing = lv_obj_create(scr);
   lv_obj_remove_style_all(s_playing);
   lv_obj_set_size(s_playing, SCREEN_W, SCREEN_H);
   lv_obj_center(s_playing);
   lv_obj_remove_flag(s_playing, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(s_playing, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_playing, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_all(s_playing, SH(7), 0);
 
   s_playTitle = makeLabel(s_playing, "Ocean Waves", &lv_font_montserrat_28, lv_color_to_u32(lv_color_white()));
-  lv_obj_align(s_playTitle, LV_ALIGN_TOP_MID, 0, SH(22));
+  lv_obj_set_width(s_playTitle, SW(94));
+  lv_label_set_long_mode(s_playTitle, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(s_playTitle, LV_TEXT_ALIGN_CENTER, 0);
 
-  lv_obj_t *stop = makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
-  lv_obj_align(stop, LV_ALIGN_CENTER, 0, -SH(2));
+  makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
 
-  lv_obj_t *volIcon = makeLabel(s_playing, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, COL_SUBTLE);
-  lv_obj_align(volIcon, LV_ALIGN_BOTTOM_LEFT, SW(6), -SH(11));
-
-  s_volSlider = lv_slider_create(s_playing);
+  // Volume row: icon + slider as one flex item so it spaces evenly with the others.
+  lv_obj_t *volRow = lv_obj_create(s_playing);
+  lv_obj_remove_style_all(volRow);
+  lv_obj_set_size(volRow, SW(94), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(volRow, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(volRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(volRow, SW(3), 0);
+  makeLabel(volRow, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, COL_SUBTLE);
+  s_volSlider = lv_slider_create(volRow);
   lv_slider_set_range(s_volSlider, 0, 100);
-  lv_obj_set_width(s_volSlider, SW(72));
-  lv_obj_align(s_volSlider, LV_ALIGN_BOTTOM_MID, SW(8), -SH(13));
+  lv_obj_set_width(s_volSlider, SW(78));
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_SLATE), LV_PART_MAIN);
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
