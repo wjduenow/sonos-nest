@@ -20,21 +20,35 @@
 #include <lvgl.h>
 #include <Arduino.h>
 #include <WiFi.h>              // scanNetworks for the Wi-Fi picker
+#include <time.h>             // clock screensaver
 #include <vector>
 
 // This appliance is bound to one room + one Sonos saved playlist.
 static const char *TARGET_ROOM    = "Nursery";
 static const char *SLEEP_PLAYLIST = "Sleep";   // exact saved-playlist title (SQ:0)
 static const uint8_t SLEEP_VOLUME = 45;
+// Screensaver: after this much idle, dim the backlight and show a drifting clock (protects
+// the LCD backlight over the many static hours a day; any tap wakes it back to the menu).
+static const uint32_t SS_IDLE_MS = 60000;
+static const uint8_t  SS_DIM     = 10;   // backlight % while the screensaver is showing
 // Default local track on the microSD (options 2 & 3), used until one is picked in Settings.
 static const char *LOCAL_OCEAN_FILE = "/Ocean.mp3";
 
 // Palette (deep-night theme, easy on the eyes in a dark nursery).
 static const uint32_t COL_BG     = 0x0A1428;   // near-black navy
-static const uint32_t COL_CLOUD  = 0x1E7A99;   // teal — primary action
+static const uint32_t COL_CLOUD  = 0x1E7A99;   // teal   — Play from Cloud
+static const uint32_t COL_LOCAL  = 0x2F7D57;   // green  — Play from Local
+static const uint32_t COL_DEVICE = 0x6A4C93;   // purple — Play on Device
 static const uint32_t COL_SLATE  = 0x27324A;   // muted slate — secondary actions
 static const uint32_t COL_STOP   = 0x8C2B2B;   // muted red
 static const uint32_t COL_SUBTLE = 0x7C8AA5;   // grey-blue secondary text
+
+// Home carousel: one large button per screen, cycled by swiping left/right (wraps both ways).
+static const char    *HOME_LABELS[3] = {"Start Sleep Sounds",
+                                        "Start From Local (No Internet)",
+                                        "Start on Device (No Wifi)"};
+static const uint32_t HOME_COLORS[3] = {COL_CLOUD, COL_LOCAL, COL_DEVICE};
+static const char    *HOME_ICONS[3]  = {LV_SYMBOL_AUDIO, LV_SYMBOL_SD_CARD, LV_SYMBOL_VOLUME_MAX};
 
 enum UiState { ST_HOME, ST_STARTING, ST_PLAYING };
 static UiState  s_state        = ST_HOME;
@@ -44,10 +58,18 @@ static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker,
 static String   s_sonosTitle;             // known title for a local-stream-on-Sonos ("" = use live)
 
 static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks;
+static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
+static int       s_homeIdx = 0;   // which carousel option (0..2) is showing
 static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
 static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_roomsList, *s_tracksList;
 static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb;
 static lv_obj_t *s_toast;
+static lv_obj_t *s_screensaver, *s_clockLabel;
+static lv_obj_t *s_curPage   = nullptr;   // page currently shown (screensaver return target)
+static lv_obj_t *s_ssReturn  = nullptr;   // page to restore on wake
+static bool      s_ssOn      = false;     // screensaver currently showing
+static uint32_t  s_ssDriftMs = 0, s_ssClockMs = 0;
+static uint8_t   s_ssDriftIdx = 0;
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
@@ -60,7 +82,9 @@ static bool      s_wifiConnecting  = false;
 // --- helpers ---------------------------------------------------------------
 
 static void showOnly(lv_obj_t *keep) {
-  lv_obj_t *pages[8] = {s_home, s_starting, s_playing, s_settings, s_rooms, s_wifi, s_wifiPw, s_tracks};
+  s_curPage = keep;
+  lv_obj_t *pages[9] = {s_home, s_starting, s_playing, s_settings, s_rooms,
+                        s_wifi, s_wifiPw, s_tracks, s_screensaver};
   for (lv_obj_t *p : pages) {
     if (p == keep) lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     else           lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
@@ -95,11 +119,15 @@ static String trackDisplayName() {
   return d;
 }
 
+static void updateHome();   // fwd: refresh the carousel button + dots for s_homeIdx
+
 static void gotoHome() {
   s_state = ST_HOME;
   s_playRequested = false;
   s_localMode = false;
   s_sonosTitle = "";
+  s_homeIdx = 0;              // always return to the default option (Start Sleep Sounds)
+  updateHome();
   showOnly(s_home);
 }
 
@@ -175,6 +203,46 @@ static void stopCb(lv_event_t *) {
   if (s_localMode) { localAudioStop(); gotoHome(); }
   else if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); }
 }
+
+// --- home carousel ---------------------------------------------------------
+
+// The one big button dispatches to the current option's action.
+static void homeBtnCb(lv_event_t *e) {
+  if (s_homeIdx == 0)      cloudCb(e);
+  else if (s_homeIdx == 1) localCb(e);
+  else                     deviceCb(e);
+}
+
+static void updateHome() {
+  lv_color_t accent = lv_color_hex(HOME_COLORS[s_homeIdx]);
+  lv_color_t light  = lv_color_lighten(accent, 90);   // bright accent for edge / text / icon
+  lv_label_set_text(s_homeIcon, HOME_ICONS[s_homeIdx]);
+  lv_label_set_text(s_homeBtnLabel, HOME_LABELS[s_homeIdx]);
+  lv_obj_set_style_bg_color(s_homeBtn, accent, 0);       // faint tinted glass (low opacity)
+  lv_obj_set_style_border_color(s_homeBtn, light, 0);    // bright accent edge
+  lv_obj_set_style_shadow_color(s_homeBtn, accent, 0);   // colored glow
+  lv_obj_set_style_text_color(s_homeIcon, light, 0);
+  lv_obj_set_style_text_color(s_homeBtnLabel, light, 0);
+  for (int i = 0; i < 3; ++i)
+    lv_obj_set_style_bg_color(s_dot[i], lv_color_hex(i == s_homeIdx ? COL_SUBTLE : COL_SLATE), 0);
+}
+
+static void homeSlideXCb(void *obj, int32_t v) { lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0); }
+
+// Slide the (already-updated) button in from `dir` (+1 = from the right, -1 = from the left).
+static void homeSlide(int dir) {
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, s_homeBtn);
+  lv_anim_set_exec_cb(&a, homeSlideXCb);
+  lv_anim_set_values(&a, dir * SCREEN_W, 0);
+  lv_anim_set_duration(&a, 220);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+}
+
+static void homeNext() { s_homeIdx = (s_homeIdx + 1) % 3; updateHome(); homeSlide(+1); }  // swipe left
+static void homePrev() { s_homeIdx = (s_homeIdx + 2) % 3; updateHome(); homeSlide(-1); }  // swipe right
 
 // Bottom volume slider: drives the Sonos speaker volume (cloud) or the ES8311 codec volume
 // (on-device). Coalesced for Sonos via g_pending.targetVolume.
@@ -257,7 +325,9 @@ static void openTracks();
 static void screenGestureCb(lv_event_t *) {
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
   if (!lv_obj_has_flag(s_home, LV_OBJ_FLAG_HIDDEN)) {
-    if (dir == LV_DIR_BOTTOM) openSettings();
+    if (dir == LV_DIR_BOTTOM)     openSettings();
+    else if (dir == LV_DIR_LEFT)  homeNext();   // swipe left  -> next option (wraps)
+    else if (dir == LV_DIR_RIGHT) homePrev();   // swipe right -> previous option (wraps)
   } else if (!lv_obj_has_flag(s_settings, LV_OBJ_FLAG_HIDDEN)) {
     if (dir == LV_DIR_TOP) gotoHome();
   }
@@ -389,6 +459,44 @@ static void openTracks() {
   showOnly(s_tracks);
 }
 
+// --- clock screensaver -----------------------------------------------------
+
+static void ssUpdateClock() {
+  time_t now = time(nullptr);
+  struct tm ti;
+  localtime_r(&now, &ti);
+  if (ti.tm_year > 118) {   // year >= 2018 => NTP time is set
+    char buf[16];
+    strftime(buf, sizeof(buf), "%I:%M %p", &ti);
+    lv_label_set_text(s_clockLabel, buf[0] == '0' ? buf + 1 : buf);   // trim leading zero
+  } else {
+    lv_label_set_text(s_clockLabel, "--:--");
+  }
+}
+
+// Nudge the clock to a new position periodically so it never sits on the same pixels.
+static void ssDrift() {
+  static const int8_t off[8][2] = {{0,-14},{16,-7},{18,9},{5,16},{-12,15},{-18,3},{-10,-12},{9,-11}};
+  s_ssDriftIdx = (s_ssDriftIdx + 1) & 7;
+  lv_obj_align(s_clockLabel, LV_ALIGN_CENTER, off[s_ssDriftIdx][0], off[s_ssDriftIdx][1]);
+}
+
+static void enterScreensaver() {
+  s_ssReturn = s_curPage;
+  s_ssOn = true;
+  s_ssDriftMs = s_ssClockMs = millis();
+  ssUpdateClock();
+  ssDrift();
+  showOnly(s_screensaver);
+  backlightSet(SS_DIM);
+}
+
+static void exitScreensaver() {
+  s_ssOn = false;
+  backlightSet(settingsBrightness());
+  showOnly(s_ssReturn ? s_ssReturn : s_home);
+}
+
 // --- unit contract ---------------------------------------------------------
 
 void uiInit() {
@@ -401,12 +509,60 @@ void uiInit() {
   lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
   lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-  // HOME — three options.
-  s_home = makePage(scr);
-  lv_obj_set_style_pad_row(s_home, SH(5), 0);
-  makeButton(s_home, "Play from Cloud", COL_CLOUD, cloudCb);
-  makeButton(s_home, "Play from Local", COL_SLATE, localCb);
-  makeButton(s_home, "Play on Device",  COL_SLATE, deviceCb);
+  // HOME — a one-button carousel; swipe left/right to cycle the three options.
+  s_home = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_home);
+  lv_obj_set_size(s_home, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_home);
+  lv_obj_remove_flag(s_home, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_home, LV_OBJ_FLAG_EVENT_BUBBLE);   // let swipes reach the screen handler
+
+  s_homeBtn = lv_button_create(s_home);
+  lv_obj_remove_style_all(s_homeBtn);            // full control of the glass look
+  lv_obj_set_size(s_homeBtn, SW(82), SH(54));
+  lv_obj_align(s_homeBtn, LV_ALIGN_CENTER, 0, -SH(5));
+  lv_obj_add_flag(s_homeBtn, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_event_cb(s_homeBtn, homeBtnCb, LV_EVENT_CLICKED, nullptr);
+  // Glass / outlined base: faint tinted fill, bright accent border, soft accent glow (colors
+  // per option are applied in updateHome). Pressed = brighter fill/glow + a small push down.
+  lv_obj_set_style_radius(s_homeBtn, SH(8), 0);
+  lv_obj_set_style_bg_opa(s_homeBtn, LV_OPA_30, 0);
+  lv_obj_set_style_border_width(s_homeBtn, 2, 0);
+  lv_obj_set_style_border_opa(s_homeBtn, LV_OPA_COVER, 0);
+  lv_obj_set_style_shadow_width(s_homeBtn, 18, 0);
+  lv_obj_set_style_shadow_spread(s_homeBtn, 0, 0);
+  lv_obj_set_style_shadow_opa(s_homeBtn, LV_OPA_50, 0);
+  lv_obj_set_style_bg_opa(s_homeBtn, LV_OPA_50, LV_STATE_PRESSED);
+  lv_obj_set_style_shadow_opa(s_homeBtn, LV_OPA_80, LV_STATE_PRESSED);
+  lv_obj_set_style_translate_y(s_homeBtn, SH(1), LV_STATE_PRESSED);
+  // Content: icon over wrapping text, centered.
+  lv_obj_set_flex_flow(s_homeBtn, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_homeBtn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_all(s_homeBtn, SH(2), 0);
+  lv_obj_set_style_pad_row(s_homeBtn, SH(2), 0);
+  s_homeIcon = lv_label_create(s_homeBtn);
+  lv_obj_set_style_text_font(s_homeIcon, &lv_font_montserrat_28, 0);
+  s_homeBtnLabel = lv_label_create(s_homeBtn);
+  lv_obj_set_style_text_font(s_homeBtnLabel, &lv_font_montserrat_24, 0);
+  lv_label_set_long_mode(s_homeBtnLabel, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_homeBtnLabel, SW(72));
+  lv_obj_set_style_text_align(s_homeBtnLabel, LV_TEXT_ALIGN_CENTER, 0);
+
+  // page-position dots
+  lv_obj_t *dots = lv_obj_create(s_home);
+  lv_obj_remove_style_all(dots);
+  lv_obj_set_size(dots, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_align(dots, LV_ALIGN_BOTTOM_MID, 0, -SH(8));
+  lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
+  lv_obj_set_style_pad_column(dots, SW(2), 0);
+  for (int i = 0; i < 3; ++i) {
+    s_dot[i] = lv_obj_create(dots);
+    lv_obj_remove_style_all(s_dot[i]);
+    lv_obj_set_size(s_dot[i], SH(3), SH(3));
+    lv_obj_set_style_radius(s_dot[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_dot[i], LV_OPA_COVER, 0);
+  }
+  updateHome();
 
   // STARTING — brief transitional state while playback is enqueued (label set per track).
   s_starting = makePage(scr);
@@ -561,6 +717,17 @@ void uiInit() {
   lv_obj_set_flex_align(s_tracksList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(s_tracksList, SH(2), 0);
 
+  // SCREENSAVER — dim drifting clock shown after idle; a tap wakes back to the menu.
+  s_screensaver = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_screensaver);
+  lv_obj_set_size(s_screensaver, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_screensaver);
+  lv_obj_remove_flag(s_screensaver, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(s_screensaver, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(s_screensaver, LV_OPA_COVER, 0);
+  s_clockLabel = makeLabel(s_screensaver, "--:--", &lv_font_montserrat_48, COL_SUBTLE);
+  lv_obj_center(s_clockLabel);
+
   lv_obj_add_event_cb(scr, screenGestureCb, LV_EVENT_GESTURE, nullptr);
 
   gotoHome();
@@ -585,6 +752,22 @@ void uiTick() {
   if (s_toastUntil && now > s_toastUntil) {
     lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
     s_toastUntil = 0;
+  }
+
+  // Screensaver: dim clock after idle on the resting screens (home / now-playing); any touch
+  // wakes it. While showing, refresh the time and drift its position, and skip the rest.
+  uint32_t idle = lv_display_get_inactive_time(NULL);
+  if (s_ssOn) {
+    if (idle < 800) {
+      exitScreensaver();                          // woke on touch -> fall through to normal UI
+    } else {
+      if (now - s_ssClockMs > 1000)  { s_ssClockMs = now; ssUpdateClock(); }
+      if (now - s_ssDriftMs > 30000) { s_ssDriftMs = now; ssDrift(); }
+      return;
+    }
+  } else if (idle > SS_IDLE_MS && (s_curPage == s_home || s_curPage == s_playing)) {
+    enterScreensaver();
+    return;
   }
 
   // Wi-Fi async scan finished -> populate the network list.
