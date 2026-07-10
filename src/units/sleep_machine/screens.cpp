@@ -284,6 +284,38 @@ static lv_obj_t *makeButton(lv_obj_t *parent, const char *text, uint32_t color, 
   return b;
 }
 
+// Glass / outlined button (same look as the home carousel): faint accent-tinted fill, bright
+// accent border, soft accent glow, accent text, and a pressed state (brighter + push down).
+static lv_obj_t *makeGlassButton(lv_obj_t *parent, const char *text, uint32_t accentHex,
+                                 lv_coord_t w, lv_coord_t h, lv_event_cb_t cb) {
+  lv_color_t accent = lv_color_hex(accentHex);
+  lv_color_t light  = lv_color_lighten(accent, 90);
+  lv_obj_t *b = lv_button_create(parent);
+  lv_obj_remove_style_all(b);
+  lv_obj_set_size(b, w, h);
+  lv_obj_set_style_radius(b, SH(6), 0);
+  lv_obj_set_style_bg_color(b, accent, 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_30, 0);
+  lv_obj_set_style_border_width(b, 2, 0);
+  lv_obj_set_style_border_color(b, light, 0);
+  lv_obj_set_style_border_opa(b, LV_OPA_COVER, 0);
+  lv_obj_set_style_shadow_width(b, 14, 0);
+  lv_obj_set_style_shadow_spread(b, 0, 0);
+  lv_obj_set_style_shadow_color(b, accent, 0);
+  lv_obj_set_style_shadow_opa(b, LV_OPA_50, 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_50, LV_STATE_PRESSED);
+  lv_obj_set_style_shadow_opa(b, LV_OPA_80, LV_STATE_PRESSED);
+  lv_obj_set_style_translate_y(b, SH(1), LV_STATE_PRESSED);
+  lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *l = lv_label_create(b);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(l, light, 0);
+  lv_label_set_text(l, text);
+  lv_obj_center(l);
+  return b;
+}
+
 static lv_obj_t *makeLabel(lv_obj_t *parent, const char *text, const lv_font_t *font, uint32_t color) {
   lv_obj_t *l = lv_label_create(parent);
   lv_obj_set_style_text_font(l, font, 0);
@@ -587,7 +619,7 @@ void uiInit() {
   lv_label_set_long_mode(s_playTitle, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(s_playTitle, LV_TEXT_ALIGN_CENTER, 0);
 
-  makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
+  makeGlassButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, SW(50), SH(24), stopCb);
 
   // Volume row: icon + slider as one flex item so it spaces evenly with the others.
   lv_obj_t *volRow = lv_obj_create(s_playing);
