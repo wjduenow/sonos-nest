@@ -29,3 +29,15 @@ void settingsSetBrightness(uint8_t pct) {
 String settingsZones() { return s_prefs.getString("zones", ""); }
 
 void settingsSetZones(const String &blob) { s_prefs.putString("zones", blob); }
+
+String settingsWifiSsid() { return s_prefs.getString("wifi_ssid", ""); }
+String settingsWifiPass() { return s_prefs.getString("wifi_pass", ""); }
+
+void settingsSetWifi(const String &ssid, const String &pass) {
+  s_prefs.putString("wifi_ssid", ssid);
+  s_prefs.putString("wifi_pass", pass);
+}
+
+String settingsSleepTrack() { return s_prefs.getString("track", ""); }
+
+void settingsSetSleepTrack(const String &path) { s_prefs.putString("track", path); }

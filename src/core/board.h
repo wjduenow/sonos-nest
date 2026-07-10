@@ -41,3 +41,10 @@ void localAudioSetVolume(uint8_t pct);   // 0..100; no-op on boards without audi
 // nullptr if the board has no local storage/server or it couldn't start. The returned pointer
 // is owned by the board; copy it before the next call.
 const char *localFileUrl(const char *path);
+
+// Local track library — playable files (e.g. .mp3) on the board's SD card. Empty on boards
+// without local storage. Call localTracksRefresh() to (re)scan before listing.
+void        localTracksRefresh();
+int         localTrackCount();
+const char *localTrackName(int i);   // display basename (nullptr if out of range)
+const char *localTrackPath(int i);   // full path for localAudioPlay / localFileUrl

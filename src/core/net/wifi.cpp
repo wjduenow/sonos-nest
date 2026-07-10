@@ -1,24 +1,62 @@
 #include "wifi.h"
+#include "../settings.h"
 #include <WiFi.h>
-#include <Preferences.h>
 
-// Dev credentials live in include/secrets.h (gitignored). Production stores them in NVS.
+// Credentials come from NVS (set on-device via Settings), falling back to include/secrets.h
+// (gitignored) when NVS has none — so a fresh unit connects with the dev creds, and a WiFi
+// change made on the device persists and wins thereafter.
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
 
-// TODO Phase 1: load SSID/pass from NVS (or include/secrets.h during dev), connect.
-// TODO Phase 4: captive portal when no creds; persist on success.
+static volatile int s_result = WIFI_APPLY_IDLE;   // result of the last wifiApply()
 
-bool wifiConnect() {
+// Start a connection from the best available stored credentials (NVS first, then secrets.h).
+static bool beginFromStored() {
+  String ss = settingsWifiSsid(), pw = settingsWifiPass();
+  if (ss.length()) { WiFi.begin(ss.c_str(), pw.c_str()); return true; }
 #if defined(WIFI_SSID) && defined(WIFI_PASS)
-  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; ++i) delay(250);
-  return WiFi.status() == WL_CONNECTED;
+  return true;
 #else
-  return false;  // TODO: NVS creds / captive portal
+  return false;
 #endif
 }
 
+static bool waitConnected(uint32_t timeoutMs) {
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < timeoutMs) delay(200);
+  return WiFi.status() == WL_CONNECTED;
+}
+
+bool wifiConnect() {
+  WiFi.mode(WIFI_STA);
+  if (!beginFromStored()) return false;
+  return waitConnected(10000);
+}
+
 bool wifiIsConnected() { return WiFi.status() == WL_CONNECTED; }
+
+String wifiSsid() { return WiFi.SSID(); }
+
+int  wifiApplyResult()      { return s_result; }
+void wifiApplyResultReset() { s_result = WIFI_APPLY_IDLE; }
+
+// Blocking — call from netTask. Try the new creds; on success persist them; on failure revert
+// to the previously stored creds so the device isn't left offline.
+void wifiApply(const String &ssid, const String &pass) {
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  if (waitConnected(12000)) {
+    settingsSetWifi(ssid, pass);
+    s_result = WIFI_APPLY_OK;
+    return;
+  }
+  // Failed — restore the previous connection so we don't strand the device offline.
+  WiFi.disconnect();
+  delay(100);
+  beginFromStored();
+  waitConnected(8000);
+  s_result = WIFI_APPLY_FAIL;
+}

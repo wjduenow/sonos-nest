@@ -15,18 +15,19 @@
 #include "core/settings.h"
 #include "core/board.h"        // localAudioPlay/Stop/Active, backlightSet
 #include "core/sonos/ssdp.h"   // sonos::zones() for the device picker
+#include "core/net/wifi.h"     // wifiApply/result/ssid for Wi-Fi setup
 #include "ui_scale.h"
 #include <lvgl.h>
 #include <Arduino.h>
+#include <WiFi.h>              // scanNetworks for the Wi-Fi picker
 #include <vector>
 
 // This appliance is bound to one room + one Sonos saved playlist.
 static const char *TARGET_ROOM    = "Nursery";
 static const char *SLEEP_PLAYLIST = "Sleep";   // exact saved-playlist title (SQ:0)
 static const uint8_t SLEEP_VOLUME = 45;
-// The same ocean track copied onto the microSD (played locally for "Play on Device").
-static const char *LOCAL_OCEAN_FILE =
-    "/Ocean Waves Crashing - Relaxing Sounds - Calming Relaxation Music For Sleeping - 1 Hour.mp3";
+// Default local track on the microSD (options 2 & 3), used until one is picked in Settings.
+static const char *LOCAL_OCEAN_FILE = "/Ocean.mp3";
 
 // Palette (deep-night theme, easy on the eyes in a dark nursery).
 static const uint32_t COL_BG     = 0x0A1428;   // near-black navy
@@ -41,19 +42,24 @@ static uint32_t s_startMs       = 0;      // when the cloud sequence began (for 
 static bool     s_playRequested = false;  // have we posted requestPlay for this attempt yet
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 
-static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms;
-static lv_obj_t *s_playTitle, *s_volSlider;
-static lv_obj_t *s_briSlider, *s_sonosLabel, *s_roomsList;
+static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks;
+static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
+static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_roomsList, *s_tracksList;
+static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb;
 static lv_obj_t *s_toast;
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
 static std::vector<String> s_roomIps, s_roomNames;   // parallel to the device-picker rows
+static std::vector<String> s_ssids;                  // scanned Wi-Fi networks
+static String    s_pickedSsid;
+static bool      s_wifiScanPending = false;
+static bool      s_wifiConnecting  = false;
 
 // --- helpers ---------------------------------------------------------------
 
 static void showOnly(lv_obj_t *keep) {
-  lv_obj_t *pages[5] = {s_home, s_starting, s_playing, s_settings, s_rooms};
+  lv_obj_t *pages[8] = {s_home, s_starting, s_playing, s_settings, s_rooms, s_wifi, s_wifiPw, s_tracks};
   for (lv_obj_t *p : pages) {
     if (p == keep) lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     else           lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
@@ -74,6 +80,20 @@ static String prettyTitle(const String &t) {
   return t.length() ? t : String("Ocean Waves");
 }
 
+// The track options 2 & 3 play: the user's pick (Settings -> Sleep Track), else the default.
+static String currentTrack() {
+  String t = settingsSleepTrack();
+  return t.length() ? t : String(LOCAL_OCEAN_FILE);
+}
+
+// Display name for the current track: basename without the ".mp3" (e.g. "Thunder Storm").
+static String trackDisplayName() {
+  String tr = currentTrack();
+  String d = tr.substring(tr.lastIndexOf('/') + 1);
+  if (d.endsWith(".mp3")) d.remove(d.length() - 4);
+  return d;
+}
+
 static void gotoHome() {
   s_state = ST_HOME;
   s_playRequested = false;
@@ -81,10 +101,11 @@ static void gotoHome() {
   showOnly(s_home);
 }
 
-static void gotoStarting() {
+static void gotoStarting(const String &what) {
   s_state = ST_STARTING;
   s_startMs = millis();
   s_playRequested = false;
+  lv_label_set_text(s_startingLabel, (String("Starting ") + what + "\xE2\x80\xA6").c_str());
   showOnly(s_starting);
 }
 
@@ -99,7 +120,7 @@ static void gotoPlaying(const String &title, uint8_t vol) {
 // Local playback (option 3): ocean track off the SD card through the onboard speaker.
 static void gotoLocalPlaying() {
   s_localMode = true;
-  lv_label_set_text(s_playTitle, "Ocean Waves");
+  lv_label_set_text(s_playTitle, trackDisplayName().c_str());
   lv_slider_set_value(s_volSlider, s_localVol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
@@ -113,28 +134,31 @@ static void cloudCb(lv_event_t *) {
   // 2) browse the saved playlists; uiTick picks "Sleep" from the results and plays it, which
   //    (PLAY_PLAYLIST) clears the queue, enqueues, and starts playback.
   library::requestBrowse("SQ:", library::PLAY_PLAYLIST);
-  gotoStarting();
+  gotoStarting("Ocean Waves");
 }
 
 // Play from Local: serve the ocean MP3 off the SD card over HTTP and play it on the Nursery
 // Sonos (looped). netTask enqueues the URL + REPEAT_ALL; this is Sonos playback, so it lands
 // on the cloud now-playing screen (Sonos volume slider).
 static void localCb(lv_event_t *) {
-  const char *url = localFileUrl(LOCAL_OCEAN_FILE);
+  String track = currentTrack();
+  const char *url = localFileUrl(track.c_str());
   if (!url) { showToast("SD / network unavailable"); return; }
   if (stateLock()) {
-    g_pending.targetVolume   = SLEEP_VOLUME;   // 45, bedtime
-    g_pending.localStreamUrl = url;
+    g_pending.targetVolume     = SLEEP_VOLUME;   // 45, bedtime
+    g_pending.localStreamUrl   = url;
+    g_pending.localStreamTitle = trackDisplayName();
     stateUnlock();
   }
-  gotoStarting();
+  gotoStarting(trackDisplayName());
 }
 
 // Play on Device: stream the ocean MP3 from the SD card through the onboard speaker. The first
 // tap lazily mounts the SD + brings up the codec, so it can block briefly.
 static void deviceCb(lv_event_t *) {
-  if (localAudioPlay(LOCAL_OCEAN_FILE)) gotoLocalPlaying();
-  else                                  showToast("No SD card / audio unavailable");
+  String track = currentTrack();
+  if (localAudioPlay(track.c_str())) gotoLocalPlaying();
+  else                               showToast("No SD card / audio unavailable");
 }
 
 static void stopCb(lv_event_t *) {
@@ -190,10 +214,33 @@ static lv_obj_t *makeLabel(lv_obj_t *parent, const char *text, const lv_font_t *
   return l;
 }
 
+// Compact full-width list row (font 20, ellipsized) — for long entries like track names.
+static lv_obj_t *makeListButton(lv_obj_t *parent, const char *text, uint32_t color, lv_event_cb_t cb) {
+  lv_obj_t *b = lv_button_create(parent);
+  lv_obj_set_size(b, SW(92), SH(16));
+  lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+  lv_obj_set_style_radius(b, SH(4), 0);
+  lv_obj_set_style_shadow_width(b, 0, 0);
+  lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *l = lv_label_create(b);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_color(l, lv_color_white(), 0);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(l, SW(84));
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(l, text);
+  lv_obj_center(l);
+  return b;
+}
+
 // --- settings + device picker ----------------------------------------------
 
 static void openSettings();
 static void openRooms();
+static void openWifi();
+static void openWifiPw(const String &ssid);
+static void openTracks();
 
 // One gesture handler on the screen (gestures from pages/buttons bubble up to it): swipe down
 // from Home opens Settings; swipe up from Settings closes it.
@@ -214,7 +261,8 @@ static void briSliderCb(lv_event_t *) {
 }
 
 static void sonosBtnCb(lv_event_t *)  { openRooms(); }
-static void wifiBtnCb(lv_event_t *)   { showToast("Wi-Fi setup — coming soon"); }
+static void wifiBtnCb(lv_event_t *)   { openWifi(); }
+static void trackBtnCb(lv_event_t *)  { openTracks(); }
 static void backSettingsCb(lv_event_t *) { openSettings(); }
 
 static void roomClickCb(lv_event_t *e) {
@@ -233,6 +281,14 @@ static void openSettings() {
   if (room.length() == 0) room = settingsRoom();
   lv_label_set_text(s_sonosLabel,
                     (String(LV_SYMBOL_AUDIO "  ") + (room.length() ? room : String("Sonos Device"))).c_str());
+  String ssid = wifiSsid();
+  lv_label_set_text(s_wifiLabel,
+                    (String(LV_SYMBOL_WIFI "  ") + (ssid.length() ? ssid : String("Wi-Fi Setup"))).c_str());
+  String tr = currentTrack();
+  int slash = tr.lastIndexOf('/');
+  String disp = tr.substring(slash + 1);
+  if (disp.endsWith(".mp3")) disp.remove(disp.length() - 4);
+  lv_label_set_text(s_trackLabel, (String(LV_SYMBOL_AUDIO "  ") + disp).c_str());
   showOnly(s_settings);
 }
 
@@ -254,6 +310,75 @@ static void openRooms() {
   showOnly(s_rooms);
 }
 
+// --- Wi-Fi setup (scan + on-screen keyboard) -------------------------------
+
+static void ssidClickCb(lv_event_t *e) {
+  lv_obj_t *btn = (lv_obj_t *)lv_event_get_target(e);
+  int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+  if (idx >= 0 && idx < (int)s_ssids.size()) openWifiPw(s_ssids[idx]);
+}
+
+// Keyboard OK: post the new creds to netTask (which applies + persists), and show a
+// "Connecting..." state that uiTick resolves via wifiApplyResult().
+static void kbReadyCb(lv_event_t *) {
+  String pw = lv_textarea_get_text(s_wifiPwArea);
+  wifiApplyResultReset();
+  if (stateLock()) { g_pending.wifiSsid = s_pickedSsid; g_pending.wifiPass = pw; stateUnlock(); }
+  s_wifiConnecting = true;
+  lv_obj_clean(s_wifiList);
+  makeLabel(s_wifiList, (String("Connecting to ") + s_pickedSsid + "\xE2\x80\xA6").c_str(),
+            &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  showOnly(s_wifi);
+}
+static void kbCancelCb(lv_event_t *) { openWifi(); }
+
+static void openWifi() {
+  s_wifiConnecting = false;
+  lv_obj_clean(s_wifiList);
+  s_ssids.clear();
+  makeLabel(s_wifiList, "Scanning" LV_SYMBOL_REFRESH, &lv_font_montserrat_20, COL_SUBTLE);
+  WiFi.scanDelete();
+  WiFi.scanNetworks(true /* async */);
+  s_wifiScanPending = true;
+  showOnly(s_wifi);
+}
+
+static void openWifiPw(const String &ssid) {
+  s_pickedSsid = ssid;
+  lv_label_set_text(s_wifiSsidLabel, ssid.c_str());
+  lv_textarea_set_text(s_wifiPwArea, "");
+  lv_keyboard_set_textarea(s_kb, s_wifiPwArea);
+  showOnly(s_wifiPw);
+}
+
+// --- sleep-track picker (MP3s on the SD card) ------------------------------
+
+static void trackClickCb(lv_event_t *e) {
+  lv_obj_t *btn = (lv_obj_t *)lv_event_get_target(e);
+  int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+  const char *p = localTrackPath(idx);
+  if (p) { settingsSetSleepTrack(p); showToast("Sleep track set"); }
+  openSettings();
+}
+
+static void openTracks() {
+  localTracksRefresh();
+  lv_obj_clean(s_tracksList);
+  int n = localTrackCount();
+  String cur = currentTrack();
+  if (n == 0) {
+    makeLabel(s_tracksList, "No MP3s on the SD card", &lv_font_montserrat_20, COL_SUBTLE);
+  }
+  for (int i = 0; i < n; ++i) {
+    const char *name = localTrackName(i);
+    const char *path = localTrackPath(i);
+    bool sel = path && (cur == path);
+    lv_obj_t *b = makeListButton(s_tracksList, name ? name : "?", sel ? COL_CLOUD : COL_SLATE, trackClickCb);
+    lv_obj_set_user_data(b, (void *)(intptr_t)i);
+  }
+  showOnly(s_tracks);
+}
+
 // --- unit contract ---------------------------------------------------------
 
 void uiInit() {
@@ -273,10 +398,13 @@ void uiInit() {
   makeButton(s_home, "Play from Local", COL_SLATE, localCb);
   makeButton(s_home, "Play on Device",  COL_SLATE, deviceCb);
 
-  // STARTING — brief transitional state while the playlist is enqueued.
+  // STARTING — brief transitional state while playback is enqueued (label set per track).
   s_starting = makePage(scr);
   makeLabel(s_starting, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, COL_CLOUD);
-  makeLabel(s_starting, "Starting Ocean Waves\xE2\x80\xA6", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  s_startingLabel = makeLabel(s_starting, "Starting\xE2\x80\xA6", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  lv_obj_set_width(s_startingLabel, SW(92));
+  lv_label_set_long_mode(s_startingLabel, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(s_startingLabel, LV_TEXT_ALIGN_CENTER, 0);
 
   // PLAYING — status + Stop, with a volume slider anchored at the bottom (manual layout, not
   // flex, so the slider can sit at the bottom edge).
@@ -317,9 +445,9 @@ void uiInit() {
 
   // SETTINGS — reached by swiping down from Home; swipe up to close.
   s_settings = makePage(scr);
-  lv_obj_set_style_pad_row(s_settings, SH(4), 0);
-  makeLabel(s_settings, "Settings", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
-  makeLabel(s_settings, "Brightness", &lv_font_montserrat_20, COL_SUBTLE);
+  lv_obj_set_style_pad_row(s_settings, SH(2), 0);
+  makeLabel(s_settings, "Settings", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  makeLabel(s_settings, "Brightness", &lv_font_montserrat_14, COL_SUBTLE);
   s_briSlider = lv_slider_create(s_settings);
   lv_slider_set_range(s_briSlider, 10, 100);
   lv_obj_set_width(s_briSlider, SW(80));
@@ -328,9 +456,12 @@ void uiInit() {
   lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
   lv_obj_add_flag(s_briSlider, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_event_cb(s_briSlider, briSliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
-  lv_obj_t *sonosBtn = makeButton(s_settings, LV_SYMBOL_AUDIO "  Sonos Device", COL_SLATE, sonosBtnCb);
+  lv_obj_t *sonosBtn = makeListButton(s_settings, LV_SYMBOL_AUDIO "  Sonos Device", COL_SLATE, sonosBtnCb);
   s_sonosLabel = lv_obj_get_child(sonosBtn, 0);
-  makeButton(s_settings, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
+  lv_obj_t *trackBtn = makeListButton(s_settings, LV_SYMBOL_AUDIO "  Sleep Track", COL_SLATE, trackBtnCb);
+  s_trackLabel = lv_obj_get_child(trackBtn, 0);
+  lv_obj_t *wifiBtn = makeListButton(s_settings, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
+  s_wifiLabel = lv_obj_get_child(wifiBtn, 0);
   makeLabel(s_settings, LV_SYMBOL_UP "  swipe up to close", &lv_font_montserrat_14, COL_SUBTLE);
 
   // ROOMS — Sonos device picker (scrollable list of discovered rooms).
@@ -352,6 +483,66 @@ void uiInit() {
   lv_obj_set_flex_flow(s_roomsList, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(s_roomsList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(s_roomsList, SH(2), 0);
+
+  // WIFI — network scan list (same layout as the rooms picker).
+  s_wifi = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_wifi);
+  lv_obj_set_size(s_wifi, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_wifi);
+  lv_obj_remove_flag(s_wifi, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *wback = makeButton(s_wifi, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
+  lv_obj_set_size(wback, SW(28), SH(15));
+  lv_obj_set_style_text_font(lv_obj_get_child(wback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_align(wback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
+  lv_obj_t *whdr = makeLabel(s_wifi, "Wi-Fi", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(whdr, LV_ALIGN_TOP_MID, 0, SH(6));
+  s_wifiList = lv_obj_create(s_wifi);
+  lv_obj_remove_style_all(s_wifiList);
+  lv_obj_set_size(s_wifiList, SCREEN_W, SH(70));
+  lv_obj_align(s_wifiList, LV_ALIGN_BOTTOM_MID, 0, -SH(2));
+  lv_obj_set_flex_flow(s_wifiList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_wifiList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_wifiList, SH(2), 0);
+
+  // WIFI PASSWORD — SSID label + text field + on-screen keyboard.
+  s_wifiPw = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_wifiPw);
+  lv_obj_set_size(s_wifiPw, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_wifiPw);
+  lv_obj_remove_flag(s_wifiPw, LV_OBJ_FLAG_SCROLLABLE);
+  s_wifiSsidLabel = makeLabel(s_wifiPw, "", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(s_wifiSsidLabel, LV_ALIGN_TOP_MID, 0, SH(1));
+  s_wifiPwArea = lv_textarea_create(s_wifiPw);
+  lv_textarea_set_one_line(s_wifiPwArea, true);
+  lv_textarea_set_placeholder_text(s_wifiPwArea, "password");
+  lv_obj_set_width(s_wifiPwArea, SW(92));
+  lv_obj_align(s_wifiPwArea, LV_ALIGN_TOP_MID, 0, SH(15));
+  s_kb = lv_keyboard_create(s_wifiPw);
+  lv_obj_set_size(s_kb, SCREEN_W, SH(58));
+  lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_keyboard_set_textarea(s_kb, s_wifiPwArea);
+  lv_obj_add_event_cb(s_kb, kbReadyCb, LV_EVENT_READY, nullptr);
+  lv_obj_add_event_cb(s_kb, kbCancelCb, LV_EVENT_CANCEL, nullptr);
+
+  // SLEEP TRACK — picker listing the SD card's MP3s (same layout as the rooms picker).
+  s_tracks = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_tracks);
+  lv_obj_set_size(s_tracks, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_tracks);
+  lv_obj_remove_flag(s_tracks, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *tback = makeButton(s_tracks, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
+  lv_obj_set_size(tback, SW(28), SH(15));
+  lv_obj_set_style_text_font(lv_obj_get_child(tback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_align(tback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
+  lv_obj_t *thdr = makeLabel(s_tracks, "Sleep Track", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(thdr, LV_ALIGN_TOP_MID, 0, SH(6));
+  s_tracksList = lv_obj_create(s_tracks);
+  lv_obj_remove_style_all(s_tracksList);
+  lv_obj_set_size(s_tracksList, SCREEN_W, SH(70));
+  lv_obj_align(s_tracksList, LV_ALIGN_BOTTOM_MID, 0, -SH(2));
+  lv_obj_set_flex_flow(s_tracksList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_tracksList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_tracksList, SH(2), 0);
 
   lv_obj_add_event_cb(scr, screenGestureCb, LV_EVENT_GESTURE, nullptr);
 
@@ -377,6 +568,35 @@ void uiTick() {
   if (s_toastUntil && now > s_toastUntil) {
     lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
     s_toastUntil = 0;
+  }
+
+  // Wi-Fi async scan finished -> populate the network list.
+  if (s_wifiScanPending) {
+    int n = WiFi.scanComplete();
+    if (n >= 0) {
+      s_wifiScanPending = false;
+      lv_obj_clean(s_wifiList);
+      s_ssids.clear();
+      if (n == 0) makeLabel(s_wifiList, "No networks found", &lv_font_montserrat_20, COL_SUBTLE);
+      for (int i = 0; i < n && (int)s_ssids.size() < 24; ++i) {
+        String ss = WiFi.SSID(i);
+        if (ss.length() == 0) continue;
+        bool dup = false;
+        for (auto &e : s_ssids) if (e == ss) { dup = true; break; }
+        if (dup) continue;
+        lv_obj_t *b = makeButton(s_wifiList, ss.c_str(), COL_SLATE, ssidClickCb);
+        lv_obj_set_user_data(b, (void *)(intptr_t)s_ssids.size());
+        s_ssids.push_back(ss);
+      }
+      WiFi.scanDelete();
+    }
+  }
+
+  // Wi-Fi connect result (netTask ran wifiApply).
+  if (s_wifiConnecting) {
+    int r = wifiApplyResult();
+    if (r == WIFI_APPLY_OK)   { s_wifiConnecting = false; showToast("Wi-Fi connected"); openSettings(); }
+    else if (r == WIFI_APPLY_FAIL) { s_wifiConnecting = false; showToast("Couldn\xE2\x80\x99t connect"); openWifi(); }
   }
 
   switch (s_state) {

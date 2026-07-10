@@ -12,3 +12,10 @@ void    settingsSetBrightness(uint8_t pct);
 
 String  settingsZones();                 // cached discovered-zone blob ("" if none)
 void    settingsSetZones(const String &blob);
+
+String  settingsWifiSsid();              // saved WiFi creds (NVS); "" if never set on-device
+String  settingsWifiPass();
+void    settingsSetWifi(const String &ssid, const String &pass);
+
+String  settingsSleepTrack();            // selected local sleep-track path ("" = unit default)
+void    settingsSetSleepTrack(const String &path);

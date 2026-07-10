@@ -39,6 +39,9 @@ struct PendingCmds {
   String groupJoinIp;         // join this speaker to the active group
   String groupLeaveIp;        // remove this speaker from its group (become standalone)
   String localStreamUrl;      // non-empty: play this local HTTP file URL on the coordinator, looped
+  String localStreamTitle;    // dc:title shown by Sonos for the local stream
+  String wifiSsid;            // non-empty: apply these WiFi creds (with wifiPass) on netTask
+  String wifiPass;
 };
 
 // Bumped whenever the discovered zone list changes (after grouping ops / re-discovery) so

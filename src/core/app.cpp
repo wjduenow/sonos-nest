@@ -148,7 +148,7 @@ static void processPending() {
         "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
         "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
         "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
-        "<dc:title>Ocean Waves</dc:title>"
+        "<dc:title>" + (p.localStreamTitle.length() ? p.localStreamTitle : String("Ocean Waves")) + "</dc:title>"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         "<res protocolInfo=\"http-get:*:audio/mpeg:*\">" + p.localStreamUrl + "</res>"
         "</item></DIDL-Lite>";
@@ -159,6 +159,13 @@ static void processPending() {
     sonos::setPlayMode(s_coordIp, "REPEAT_ALL");
     sonos::play(s_coordIp);
     s_lastPoll = millis() - 600;
+  }
+
+  // WiFi change requested from Settings: apply the new creds (blocking; reverts on failure).
+  // Re-discover Sonos afterward since the network/IPs may have changed.
+  if (p.wifiSsid.length()) {
+    wifiApply(p.wifiSsid, p.wifiPass);
+    if (wifiIsConnected()) { sonos::ssdpDiscover(); selectZone(); }
   }
 
   // After a transport change the track/state (and art) update — poll again soon, once the

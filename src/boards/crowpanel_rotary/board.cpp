@@ -31,3 +31,7 @@ void localAudioStop() {}
 bool localAudioActive() { return false; }
 void localAudioSetVolume(uint8_t /*pct*/) {}
 const char *localFileUrl(const char * /*path*/) { return nullptr; }
+void localTracksRefresh() {}
+int  localTrackCount() { return 0; }
+const char *localTrackName(int) { return nullptr; }
+const char *localTrackPath(int) { return nullptr; }
