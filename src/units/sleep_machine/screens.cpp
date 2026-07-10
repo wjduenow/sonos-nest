@@ -41,9 +41,11 @@ static bool     s_playRequested = false;  // have we posted requestPlay for this
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 
 static lv_obj_t *s_home, *s_starting, *s_playing;
-static lv_obj_t *s_playTitle, *s_playSub, *s_playStatus;
+static lv_obj_t *s_playTitle, *s_playStatus, *s_volSlider;
 static lv_obj_t *s_toast;
-static uint32_t  s_toastUntil = 0;
+static uint32_t  s_toastUntil   = 0;
+static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
+static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
 
 // --- helpers ---------------------------------------------------------------
 
@@ -86,10 +88,8 @@ static void gotoStarting() {
 static void gotoPlaying(const String &title, uint8_t vol) {
   s_localMode = false;
   lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
-  lv_label_set_text(s_playSub, "Nursery");
-  char buf[48];
-  snprintf(buf, sizeof(buf), LV_SYMBOL_PLAY "  Playing   ·   Vol %u", (unsigned)vol);
-  lv_label_set_text(s_playStatus, buf);
+  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  Playing");
+  lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
 }
@@ -98,8 +98,8 @@ static void gotoPlaying(const String &title, uint8_t vol) {
 static void gotoLocalPlaying() {
   s_localMode = true;
   lv_label_set_text(s_playTitle, "Ocean Waves");
-  lv_label_set_text(s_playSub, "On device");
-  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  Playing   ·   Local");
+  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  On device");
+  lv_slider_set_value(s_volSlider, s_localVol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
 }
@@ -127,6 +127,15 @@ static void deviceCb(lv_event_t *) {
 static void stopCb(lv_event_t *) {
   if (s_localMode) { localAudioStop(); gotoHome(); }
   else if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); }
+}
+
+// Bottom volume slider: drives the Sonos speaker volume (cloud) or the ES8311 codec volume
+// (on-device). Coalesced for Sonos via g_pending.targetVolume.
+static void volSliderCb(lv_event_t *) {
+  int v = lv_slider_get_value(s_volSlider);
+  s_volTouchedMs = millis();
+  if (s_localMode) { s_localVol = (uint8_t)v; localAudioSetVolume((uint8_t)v); }
+  else if (stateLock()) { g_pending.targetVolume = v; stateUnlock(); }
 }
 
 // --- widget builders -------------------------------------------------------
@@ -177,10 +186,9 @@ void uiInit() {
   lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
   lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-  // HOME — room header + three options.
+  // HOME — three options.
   s_home = makePage(scr);
   lv_obj_set_style_pad_row(s_home, SH(5), 0);
-  makeLabel(s_home, LV_SYMBOL_AUDIO "  Nursery", &lv_font_montserrat_20, COL_SUBTLE);
   makeButton(s_home, "Play from Cloud", COL_CLOUD, cloudCb);
   makeButton(s_home, "Play from Local", COL_SLATE, localCb);
   makeButton(s_home, "Play on Device",  COL_SLATE, deviceCb);
@@ -190,12 +198,33 @@ void uiInit() {
   makeLabel(s_starting, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, COL_CLOUD);
   makeLabel(s_starting, "Starting Ocean Waves\xE2\x80\xA6", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
 
-  // PLAYING — live status + Stop.
-  s_playing   = makePage(scr);
+  // PLAYING — status + Stop, with a volume slider anchored at the bottom (manual layout, not
+  // flex, so the slider can sit at the bottom edge).
+  s_playing = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_playing);
+  lv_obj_set_size(s_playing, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_playing);
+  lv_obj_remove_flag(s_playing, LV_OBJ_FLAG_SCROLLABLE);
+
   s_playTitle = makeLabel(s_playing, "Ocean Waves", &lv_font_montserrat_28, lv_color_to_u32(lv_color_white()));
-  s_playSub    = makeLabel(s_playing, "Nursery", &lv_font_montserrat_20, COL_SUBTLE);
+  lv_obj_align(s_playTitle, LV_ALIGN_TOP_MID, 0, SH(13));
   s_playStatus = makeLabel(s_playing, LV_SYMBOL_PLAY "  Playing", &lv_font_montserrat_20, COL_SUBTLE);
-  makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
+  lv_obj_align(s_playStatus, LV_ALIGN_TOP_MID, 0, SH(31));
+
+  lv_obj_t *stop = makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
+  lv_obj_align(stop, LV_ALIGN_CENTER, 0, -SH(4));
+
+  lv_obj_t *volIcon = makeLabel(s_playing, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, COL_SUBTLE);
+  lv_obj_align(volIcon, LV_ALIGN_BOTTOM_LEFT, SW(6), -SH(11));
+
+  s_volSlider = lv_slider_create(s_playing);
+  lv_slider_set_range(s_volSlider, 0, 100);
+  lv_obj_set_width(s_volSlider, SW(72));
+  lv_obj_align(s_volSlider, LV_ALIGN_BOTTOM_MID, SW(8), -SH(13));
+  lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_SLATE), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
+  lv_obj_add_event_cb(s_volSlider, volSliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
 
   // TOAST — transient bottom message for the placeholder actions / errors.
   s_toast = lv_label_create(scr);
@@ -262,7 +291,14 @@ void uiTick() {
       } else if (tr == TransportState::Stopped || tr == TransportState::Paused) {
         gotoHome();
       } else {
-        gotoPlaying(title, vol);   // keep the live Sonos title/volume fresh
+        // Keep the live Sonos title fresh, and sync the slider to the speaker's volume —
+        // but not while the user is dragging it or just did (so we don't fight the drag).
+        lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
+        bool dragging = lv_obj_has_state(s_volSlider, LV_STATE_PRESSED);
+        if (!dragging && now - s_volTouchedMs > 1500 &&
+            lv_slider_get_value(s_volSlider) != vol) {
+          lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
+        }
       }
       break;
   }

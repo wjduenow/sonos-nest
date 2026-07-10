@@ -34,3 +34,4 @@ bool      knobDown();              // true while the knob is held; false if no k
 bool localAudioPlay(const char *path);
 void localAudioStop();
 bool localAudioActive();           // true while a local file is playing
+void localAudioSetVolume(uint8_t pct);   // 0..100; no-op on boards without audio

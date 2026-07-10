@@ -17,7 +17,11 @@
 static DriverDeviceInfo   s_pins;
 static AudioBoard         s_board(AudioDriverES8311, s_pins);
 static I2SCodecStream     s_out(s_board);
-static EncodedAudioStream s_decoder(&s_out, new MP3DecoderHelix());
+// Software volume before the codec: the ES8311's own volume register doesn't take on this
+// board, so we scale the PCM here instead. VolumeStream(AudioStream&) also forwards the
+// decoder's sample-rate changes on to the codec.
+static VolumeStream       s_vol(s_out);
+static EncodedAudioStream s_decoder(&s_vol, new MP3DecoderHelix());
 static StreamCopy         s_copier;
 static fs::File           s_file;
 
@@ -44,7 +48,12 @@ static bool ensureInit() {
   auto cfg = s_out.defaultConfig();
   cfg.copyFrom(AudioInfo(44100, 2, 16));
   s_out.begin(cfg);
-  s_out.setVolume(0.6f);
+  s_out.setVolume(1.0f);   // codec at full; the software VolumeStream sets the actual level
+
+  auto vcfg = s_vol.defaultConfig();
+  vcfg.copyFrom(AudioInfo(44100, 2, 16));
+  s_vol.begin(vcfg);
+  s_vol.setVolume(0.6f);   // default 60% (matches the slider's default)
 
   // Speaker power amp: active-low enable. Keep it OFF (HIGH) until we're actually playing so
   // there's no idle hiss.
@@ -101,3 +110,9 @@ void localAudioStop() {
 }
 
 bool localAudioActive() { return s_active; }
+
+void localAudioSetVolume(uint8_t pct) {
+  if (!s_inited) return;                 // pipeline not up yet (only playing has a slider)
+  if (pct > 100) pct = 100;
+  s_vol.setVolume(pct / 100.0f);         // software gain before the codec
+}
