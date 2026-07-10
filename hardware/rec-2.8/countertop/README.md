@@ -59,11 +59,14 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   right-hand bare-PCB strip** — 8 mm up from the board's bottom edge. The port lands
   4.12 mm from the lower-right corner screw, leaving **0.42 mm** between the Ø2 port and
   a max-size Ø5.4 screw head, so **don't oversize that screw head**.
-- **Speaker (kit's ~20×15 box, 8 Ω / ~1 W):** **downward-firing** pocket in the solid
+- **Speaker (kit's 38 × 26 × 8 mm box, 8 Ω / ~1 W):** **downward-firing** pocket in the solid
   back of the wedge, **loaded from the rear**, firing through an integral **grille** in
   the base. Four **feet** lift the base 4 mm for the air gap. A wire channel connects the
   pocket up to the board's SPEAKER header. The box speaker is self-enclosed, so no sealed
-  chamber is needed. The speaker sits at the front of the pocket; a **snap-in cap**
+  chamber is needed. It's laid **38 mm across / 26 mm deep**: a 38 mm insertion depth would
+  force `BACK_Y ≈ 57`, and since it fires straight down the 90° rotation costs nothing.
+  The 26 mm depth is what sets **`BACK_Y = 48`** (see below). The speaker sits at the front
+  of the pocket; a **snap-in cap**
   (`speaker_cap.stl`) closes the rear load port, backs the speaker in, and clicks into two
   catch recesses in the pocket walls. The hooks are **arrow-profiled (lead-out ramps)** and
   the plate has a **fingernail pull-tab** on its bottom edge — hook a nail/spudger under
@@ -77,7 +80,11 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   provides **no card opening** and the back wall stays solid. Swap the card with the
   board out of the case. (Content is expected to be written once; the unit streams from
   Sonos in normal use.)
-- **20° recline** on a flat base for nightstand viewing.
+- **20° recline** on a flat base for nightstand viewing. Footprint **94 × 48 mm**.
+  `BACK_Y = 48` is **not free**: the 26 mm-deep speaker pocket's front wall must stay
+  behind the board-cavity floor plane (`y = 0.364·z + 8.833`), which needs `BACK_Y ≥ 45.2`.
+  Any shallower and the pocket breaks into the cavity right at the board's bottom edge —
+  where the microSD socket and the inserted card live.
 
 ## Screws (BOM)
 
@@ -124,7 +131,7 @@ RESET_X                    # RESET button along the board width  (still estimate
 RESET_Y                    # MEASURED: 7.0 mm c-to-c from the (-39,+21) corner hole
 MIC_X                      # mic across the board width          (still estimated)
 MIC_Y                      # MEASURED: 8.0 mm up from the PCB's bottom edge
-SPK_W, SPK_L, SPK_T        # included speaker box size (measure the real one)
+SPK_W, SPK_L, SPK_T        # MEASURED: 38 x 26 x 8 speaker box
 ```
 
 **microSD needs no verification** — the case has no card opening, so nothing has to
@@ -156,16 +163,19 @@ so the two parts can't drift.
 ## Print notes
 
 **Infill:** not part of the STL — it's a slicer setting you pick at print time. The
-shell models as a *solid* ~133 cm³ block; the slicer fills the interior at whatever
+shell models as a *solid* ~173 cm³ block; the slicer fills the interior at whatever
 infill you choose. This is a static compression part, so **15 % is plenty** (20 % if you
-want extra heft/stability). At 15 %, ~3 walls, expect roughly **~65 g of PLA and ~2 h**
+want extra heft/stability). At 15 %, ~3 walls, expect roughly **~85 g of PLA and ~2.5 h**
 for the shell; the bezel is ~10 g / ~25 min. There's no need to hollow the model —
 infill handles the weight.
 
 - **shell:** print base-down (as modeled, on the feet). The reclined face self-supports;
   the boss pilots and jack cutout print cleanly. The **speaker pocket** is a rear-loaded
-  cavity — its ceiling bridges ~15 mm, so enable bridging (or a little support) for that
-  one region. The rear reset/speaker openings exit low on the back.
+  cavity whose ceiling now bridges **39.2 mm** (it was ~21 mm with the old 20 mm-wide
+  speaker) — that is past comfortable bridging distance, so **enable supports for that
+  region**, or expect some ceiling droop. Droop there is cosmetic (it's a blind cavity
+  behind the cap), but heavy droop eats into the 8 mm box clearance. The rear
+  reset/speaker openings exit low on the back.
 - **bezel:** print flat, face-down; the countersinks are on the up-face.
 - **speaker cap:** print plate-down (arms/hooks + pull-tab up). Fit/retention tuning:
   `CAP_CLR` (looser = easier), `CAP_HOOK`/`CAP_HOOK_RAMP` (retention strength vs pry effort).

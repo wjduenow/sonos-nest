@@ -169,15 +169,23 @@ def speaker_pocket():
     return box(extents=(P.SPK_W + 2 * P.SPK_FIT, y1 - y0, z1 - z0),
                transform=translation_matrix([P.SPK_CX, (y0 + y1) / 2, (z0 + z1) / 2]))
 
+def _grille_offsets(extent, margin=1.0):
+    """Hole-centre offsets, symmetric about 0, that keep the full hole inside `extent`.
+    (A plain range(-n//2, n//2+1) floors negatively for odd n -> off-centre grid whose
+    first row can fall outside the pocket and drill a blind hole into the solid base.)"""
+    span = extent - P.GRILLE_HOLE - 2.0 * margin      # centre-to-centre span available
+    if span < 0:
+        return [0.0]
+    n = int(span // P.GRILLE_PITCH)                   # number of gaps -> n+1 holes
+    return [(k - n / 2.0) * P.GRILLE_PITCH for k in range(n + 1)]
+
 def speaker_grille():
     _, _, yc = _spk_y()
-    holes, nx = [], int(P.SPK_W // P.GRILLE_PITCH)
-    ny = int(P.SPK_L // P.GRILLE_PITCH)
-    for i in range(-nx // 2, nx // 2 + 1):
-        for j in range(-ny // 2, ny // 2 + 1):
+    holes = []
+    for dx in _grille_offsets(P.SPK_W):
+        for dy in _grille_offsets(P.SPK_L):
             h = cylinder(radius=P.GRILLE_HOLE / 2, height=P.GRILLE_T + 1.0, sections=32)
-            h.apply_translation([P.SPK_CX + i * P.GRILLE_PITCH,
-                                 yc + j * P.GRILLE_PITCH, P.GRILLE_T / 2])
+            h.apply_translation([P.SPK_CX + dx, yc + dy, P.GRILLE_T / 2])
             holes.append(h)
     return holes
 

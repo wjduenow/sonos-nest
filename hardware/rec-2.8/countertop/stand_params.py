@@ -62,7 +62,11 @@ MB          = 9.0      # face margin below the board (bottom lip)
 MT          = 9.0      # face margin above the board (top lip)
 FRONT_LIP   = 0.0      # face bottom sits at the very front-bottom of the base
 W_OUT       = 94.0     # body width in X  -> ~3.6 mm side walls around the pocket
-BACK_Y      = 40.0     # back wall depth (base footprint 0..BACK_Y)
+BACK_Y      = 48.0     # back wall depth (base footprint 0..BACK_Y)
+                       # >=45.2 is REQUIRED by the 26 mm-deep speaker pocket: its front
+                       # wall must clear the board-cavity floor plane (y = 0.364z + 8.833),
+                       # else the pocket breaks into the cavity at the board's bottom edge
+                       # -- exactly where the microSD socket + card live.
 WALL        = 3.0      # nominal wall thickness target
 
 # pocket that the board drops into (board footprint + clearance)
@@ -142,12 +146,14 @@ MIC_Y       = -17.0    # = -PCB_H/2 + 8.0  -> 8 mm from the board's bottom edge
 MIC_HOLE_D  = 2.0
 MIC_CSK_D   = 4.5      # funnel Ø on the visible bezel face (tapers to MIC_HOLE_D)
 
-# included kit speaker: enclosed ~20x15 box, 8Ω / ~1 W (FM8002E amp), DOWNWARD-firing.
+# included kit speaker: enclosed 38 x 26 x 8 box, 8Ω / ~1 W (FM8002E amp), DOWNWARD-firing.
 # Housed in the solid back of the wedge, loaded from the rear, firing down through a
-# grille; feet lift the base for the air gap.  *** SIZE ESTIMATED -- VERIFY the box ***
-SPK_W        = 20.0    # box footprint X
-SPK_L        = 15.0    # box footprint Y (rear insertion depth)
-SPK_T        = 11.0    # box thickness (Z)
+# grille; feet lift the base for the air gap.  Footprint MEASURED (38 x 26); the box is
+# laid 38-across / 26-deep because a 38 mm insertion depth would need BACK_Y ~= 57.
+# It fires straight down, so the 90deg rotation costs nothing acoustically.
+SPK_W        = 38.0    # box footprint X  (across the case)
+SPK_L        = 26.0    # box footprint Y  (rear insertion depth)
+SPK_T        = 8.0     # box thickness (Z)
 SPK_FIT      = 0.6     # pocket clearance
 SPK_CX       = 0.0     # pocket centre X (clear of the -X cable channel)
 GRILLE_T     = 1.5     # perforated floor thickness under the speaker
