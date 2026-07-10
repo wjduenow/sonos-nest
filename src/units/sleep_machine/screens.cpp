@@ -64,12 +64,14 @@ static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
 static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_roomsList, *s_tracksList;
 static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb;
 static lv_obj_t *s_toast;
-static lv_obj_t *s_screensaver, *s_clockLabel;
+static lv_obj_t *s_screensaver, *s_ssBox, *s_clockLabel, *s_timerLabel;
 static lv_obj_t *s_curPage   = nullptr;   // page currently shown (screensaver return target)
 static lv_obj_t *s_ssReturn  = nullptr;   // page to restore on wake
 static bool      s_ssOn      = false;     // screensaver currently showing
+static bool      s_ssShowTimer = false;   // screensaver includes the sleep-elapsed timer
 static uint32_t  s_ssDriftMs = 0, s_ssClockMs = 0;
 static uint8_t   s_ssDriftIdx = 0;
+static uint32_t  s_playStartMs = 0;       // when the current playback started (for the timer)
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
@@ -146,6 +148,7 @@ static void gotoStarting(const String &what) {
 }
 
 static void gotoPlaying(const String &title, uint8_t vol) {
+  if (s_state != ST_PLAYING) s_playStartMs = millis();   // stamp the start on transition in
   s_localMode = false;
   lv_label_set_text(s_playTitle, sonosDisplayTitle(title).c_str());
   lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
@@ -155,6 +158,7 @@ static void gotoPlaying(const String &title, uint8_t vol) {
 
 // Local playback (option 3): ocean track off the SD card through the onboard speaker.
 static void gotoLocalPlaying() {
+  if (s_state != ST_PLAYING) s_playStartMs = millis();   // stamp the start on transition in
   s_localMode = true;
   lv_label_set_text(s_playTitle, trackDisplayName().c_str());
   lv_slider_set_value(s_volSlider, s_localVol, LV_ANIM_OFF);
@@ -506,17 +510,29 @@ static void ssUpdateClock() {
   }
 }
 
-// Nudge the clock to a new position periodically so it never sits on the same pixels.
+// Running elapsed time since playback started, as a ticking timer.
+static void ssUpdateTimer() {
+  uint32_t sec = (millis() - s_playStartMs) / 1000;
+  char buf[24];
+  snprintf(buf, sizeof(buf), LV_SYMBOL_PLAY "  %u:%02u:%02u",
+           (unsigned)(sec / 3600), (unsigned)((sec % 3600) / 60), (unsigned)(sec % 60));
+  lv_label_set_text(s_timerLabel, buf);
+}
+
+// Nudge the whole box to a new position periodically so it never sits on the same pixels.
 static void ssDrift() {
   static const int8_t off[8][2] = {{0,-14},{16,-7},{18,9},{5,16},{-12,15},{-18,3},{-10,-12},{9,-11}};
   s_ssDriftIdx = (s_ssDriftIdx + 1) & 7;
-  lv_obj_align(s_clockLabel, LV_ALIGN_CENTER, off[s_ssDriftIdx][0], off[s_ssDriftIdx][1]);
+  lv_obj_align(s_ssBox, LV_ALIGN_CENTER, off[s_ssDriftIdx][0], off[s_ssDriftIdx][1]);
 }
 
 static void enterScreensaver() {
   s_ssReturn = s_curPage;
   s_ssOn = true;
+  s_ssShowTimer = (s_ssReturn == s_playing);   // show the sleep timer only while playing
   s_ssDriftMs = s_ssClockMs = millis();
+  if (s_ssShowTimer) { lv_obj_remove_flag(s_timerLabel, LV_OBJ_FLAG_HIDDEN); ssUpdateTimer(); }
+  else               { lv_obj_add_flag(s_timerLabel, LV_OBJ_FLAG_HIDDEN); }
   ssUpdateClock();
   ssDrift();
   showOnly(s_screensaver);
@@ -757,8 +773,15 @@ void uiInit() {
   lv_obj_remove_flag(s_screensaver, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_color(s_screensaver, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(s_screensaver, LV_OPA_COVER, 0);
-  s_clockLabel = makeLabel(s_screensaver, "--:--", &lv_font_montserrat_48, COL_SUBTLE);
-  lv_obj_center(s_clockLabel);
+  s_ssBox = lv_obj_create(s_screensaver);
+  lv_obj_remove_style_all(s_ssBox);
+  lv_obj_set_size(s_ssBox, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_center(s_ssBox);
+  lv_obj_set_flex_flow(s_ssBox, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_ssBox, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_ssBox, SH(2), 0);
+  s_clockLabel = makeLabel(s_ssBox, "--:--", &lv_font_montserrat_48, COL_SUBTLE);   // current time
+  s_timerLabel = makeLabel(s_ssBox, "", &lv_font_montserrat_28, COL_SUBTLE);        // sleep elapsed
 
   lv_obj_add_event_cb(scr, screenGestureCb, LV_EVENT_GESTURE, nullptr);
 
@@ -793,7 +816,11 @@ void uiTick() {
     if (idle < 800) {
       exitScreensaver();                          // woke on touch -> fall through to normal UI
     } else {
-      if (now - s_ssClockMs > 1000)  { s_ssClockMs = now; ssUpdateClock(); }
+      if (now - s_ssClockMs > 1000) {
+        s_ssClockMs = now;
+        ssUpdateClock();
+        if (s_ssShowTimer) ssUpdateTimer();
+      }
       if (now - s_ssDriftMs > 30000) { s_ssDriftMs = now; ssDrift(); }
       return;
     }
