@@ -152,7 +152,8 @@ static void processPending() {
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         "<res protocolInfo=\"http-get:*:audio/mpeg:*\">" + p.localStreamUrl + "</res>"
         "</item></DIDL-Lite>";
-    sonos::removeAllTracksFromQueue(s_coordIp);
+    sonos::removeAllTracksFromQueue(s_coordIp);           // clear the queue first
+    if (p.targetVolume >= 0) sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume);  // volume before play
     sonos::addUriToQueue(s_coordIp, p.localStreamUrl, meta);
     sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
     sonos::setPlayMode(s_coordIp, "REPEAT_ALL");

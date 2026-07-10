@@ -41,7 +41,7 @@ static bool     s_playRequested = false;  // have we posted requestPlay for this
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 
 static lv_obj_t *s_home, *s_starting, *s_playing;
-static lv_obj_t *s_playTitle, *s_playStatus, *s_volSlider;
+static lv_obj_t *s_playTitle, *s_volSlider;
 static lv_obj_t *s_toast;
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
@@ -88,7 +88,6 @@ static void gotoStarting() {
 static void gotoPlaying(const String &title, uint8_t vol) {
   s_localMode = false;
   lv_label_set_text(s_playTitle, prettyTitle(title).c_str());
-  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  Playing");
   lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
@@ -98,7 +97,6 @@ static void gotoPlaying(const String &title, uint8_t vol) {
 static void gotoLocalPlaying() {
   s_localMode = true;
   lv_label_set_text(s_playTitle, "Ocean Waves");
-  lv_label_set_text(s_playStatus, LV_SYMBOL_PLAY "  On device");
   lv_slider_set_value(s_volSlider, s_localVol, LV_ANIM_OFF);
   s_state = ST_PLAYING;
   showOnly(s_playing);
@@ -219,12 +217,10 @@ void uiInit() {
   lv_obj_remove_flag(s_playing, LV_OBJ_FLAG_SCROLLABLE);
 
   s_playTitle = makeLabel(s_playing, "Ocean Waves", &lv_font_montserrat_28, lv_color_to_u32(lv_color_white()));
-  lv_obj_align(s_playTitle, LV_ALIGN_TOP_MID, 0, SH(13));
-  s_playStatus = makeLabel(s_playing, LV_SYMBOL_PLAY "  Playing", &lv_font_montserrat_20, COL_SUBTLE);
-  lv_obj_align(s_playStatus, LV_ALIGN_TOP_MID, 0, SH(31));
+  lv_obj_align(s_playTitle, LV_ALIGN_TOP_MID, 0, SH(22));
 
   lv_obj_t *stop = makeButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, stopCb);
-  lv_obj_align(stop, LV_ALIGN_CENTER, 0, -SH(4));
+  lv_obj_align(stop, LV_ALIGN_CENTER, 0, -SH(2));
 
   lv_obj_t *volIcon = makeLabel(s_playing, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, COL_SUBTLE);
   lv_obj_align(volIcon, LV_ALIGN_BOTTOM_LEFT, SW(6), -SH(11));
