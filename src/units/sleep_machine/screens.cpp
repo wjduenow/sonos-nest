@@ -13,7 +13,8 @@
 #include "core/player_state.h"
 #include "core/library.h"
 #include "core/settings.h"
-#include "core/board.h"        // localAudioPlay/Stop/Active (option 3)
+#include "core/board.h"        // localAudioPlay/Stop/Active, backlightSet
+#include "core/sonos/ssdp.h"   // sonos::zones() for the device picker
 #include "ui_scale.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -40,17 +41,19 @@ static uint32_t s_startMs       = 0;      // when the cloud sequence began (for 
 static bool     s_playRequested = false;  // have we posted requestPlay for this attempt yet
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 
-static lv_obj_t *s_home, *s_starting, *s_playing;
+static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms;
 static lv_obj_t *s_playTitle, *s_volSlider;
+static lv_obj_t *s_briSlider, *s_sonosLabel, *s_roomsList;
 static lv_obj_t *s_toast;
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
+static std::vector<String> s_roomIps, s_roomNames;   // parallel to the device-picker rows
 
 // --- helpers ---------------------------------------------------------------
 
 static void showOnly(lv_obj_t *keep) {
-  lv_obj_t *pages[3] = {s_home, s_starting, s_playing};
+  lv_obj_t *pages[5] = {s_home, s_starting, s_playing, s_settings, s_rooms};
   for (lv_obj_t *p : pages) {
     if (p == keep) lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     else           lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
@@ -159,6 +162,7 @@ static lv_obj_t *makePage(lv_obj_t *scr) {
   lv_obj_set_flex_align(p, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(p, SH(4), 0);
   lv_obj_remove_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(p, LV_OBJ_FLAG_EVENT_BUBBLE);   // let swipe gestures bubble up to the screen
   return p;
 }
 
@@ -168,6 +172,7 @@ static lv_obj_t *makeButton(lv_obj_t *parent, const char *text, uint32_t color, 
   lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
   lv_obj_set_style_radius(b, SH(6), 0);
   lv_obj_set_style_shadow_width(b, 0, 0);
+  lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);   // let swipe gestures reach the page below
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
   lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
@@ -185,12 +190,76 @@ static lv_obj_t *makeLabel(lv_obj_t *parent, const char *text, const lv_font_t *
   return l;
 }
 
+// --- settings + device picker ----------------------------------------------
+
+static void openSettings();
+static void openRooms();
+
+// One gesture handler on the screen (gestures from pages/buttons bubble up to it): swipe down
+// from Home opens Settings; swipe up from Settings closes it.
+static void screenGestureCb(lv_event_t *) {
+  lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+  if (!lv_obj_has_flag(s_home, LV_OBJ_FLAG_HIDDEN)) {
+    if (dir == LV_DIR_BOTTOM) openSettings();
+  } else if (!lv_obj_has_flag(s_settings, LV_OBJ_FLAG_HIDDEN)) {
+    if (dir == LV_DIR_TOP) gotoHome();
+  }
+}
+
+static void briSliderCb(lv_event_t *) {
+  int v = lv_slider_get_value(s_briSlider);
+  if (v < 10) v = 10;
+  backlightSet((uint8_t)v);
+  settingsSetBrightness((uint8_t)v);
+}
+
+static void sonosBtnCb(lv_event_t *)  { openRooms(); }
+static void wifiBtnCb(lv_event_t *)   { showToast("Wi-Fi setup — coming soon"); }
+static void backSettingsCb(lv_event_t *) { openSettings(); }
+
+static void roomClickCb(lv_event_t *e) {
+  lv_obj_t *btn = (lv_obj_t *)lv_event_get_target(e);
+  int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
+  if (idx < 0 || idx >= (int)s_roomIps.size()) return;
+  settingsSetRoom(s_roomNames[idx]);                                  // persist the choice
+  if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
+  openSettings();
+}
+
+static void openSettings() {
+  lv_slider_set_value(s_briSlider, settingsBrightness(), LV_ANIM_OFF);
+  String room;
+  if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
+  if (room.length() == 0) room = settingsRoom();
+  lv_label_set_text(s_sonosLabel,
+                    (String(LV_SYMBOL_AUDIO "  ") + (room.length() ? room : String("Sonos Device"))).c_str());
+  showOnly(s_settings);
+}
+
+static void openRooms() {
+  lv_obj_clean(s_roomsList);
+  s_roomIps.clear();
+  s_roomNames.clear();
+  String cur;
+  if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
+  const std::vector<sonos::Zone> &zs = sonos::zones();
+  if (zs.empty()) makeLabel(s_roomsList, "Searching\xE2\x80\xA6", &lv_font_montserrat_20, COL_SUBTLE);
+  for (size_t i = 0; i < zs.size(); ++i) {
+    lv_obj_t *b = makeButton(s_roomsList, zs[i].name.c_str(),
+                             zs[i].name == cur ? COL_CLOUD : COL_SLATE, roomClickCb);
+    lv_obj_set_user_data(b, (void *)(intptr_t)i);
+    s_roomIps.push_back(zs[i].ip);
+    s_roomNames.push_back(zs[i].name);
+  }
+  showOnly(s_rooms);
+}
+
 // --- unit contract ---------------------------------------------------------
 
 void uiInit() {
-  // Lock the shared core to the Nursery zone. main.cpp calls uiInit() before appBoot(), so
-  // the core's selectZone() (saved room -> SONOS_DEFAULT_ROOM -> first) picks Nursery.
-  settingsSetRoom(TARGET_ROOM);
+  // Default the shared core to the Nursery zone on first boot only, so a device picked in
+  // Settings persists. main.cpp calls uiInit() before appBoot(), so selectZone() sees it.
+  if (settingsRoom().length() == 0) settingsSetRoom(TARGET_ROOM);
   library::setLoopMode(true);   // cloud playback (option 1) loops the "Sleep" playlist forever
 
   lv_obj_t *scr = lv_screen_active();
@@ -245,6 +314,46 @@ void uiInit() {
   lv_obj_set_style_radius(s_toast, SH(4), 0);
   lv_obj_align(s_toast, LV_ALIGN_BOTTOM_MID, 0, -SH(4));
   lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+
+  // SETTINGS — reached by swiping down from Home; swipe up to close.
+  s_settings = makePage(scr);
+  lv_obj_set_style_pad_row(s_settings, SH(4), 0);
+  makeLabel(s_settings, "Settings", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  makeLabel(s_settings, "Brightness", &lv_font_montserrat_20, COL_SUBTLE);
+  s_briSlider = lv_slider_create(s_settings);
+  lv_slider_set_range(s_briSlider, 10, 100);
+  lv_obj_set_width(s_briSlider, SW(80));
+  lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_SLATE), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_CLOUD), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
+  lv_obj_add_flag(s_briSlider, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_event_cb(s_briSlider, briSliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_t *sonosBtn = makeButton(s_settings, LV_SYMBOL_AUDIO "  Sonos Device", COL_SLATE, sonosBtnCb);
+  s_sonosLabel = lv_obj_get_child(sonosBtn, 0);
+  makeButton(s_settings, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
+  makeLabel(s_settings, LV_SYMBOL_UP "  swipe up to close", &lv_font_montserrat_14, COL_SUBTLE);
+
+  // ROOMS — Sonos device picker (scrollable list of discovered rooms).
+  s_rooms = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_rooms);
+  lv_obj_set_size(s_rooms, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_rooms);
+  lv_obj_remove_flag(s_rooms, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *rback = makeButton(s_rooms, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
+  lv_obj_set_size(rback, SW(28), SH(15));
+  lv_obj_set_style_text_font(lv_obj_get_child(rback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_align(rback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
+  lv_obj_t *rhdr = makeLabel(s_rooms, "Sonos Device", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(rhdr, LV_ALIGN_TOP_MID, 0, SH(6));
+  s_roomsList = lv_obj_create(s_rooms);
+  lv_obj_remove_style_all(s_roomsList);
+  lv_obj_set_size(s_roomsList, SCREEN_W, SH(70));
+  lv_obj_align(s_roomsList, LV_ALIGN_BOTTOM_MID, 0, -SH(2));
+  lv_obj_set_flex_flow(s_roomsList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_roomsList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_roomsList, SH(2), 0);
+
+  lv_obj_add_event_cb(scr, screenGestureCb, LV_EVENT_GESTURE, nullptr);
 
   gotoHome();
 }
