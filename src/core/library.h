@@ -13,6 +13,7 @@ enum PlayMode { PLAY_FAVORITE = 0,  // SetAVTransportURI + Play   (FV:2)
                 PLAY_QUEUE    = 2 };// Seek to track N in the queue (Q:0)
 
 // --- UI side ---
+void setLoopMode(bool on);           // if set, enqueued playlists play looped (REPEAT_ALL)
 void requestBrowse(const String &objectId, int playMode);   // FV:2 / SQ: / Q:0
 bool busy();                                                 // a browse is in flight
 bool takeResults(std::vector<String> &labelsOut);            // true once when new results land

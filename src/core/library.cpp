@@ -8,6 +8,9 @@ namespace library {
 static String s_reqObject;        // pending browse object id ("" = none)
 static int    s_mode = PLAY_FAVORITE;  // how to act on a selection in the current list
 static bool   s_busy = false;
+static bool   s_loop = false;     // if set, enqueued playlists play with REPEAT_ALL (loop forever)
+
+void setLoopMode(bool on) { s_loop = on; }
 
 // One cached row: just the title (for display) plus the *fetch key* — the parent object and
 // the row's true child index within it. At play time we re-browse (parent, childIdx, 1) to
@@ -152,6 +155,7 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
     sonos::removeAllTracksFromQueue(coordIp);
     sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
     sonos::setAvTransportUri(coordIp, "x-rincon-queue:" + coordUuid + "#0", "");
+    if (s_loop) sonos::setPlayMode(coordIp, "REPEAT_ALL");   // loop the queue (sleep-machine)
     sonos::play(coordIp);
   } else {
     sonos::setAvTransportUri(coordIp, item.resUri, item.metadata);

@@ -191,6 +191,7 @@ void uiInit() {
   // Lock the shared core to the Nursery zone. main.cpp calls uiInit() before appBoot(), so
   // the core's selectZone() (saved room -> SONOS_DEFAULT_ROOM -> first) picks Nursery.
   settingsSetRoom(TARGET_ROOM);
+  library::setLoopMode(true);   // cloud playback (option 1) loops the "Sleep" playlist forever
 
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
