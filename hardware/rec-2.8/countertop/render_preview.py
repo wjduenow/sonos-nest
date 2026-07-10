@@ -95,8 +95,9 @@ rect(0, 0, P.PCB_W, P.PCB_H, fc='none', ec='#159', lw=1.4)
 a.text(0, P.PCB_H/2+2, 'PCB 86×50', color='#159', fontsize=7, ha='center')
 rect(0, 0, P.GLASS_W, P.GLASS_H, fc='#dff0df', ec='#2a2', lw=0.8)
 rect(0, 0, P.VA_W, P.VA_H, fc='#111', ec='#111')
-rect(0, 0, P.GLASS_W+2*P.GLASS_CLR, P.GLASS_H+2*P.GLASS_CLR, fc='none', ec='#fa0', lw=1.6, ls='--')
-a.text(0, -P.VA_H/2-4, 'bezel opening = glass + 0.5/side (glass sits FLUSH)',
+_ow = P.GLASS_W + 2*P.GLASS_CLR - P.BEZEL_OPEN_INSET_L   # left edge trimmed in
+rect(P.BEZEL_OPEN_INSET_L/2, 0, _ow, P.GLASS_H+2*P.GLASS_CLR, fc='none', ec='#fa0', lw=1.6, ls='--')
+a.text(0.5, -P.VA_H/2-4, 'bezel opening (glass+0.5/side; left -X edge trimmed 1mm)',
        color='#fa0', fontsize=6.5, ha='center', va='top')
 for sx in (-1, 1):
     for sy in (-1, 1):

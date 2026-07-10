@@ -55,8 +55,11 @@ def build_bezel(world=False):
     outer = extrude_polygon(rrect(P.BEZEL_OUT_X, P.BEZEL_OUT_Y, P.BEZEL_R), P.BEZEL_T)
     open_hx = P.GLASS_W / 2 + P.GLASS_CLR
     open_hy = P.GLASS_H / 2 + P.GLASS_CLR
-    opening = extrude_polygon(rrect(open_hx, open_hy, 1.0), P.BEZEL_T + 1.0)
-    opening.apply_translation([0, 0, -0.5])
+    # left (-X) edge trimmed in by BEZEL_OPEN_INSET_L: shrink half-width and recentre so the
+    # right edge stays put and only the left moves inward.
+    inset = P.BEZEL_OPEN_INSET_L
+    opening = extrude_polygon(rrect(open_hx - inset / 2, open_hy, 1.0), P.BEZEL_T + 1.0)
+    opening.apply_translation([inset / 2, 0, -0.5])
     frame = difference([outer, opening], engine='manifold')
     cuts = []
     for sx in (-1, 1):

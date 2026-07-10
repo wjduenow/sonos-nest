@@ -41,14 +41,20 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   also the PCB front plane — so its top surface ends dead level with the glass. There is
   **no raised rim** any more. The opening is the **glass outline + 0.5 mm/side**, so the
   screen passes *through* the frame instead of being capped by it, and the frame lands on
-  the 7.5 mm bare-PCB strips at either end of the glass, clamping the board down.
+  the 7.5 mm bare-PCB strips at either end of the glass, clamping the board down. The
+  **left (−X, USB-side) opening edge is trimmed in 1 mm** (`BEZEL_OPEN_INSET_L`), so the
+  opening is slightly asymmetric — 70 mm wide, offset 0.5 mm toward +X.
   4 countersunk screws (M2.5/M3) go into pilots in the top/bottom face margins.
   Bezel outer == shell face outline, so the edges align.
   Because the glass runs the full 50 mm board height, the frame only overlaps the board in
   X — in Y the opening clears the pocket, so the board is held by its 4 screws, not by a lip.
-- **Board-screw reliefs:** the 4 board screws now sit *under* the bezel, and their heads
-  stand ~2.4 mm proud of the PCB. The bezel underside carries a blind **Ø6.0 × 2.6 mm
-  pocket** over each one, leaving 1.78 mm of frame above.
+- **Board-screw reliefs:** the 4 board screws now sit *under* the bezel, and their
+  **low-profile heads** stand ~1.5 mm proud of the PCB. The bezel underside carries a blind
+  **Ø6.0 × 1.8 mm pocket** over each one (2.58 mm of frame above) so the bezel drops flush.
+  Use **low-profile heads ≤1.5 mm tall and ≤Ø6**; a standard pan head (~2.4 mm) will prop
+  the bezel up. If a reprinted bezel still won't seat, the head **diameter** is the usual
+  culprit — measure the OD and widen `HEAD_RELIEF_D` (mind the mic port beside the
+  lower-right relief).
 - **USB-C side port (open):** a normal USB-C cable plugs **straight into the board's own
   USB-C** through an **18 × 12 mm slot in the −X (left) wall**. The rear panel-mount jack
   and its internal right-angle male are **removed**. A right-angle cable keeps the stand
@@ -62,16 +68,27 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   a max-size Ø5.4 screw head, so **don't oversize that screw head**.
 - **Speaker (kit's 38 × 26 × 8 mm box, 8 Ω / ~1 W):** **downward-firing** pocket in the solid
   back of the wedge, **loaded from the rear**, firing through an integral **grille** in
-  the base. Four **feet** lift the base 4 mm for the air gap. A wire channel connects the
-  pocket up to the board's SPEAKER header. The box speaker is self-enclosed, so no sealed
+  the base. Four **feet** lift the base 4 mm for the air gap. The slot is deliberately
+  **oversize — 43.2 × 14.0 mm** against a 38 × 8 mm box — leaving **2.6 mm each side and
+  6.0 mm above** for the speaker lead to run beside and over the driver. A **Ø9 wire
+  channel** carries the lead up into the board cavity; its cavity mouth is **elongated
+  12 mm toward the board's −Y (down-incline) edge** (`SPK_WIRE_D` / `SPK_WIRE_SLOT`) so the
+  short lead reaches the SPEAKER header there — a field fix after the original round hole
+  exited at board-centre, too far to reach. The grille keys off the
+  **box**, not the slot, so the perforations stay under the driver. The box speaker is self-enclosed, so no sealed
   chamber is needed. It's laid **38 mm across / 26 mm deep**: a 38 mm insertion depth would
   force `BACK_Y ≈ 57`, and since it fires straight down the 90° rotation costs nothing.
   The 26 mm depth is what sets **`BACK_Y = 48`** (see below). The speaker sits at the front
   of the pocket; a **snap-in cap**
   (`speaker_cap.stl`) closes the rear load port, backs the speaker in, and clicks into two
-  catch recesses in the pocket walls. The hooks are **arrow-profiled (lead-out ramps)** and
-  the plate has a **fingernail pull-tab** on its bottom edge — hook a nail/spudger under
-  the tab and pull straight back to cam the hooks out and pop the cap off; press to reseat.
+  catch recesses in the pocket walls. Each hook is a **barb**: a gentle lead-in ramp on the
+  deep side (easy push-in), a retaining corner that reaches **1.45 mm past the wall** and
+  seats **0.2 mm into the shelf** (preload → no rattle), and a small pry chamfer on the
+  pull-out face. The plate has a **fingernail pull-tab** on its bottom edge — hook a
+  nail/spudger under the tab and pull straight back to cam the hooks out and pop the cap
+  off; press to reseat. **The catch recesses are derived from the hook geometry** in
+  `build_shell.py` so the shelf always lands on the hook — an earlier version computed the
+  two independently, they missed, and the cap had essentially no grip.
 - **RESET pin hole:** Ø3 channel bored straight back through the body to the RESET
   button (7.0 mm centre-to-centre from its corner screw hole) — poke a paper-clip from
   the rear.
@@ -83,9 +100,11 @@ V1.0 2025-06-11) and the LCDWIKI wiki — not guessed:
   Sonos in normal use.)
 - **20° recline** on a flat base for nightstand viewing. Footprint **94 × 48 mm**.
   `BACK_Y = 48` is **not free**: the 26 mm-deep speaker pocket's front wall must stay
-  behind the board-cavity floor plane (`y = 0.364·z + 8.833`), which needs `BACK_Y ≥ 45.2`.
+  behind the board-cavity floor plane (`y = 0.364·z + 8.833`).
   Any shallower and the pocket breaks into the cavity right at the board's bottom edge —
-  where the microSD socket and the inserted card live.
+  where the microSD socket and the inserted card live. Raising the slot to 14 mm pushed its
+  ceiling up and thinned that wall to **1.90 mm** (it was 3.4 mm at a 10 mm slot) — it is now
+  the tightest wall in the part. A taller slot, or a shallower `BACK_Y`, eats what's left.
 
 ## Screws (BOM)
 
@@ -93,18 +112,23 @@ Everything threads directly into printed plastic bosses — use **self-tapping /
 thread-forming screws** (for plastic: Plastite/PT or generic coarse-thread self-tappers).
 **No nuts or heat-set inserts** required.
 
+As-built, this unit uses **M3 × 8 mm flat-head** on the board mounts and **M3 × 10 mm
+round-head** on the bezel.
+
 | Where | Qty | Screw | Length | Head |
 |-------|-----|-------|--------|------|
-| **Board → case** | 4 | M3 self-tapping | ~8 mm | Pan (≤5.4 mm OD, ≤2.4 mm tall) |
-| **Bezel → case** | 4 | M3 self-tapping | ~8–10 mm | Countersunk / flat |
+| **Board → case** | 4 | M3 self-tapping | **8 mm** | **Flat** (low-profile: ≤5.4 mm OD, ≤1.5 mm tall) |
+| **Bezel → case** | 4 | M3 self-tapping | **10 mm** | **Round** |
 
-- **Board (4×):** PCB Ø3.2 corner holes → Ø2.6 boss pilots (M3). From the front through
-  the PCB (1.62 mm) into the boss (~6–7 mm bite); keep the head **≤5.4 mm OD** to stay
-  inside the board's Ø5.6 keep-out ring, **and ≤2.4 mm tall** — the bezel's Ø6.0 × 2.6 mm
-  underside reliefs are sized for that. Install *before* the bezel.
-- **Bezel (4×):** countersunk holes → Ø2.6 face pilots (M3), flat head to sit flush. The
-  countersink is modeled Ø5.0, so a low-profile/90° flat head seats best (`BEZEL_SCREW_HEAD`
-  widens it if needed). The frame is 4.38 mm thick, so a real countersink fits.
+- **Board (4×): M3 × 8 mm flat-head.** PCB Ø3.2 corner holes → Ø2.6 boss pilots (M3). From
+  the front through the PCB (1.62 mm) into the boss (~6–7 mm bite); keep the head **≤5.4 mm
+  OD** to stay inside the board's Ø5.6 keep-out ring, **and ≤1.5 mm tall** — the bezel's
+  Ø6.0 × 1.8 mm underside reliefs are sized for that, and a taller head props the bezel up
+  off the glass (a low flat head clears it). Install *before* the bezel.
+- **Bezel (4×): M3 × 10 mm round-head.** Ø2.6 face pilots (M3). The holes are modeled with a
+  Ø5.0 countersink; a round head sits in it slightly proud rather than flush (a 90° flat head
+  seats flush if you prefer). `BEZEL_SCREW_HEAD` widens the seat if needed; the frame is
+  4.38 mm thick.
 - **No screws** for the speaker cap (snap-in) or the speaker (trapped by the cap).
 
 Pilot sizes are `BOSS_PILOT` / `POST_PILOT` in `stand_params.py`; switch to M3 heat-set
@@ -130,6 +154,7 @@ RESET_Y                    # MEASURED: 7.0 mm c-to-c from the (-39,+21) corner h
 MIC_X                      # mic across the board width  (still estimated — see below)
 MIC_Y                      # MEASURED: 8.0 mm up from the PCB's bottom edge
 SPK_W, SPK_L, SPK_T        # MEASURED: 38 x 26 x 8 speaker box
+SPK_SLOT_W, SPK_SLOT_H     # the slot it slides into: 43.2 x 14.0 (oversize, wire room)
 ```
 
 **microSD needs no verification** — the case has no card opening, so nothing has to
@@ -178,15 +203,18 @@ infill handles the weight.
 
 - **shell:** print base-down (as modeled, on the feet). The reclined face self-supports;
   the boss pilots and jack cutout print cleanly. The **speaker pocket** is a rear-loaded
-  cavity whose ceiling now bridges **39.2 mm** (it was ~21 mm with the old 20 mm-wide
-  speaker) — that is past comfortable bridging distance, so **enable supports for that
-  region**, or expect some ceiling droop. Droop there is cosmetic (it's a blind cavity
-  behind the cap), but heavy droop eats into the 8 mm box clearance. The rear
-  reset/speaker openings exit low on the back.
+  cavity whose ceiling now bridges **43.2 mm** (it was ~21 mm with the old 20 mm-wide
+  speaker) — well past comfortable bridging distance, so **enable supports for that
+  region**, or expect ceiling droop. There is 6 mm of headroom over the box now, so droop
+  is far less likely to foul the speaker, but it is still a blind cavity behind the cap.
+  The rear reset/speaker openings exit low on the back.
 - **bezel:** print flat, **visible face up** — the screw countersinks and the mic funnel
   then print cleanly on the top, and the 4 board-screw reliefs open downward onto the bed
   (no bridging). It's 4.38 mm thick now, not 3.0.
 - **speaker cap:** print plate-down (arms/hooks + pull-tab up). Fit/retention tuning:
-  `CAP_CLR` (looser = easier), `CAP_HOOK`/`CAP_HOOK_RAMP` (retention strength vs pry effort).
+  `CAP_CLR` (arm slide clearance — loosen if it won't push in), `CAP_HOOK` (reach/grip),
+  `CAP_PRELOAD` (snugness at seat), `CAP_HOOK_RAMP` (pry chamfer — bigger = easier to pry
+  off but weaker hold), `CAP_LEAD_IN` (push-in effort). If it still won't hold on your
+  printer, drop `CAP_CLR` to 0.25 or raise `CAP_PRELOAD` to 0.4 first.
 - PLA/PETG both fine. 0.2 mm layers. Screws: M3 self-tapping for the board/bosses,
   M2.5–M3 for the bezel.

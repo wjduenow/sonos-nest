@@ -19,22 +19,30 @@ from trimesh.transformations import translation_matrix
 from shapely.geometry import Polygon
 import stand_params as P
 
-PORT_HX = P.SPK_W / 2 + P.SPK_FIT
-PORT_HZ = P.SPK_SLOT_H / 2          # the port is the SPK_SLOT_H-high slot
+PORT_HX = P.SPK_SLOT_W / 2          # the port is the SPK_SLOT_W x SPK_SLOT_H slot
+PORT_HZ = P.SPK_SLOT_H / 2
 ARM_LEN = P.SPK_CAP_ZONE - 0.5
 
 def _lbox(ext, ctr):
     m = box(extents=ext); m.apply_translation(ctr); return m
 
+# hook z-layout along the insertion axis (z=0 at plate outer face, +z deeper into pocket):
+#   z_tip  = deep end of the arm       -- start of the lead-in
+#   z_land = retaining corner plane    -- full protrusion, the shallowest protruding point
+#   z_cham = top of the pry chamfer    -- where the retaining face meets the arm
+Z_TIP  = P.CAP_T + ARM_LEN
+Z_LAND = Z_TIP - P.CAP_LEAD_IN
+Z_CHAM = Z_LAND - P.CAP_HOOK_RAMP
+
 def _hook(sx):
-    """Arrow-profile catch hook: lead-in ramp on the tip AND a lead-OUT ramp on the
-    retaining face, so a firm pull cams the arm inward and the cap pops off."""
-    z_tip = P.CAP_T + ARM_LEN
-    z_apex = z_tip - P.CAP_HOOK_RAMP                     # max outward protrusion
-    z_base = z_apex - P.CAP_HOOK_RAMP                    # ramps back to the arm (pry-release)
-    x_in = sx * (PORT_HX - P.CAP_CLR)                    # meets the arm outer face
-    x_out = sx * (PORT_HX - P.CAP_CLR + P.CAP_HOOK)      # into the catch recess
-    tri = Polygon([(x_in, z_base), (x_out, z_apex), (x_in, z_tip)])
+    """Barb: a gentle lead-in ramp on the deep side (Z_LAND->Z_TIP) that cams the arm in
+    on push, a retaining corner at full protrusion (Z_LAND), and a small pry chamfer on
+    the shallow/pull-out side (Z_CHAM->Z_LAND) so a firm nail-pull cams it free."""
+    arm_face = PORT_HX - P.CAP_CLR                       # arm outer face
+    hook_x = arm_face + P.CAP_HOOK                       # retaining corner (into the recess)
+    tri = Polygon([(sx * arm_face, Z_CHAM),              # inner, shallow (pull side)
+                   (sx * hook_x,   Z_LAND),              # outer retaining corner
+                   (sx * arm_face, Z_TIP)])              # inner, deep tip (lead-in)
     m = extrude_polygon(tri, P.CAP_ARM_Z)               # extruded along +Z (the arm height)
     # remap extrude axes (X=x, Y=z_insertion, Z=arm-height) -> local (x, y, z_insertion)
     Pm = np.array([[1, 0, 0, 0], [0, 0, 1, -P.CAP_ARM_Z / 2],

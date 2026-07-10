@@ -81,7 +81,7 @@ FACE_LEN    = PCB_H + MB + MT           # 66 mm reclined front face length
 BOSS_OD     = 5.4                        # < Ø5.6 keep-out
 BOSS_PILOT  = 2.6                        # pilot for an M3 self-tapping screw
 BOARD_SCREW_HEAD = 5.4                   # keep heads within the keep-out ring
-BOARD_SCREW_HEAD_H = 2.4                 # head stand-off above the PCB front face
+BOARD_SCREW_HEAD_H = 1.5                 # MEASURED low-profile head stand-off above the PCB
 
 # bezel (screwed-on front cover).  The GLASS SITS FLUSH WITH THE BEZEL TOP: the bezel is
 # exactly GLASS_PROUD thick and its opening is the glass outline (+GLASS_CLR/side), so the
@@ -100,8 +100,15 @@ BEZEL_OUT_Y = FACE_LEN / 2
 BEZEL_R     = 4.0                        # bezel outer corner radius
 RIM_H       = 0.0                        # no raised rim (kept at 0 so pilots datum off it)
 GLASS_CLR   = 0.5                        # bezel opening = glass outline + this per side
+# Trim the LEFT (-X, the USB-side) edge of the screen opening inward by this much.  Front
+# view with USB on the left: the left opening edge was 1 mm too wide, so bring it in 1 mm
+# (the right/top/bottom edges are unchanged -> the opening is now asymmetric in X).
+BEZEL_OPEN_INSET_L = 1.0
 HEAD_RELIEF_D     = BOARD_SCREW_HEAD + 0.6   # Ø6.0 blind pocket over each board screw head
-HEAD_RELIEF_DEPTH = BOARD_SCREW_HEAD_H + 0.2  # 2.6 deep -> leaves 1.78 of bezel above it
+HEAD_RELIEF_DEPTH = BOARD_SCREW_HEAD_H + 0.3  # 1.8 deep for a 1.5 head -> 2.58 of bezel above
+# NB: DEPTH is not what keeps the bezel proud -- even the old 2.6 mm pocket cleared a 1.5 mm
+# head.  If the bezel still won't sit flush, the head DIAMETER exceeds HEAD_RELIEF_D (low-
+# profile heads are often wide); measure the head OD and widen HEAD_RELIEF_D (watch the mic).
 POST_X      = 39.0                       # bezel screws land in the top/bottom face margin
 POST_Y      = 30.0
 POST_PILOT  = 2.6                        # M2.5/M3 self-tapping bezel screws
@@ -152,28 +159,47 @@ MIC_CSK_D   = 4.5      # funnel Ø on the visible bezel face (tapers to MIC_HOLE
 SPK_W        = 38.0    # box footprint X  (across the case)
 SPK_L        = 26.0    # box footprint Y  (rear insertion depth)
 SPK_T        = 8.0     # box thickness (Z)
-SPK_SLOT_H   = 10.0    # the slot the box slides into is 10.0 high (2.0 over the 8 mm box)
-SPK_FIT      = 0.6     # pocket clearance (X/Y only; Z is set by SPK_SLOT_H)
+SPK_FIT      = 0.6     # pocket clearance in Y (insertion depth); X/Z use the SLOT dims
+# The slot the box slides into is deliberately OVERSIZE in X and Z to leave room for the
+# speaker lead to run alongside/above the box.  Grille + wire channel still key off the
+# BOX (SPK_W / SPK_L), not the slot, so the perforations stay under the driver.
+SPK_SLOT_W   = 43.2    # slot width  (X) = 38.0 box + 0.6/side fit + 4.0 for the wire
+SPK_SLOT_H   = 14.0    # slot height (Z) = 8.0 box + 2.0 slide + 4.0 for the wire
 SPK_CX       = 0.0     # pocket centre X (clear of the -X cable channel)
 GRILLE_T     = 1.5     # perforated floor thickness under the speaker
 GRILLE_HOLE  = 2.0     # grille hole Ø
 GRILLE_PITCH = 3.6     # grille hole spacing
-SPK_WIRE_D   = 8.0     # channel from the pocket up to the board cavity (speaker lead)
+# speaker-lead channel from the pocket up into the board cavity.  FIELD FIX (see hardware
+# photo): the plain Ø8 hole exited at board-centre, too far from the SPEAKER header for the
+# short lead to reach -- so it's WIDENED and ELONGATED into a slot toward the board's -Y
+# (down-incline) edge, where the header sits.  SPK_WIRE_SLOT is how far the cavity mouth
+# runs toward -Y from centre; set it negative to elongate toward +Y instead.
+SPK_WIRE_D    = 9.0    # channel Ø (was 8)
+SPK_WIRE_SLOT = 12.0   # cavity-mouth elongation toward -Y (0 = the old single round hole)
 FOOT         = 9.0     # foot pad size
 FOOT_H       = 4.0     # base lift for the downward-firing air gap
 
 # rear speaker load port + snap-in cap (separate part: speaker_cap.stl).  The speaker
 # sits at the FRONT of the pocket; the cap fills a rear zone, backs the speaker in, and
 # snaps into two catch recesses.  Snap fits often need per-printer tuning of CAP_CLR.
+#
+# The hook is a proper barb: a gentle LEAD-IN ramp on the deep side (easy push-in), a
+# retaining corner at full protrusion, and a small pry CHAMFER on the shallow (pull-out)
+# side so a firm nail-pull on the tab cams it free.  The catch recess in build_shell is
+# DERIVED from this same geometry (see speaker_cap_catches) so the shelf can't drift off
+# the hook -- the earlier version computed the two independently and they missed, leaving
+# the hook floating in the recess with ~0 grip.
 SPK_CAP_ZONE = 5.0     # rear space behind the speaker for the cap arms/catches
 CAP_T        = 2.0     # cap face-plate thickness
 CAP_OVER     = 1.8     # plate overlap beyond the port on each side
-CAP_CLR      = 0.4     # snap/plug fit clearance
+CAP_CLR      = 0.35    # arm-to-wall slide clearance per side (loosen if it won't push in)
 CAP_ARM_X    = 2.4     # snap-arm thickness
 CAP_ARM_Z    = 8.0     # snap-arm height (within the port)
-CAP_HOOK     = 1.6     # hook outward protrusion into the catch recess
-CAP_CATCH_DEPTH = 2.0  # catch recess depth into the side wall
-CAP_HOOK_RAMP = 1.5    # lead-out ramp height on the retaining face (bigger = easier pry)
+CAP_HOOK     = 1.8     # hook outward protrusion past the arm face (reach into the recess)
+CAP_CATCH_DEPTH = 2.4  # catch recess depth into the side wall (> CAP_HOOK-CAP_CLR)
+CAP_LEAD_IN  = 2.5     # gentle deep-side insertion ramp (bigger = easier push-in)
+CAP_HOOK_RAMP = 0.6    # pry chamfer on the retaining face (bigger = easier pry, weaker hold)
+CAP_PRELOAD  = 0.2     # shelf interference at seat -> no slop, arm biased outward
 CAP_PRY_W    = 12.0    # fingernail pull-tab width on the cap's bottom edge
 CAP_PRY_LEN  = 3.0     # pull-tab reach past the plate (grab point)
 

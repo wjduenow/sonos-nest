@@ -128,10 +128,11 @@ def _spk_y():
     return y0, y1, yc
 
 def speaker_pocket():
-    """The slot the speaker box slides into: SPK_SLOT_H high (not SPK_T + fit)."""
+    """The slot the speaker box slides into: SPK_SLOT_W x SPK_SLOT_H, oversize in X and Z
+    so the speaker lead can run beside and above the box."""
     y0, y1, _ = _spk_y()
     z0, z1 = P.GRILLE_T, P.GRILLE_T + P.SPK_SLOT_H
-    return box(extents=(P.SPK_W + 2 * P.SPK_FIT, y1 - y0, z1 - z0),
+    return box(extents=(P.SPK_SLOT_W, y1 - y0, z1 - z0),
                transform=translation_matrix([P.SPK_CX, (y0 + y1) / 2, (z0 + z1) / 2]))
 
 def _grille_offsets(extent, margin=1.0):
@@ -155,16 +156,38 @@ def speaker_grille():
     return holes
 
 def speaker_wire():
+    """Speaker-lead channel: fans from the pocket ceiling up into the board cavity, with the
+    cavity mouth ELONGATED toward the board's -Y (down-incline) edge so the short lead can
+    reach the SPEAKER header there.  Built as a union of cylinders from the fixed ceiling
+    point to a row of cavity exits sliding from board-local (0,0) to (0,-SPK_WIRE_SLOT)."""
     _, _, yc = _spk_y()
-    p0 = [P.SPK_CX, yc, P.GRILLE_T + P.SPK_SLOT_H]         # pocket ceiling
-    p1 = (_M @ np.array([0.0, 0.0, -6.0, 1.0]))[:3]        # inside the board cavity
-    return cylinder(radius=P.SPK_WIRE_D / 2, segment=(p0, p1), sections=SEG)
+    p0 = [P.SPK_CX, yc, P.GRILLE_T + P.SPK_SLOT_H]         # pocket ceiling (fixed end)
+    n = 12
+    cuts = []
+    for i in range(n + 1):
+        yoff = -(i / n) * P.SPK_WIRE_SLOT                  # cavity exit slides toward -Y
+        p1 = (_M @ np.array([0.0, yoff, -6.0, 1.0]))[:3]   # inside the board cavity
+        cuts.append(cylinder(radius=P.SPK_WIRE_D / 2, segment=(p0, p1), sections=SEG))
+    return union(cuts, engine='manifold')
 
 def speaker_cap_catches():
-    """Two recesses in the pocket side walls (rear zone) that the cap's hooks snap into."""
-    port_hx = P.SPK_W / 2 + P.SPK_FIT
+    """Two recesses in the pocket side walls that the cap's hooks snap into.  DERIVED from
+    the cap's hook geometry so the retaining shelf lands exactly on the hook's retaining
+    corner (they used to be computed independently and missed -> ~0 grip).
+
+    The cap seats when its plate hits the back wall, fixing the hook in world y.  Local
+    insertion depth z maps to world y = (BACK_Y + CAP_T) - z.  The retaining corner is at
+    z_land; the shelf (solid wall on the +y / pull-out side) starts just short of it by
+    CAP_PRELOAD so the seated arm is biased outward with no slop."""
+    arm_len = P.SPK_CAP_ZONE - 0.5
+    z_tip = P.CAP_T + arm_len
+    z_land = z_tip - P.CAP_LEAD_IN
+    y_land = (P.BACK_Y + P.CAP_T) - z_land                 # retaining corner, world y
+    y_tip = (P.BACK_Y + P.CAP_T) - z_tip                   # deep end of the lead-in
+    cy1 = y_land - P.CAP_PRELOAD                            # shelf face (solid at y > cy1)
+    cy0 = y_tip - 0.5                                       # recess open back to here
+    port_hx = P.SPK_SLOT_W / 2
     zc = P.GRILLE_T + P.SPK_SLOT_H / 2
-    cy0, cy1 = P.BACK_Y - 4.0, P.BACK_Y - 1.0              # within the rear cap zone
     out = []
     for sx in (-1, 1):
         out.append(box(extents=(P.CAP_CATCH_DEPTH, cy1 - cy0, P.CAP_ARM_Z + 1.0),
