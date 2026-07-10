@@ -14,3 +14,4 @@ enum { WIFI_APPLY_IDLE = 0, WIFI_APPLY_OK = 1, WIFI_APPLY_FAIL = 2 };
 void wifiApply(const String &ssid, const String &pass);
 int  wifiApplyResult();
 void wifiApplyResultReset();
+void wifiReconnect();     // reconnect from stored creds (re-applies the hostname)

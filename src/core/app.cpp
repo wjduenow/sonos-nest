@@ -167,6 +167,11 @@ static void processPending() {
     wifiApply(p.wifiSsid, p.wifiPass);
     if (wifiIsConnected()) { sonos::ssdpDiscover(); selectZone(); }
   }
+  // Device-name change: reconnect so the router registers the new hostname.
+  if (p.reconnectWifi) {
+    wifiReconnect();
+    if (wifiIsConnected()) { sonos::ssdpDiscover(); selectZone(); }
+  }
 
   // After a transport change the track/state (and art) update — poll again soon, once the
   // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.

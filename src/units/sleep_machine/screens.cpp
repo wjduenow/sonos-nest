@@ -23,6 +23,10 @@
 #include <time.h>             // clock screensaver
 #include <vector>
 
+#ifndef DEVICE_HOSTNAME
+#define DEVICE_HOSTNAME "sonos-sleep"
+#endif
+
 // This appliance is bound to one room + one Sonos saved playlist.
 static const char *TARGET_ROOM    = "Nursery";
 static const char *SLEEP_PLAYLIST = "Sleep";   // exact saved-playlist title (SQ:0)
@@ -57,12 +61,13 @@ static bool     s_playRequested = false;  // have we posted requestPlay for this
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 static String   s_sonosTitle;             // known title for a local-stream-on-Sonos ("" = use live)
 
-static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks;
+static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks, *s_nameEdit;
 static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
 static int       s_homeIdx = 0;   // which carousel option (0..2) is showing
 static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
-static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_roomsList, *s_tracksList;
-static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb;
+static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_nameLabel;
+static lv_obj_t *s_settingsList, *s_roomsList, *s_tracksList;
+static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb, *s_nameArea, *s_nameKb;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_screensaver, *s_ssBox, *s_clockLabel, *s_timerLabel;
 static lv_obj_t *s_curPage   = nullptr;   // page currently shown (screensaver return target)
@@ -85,8 +90,8 @@ static bool      s_wifiConnecting  = false;
 
 static void showOnly(lv_obj_t *keep) {
   s_curPage = keep;
-  lv_obj_t *pages[9] = {s_home, s_starting, s_playing, s_settings, s_rooms,
-                        s_wifi, s_wifiPw, s_tracks, s_screensaver};
+  lv_obj_t *pages[10] = {s_home, s_starting, s_playing, s_settings, s_rooms,
+                         s_wifi, s_wifiPw, s_tracks, s_nameEdit, s_screensaver};
   for (lv_obj_t *p : pages) {
     if (p == keep) lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     else           lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
@@ -355,6 +360,7 @@ static void openRooms();
 static void openWifi();
 static void openWifiPw(const String &ssid);
 static void openTracks();
+static void openNameEdit();
 
 // One gesture handler on the screen (gestures from pages/buttons bubble up to it): swipe down
 // from Home opens Settings; swipe up from Settings closes it.
@@ -364,9 +370,8 @@ static void screenGestureCb(lv_event_t *) {
     if (dir == LV_DIR_BOTTOM)     openSettings();
     else if (dir == LV_DIR_LEFT)  homeNext();   // swipe left  -> next option (wraps)
     else if (dir == LV_DIR_RIGHT) homePrev();   // swipe right -> previous option (wraps)
-  } else if (!lv_obj_has_flag(s_settings, LV_OBJ_FLAG_HIDDEN)) {
-    if (dir == LV_DIR_TOP) gotoHome();
   }
+  // Settings scrolls, so it closes via its Back button (swipe-up would fight the scroll).
 }
 
 static void briSliderCb(lv_event_t *) {
@@ -379,7 +384,9 @@ static void briSliderCb(lv_event_t *) {
 static void sonosBtnCb(lv_event_t *)  { openRooms(); }
 static void wifiBtnCb(lv_event_t *)   { openWifi(); }
 static void trackBtnCb(lv_event_t *)  { openTracks(); }
+static void nameBtnCb(lv_event_t *)   { openNameEdit(); }
 static void backSettingsCb(lv_event_t *) { openSettings(); }
+static void backHomeCb(lv_event_t *)     { gotoHome(); }
 
 static void roomClickCb(lv_event_t *e) {
   lv_obj_t *btn = (lv_obj_t *)lv_event_get_target(e);
@@ -405,6 +412,8 @@ static void openSettings() {
   String disp = tr.substring(slash + 1);
   if (disp.endsWith(".mp3")) disp.remove(disp.length() - 4);
   lv_label_set_text(s_trackLabel, (String(LV_SYMBOL_AUDIO "  ") + disp).c_str());
+  String dn = settingsDeviceName();
+  lv_label_set_text(s_nameLabel, (String(LV_SYMBOL_LIST "  ") + (dn.length() ? dn : String(DEVICE_HOSTNAME))).c_str());
   showOnly(s_settings);
 }
 
@@ -493,6 +502,37 @@ static void openTracks() {
     lv_obj_set_user_data(b, (void *)(intptr_t)i);
   }
   showOnly(s_tracks);
+}
+
+// --- device name (network hostname) ----------------------------------------
+
+static void openNameEdit() {
+  String cur = settingsDeviceName();
+  if (cur.length() == 0) cur = DEVICE_HOSTNAME;
+  lv_textarea_set_text(s_nameArea, cur.c_str());
+  lv_keyboard_set_textarea(s_nameKb, s_nameArea);
+  showOnly(s_nameEdit);
+}
+
+// Keyboard OK: sanitize to a valid hostname (letters/digits/hyphen), save, and reconnect so
+// the router registers the new name.
+static void nameKbReadyCb(lv_event_t *) {
+  String raw = lv_textarea_get_text(s_nameArea);
+  String h;
+  for (unsigned i = 0; i < raw.length(); ++i) {
+    char c = raw[i];
+    bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    if (alnum)                                  h += c;
+    else if (c == ' ' || c == '_' || c == '-')  h += '-';
+  }
+  while (h.startsWith("-")) h.remove(0, 1);
+  while (h.endsWith("-"))   h.remove(h.length() - 1);
+  if (h.length()) {
+    settingsSetDeviceName(h);
+    if (stateLock()) { g_pending.reconnectWifi = true; stateUnlock(); }
+    showToast("Name saved");
+  }
+  openSettings();
 }
 
 // --- clock screensaver -----------------------------------------------------
@@ -664,26 +704,46 @@ void uiInit() {
   lv_obj_align(s_toast, LV_ALIGN_BOTTOM_MID, 0, -SH(4));
   lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
 
-  // SETTINGS — reached by swiping down from Home; swipe up to close.
-  s_settings = makePage(scr);
-  lv_obj_set_style_pad_row(s_settings, SH(2), 0);
-  makeLabel(s_settings, "Settings", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
-  makeLabel(s_settings, "Brightness", &lv_font_montserrat_14, COL_SUBTLE);
-  s_briSlider = lv_slider_create(s_settings);
+  // SETTINGS — Back-button header + a scrollable list (grows as settings are added).
+  s_settings = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_settings);
+  lv_obj_set_size(s_settings, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_settings);
+  lv_obj_remove_flag(s_settings, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *setBack = makeButton(s_settings, LV_SYMBOL_LEFT " Back", COL_SLATE, backHomeCb);
+  lv_obj_set_size(setBack, SW(28), SH(15));
+  lv_obj_set_style_text_font(lv_obj_get_child(setBack, 0), &lv_font_montserrat_20, 0);
+  lv_obj_align(setBack, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
+  lv_obj_t *setHdr = makeLabel(s_settings, "Settings", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(setHdr, LV_ALIGN_TOP_MID, 0, SH(6));
+
+  s_settingsList = lv_obj_create(s_settings);
+  lv_obj_remove_style_all(s_settingsList);
+  lv_obj_set_size(s_settingsList, SCREEN_W, SH(78));
+  lv_obj_align(s_settingsList, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_flex_flow(s_settingsList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(s_settingsList, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(s_settingsList, SH(3), 0);
+  lv_obj_set_style_pad_top(s_settingsList, SH(2), 0);
+  lv_obj_set_style_pad_bottom(s_settingsList, SH(4), 0);
+  lv_obj_set_scroll_dir(s_settingsList, LV_DIR_VER);
+
+  makeLabel(s_settingsList, "Brightness", &lv_font_montserrat_14, COL_SUBTLE);
+  s_briSlider = lv_slider_create(s_settingsList);
   lv_slider_set_range(s_briSlider, 10, 100);
   lv_obj_set_width(s_briSlider, SW(80));
   lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_SLATE), LV_PART_MAIN);
   lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_CLOUD), LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(s_briSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
-  lv_obj_add_flag(s_briSlider, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_event_cb(s_briSlider, briSliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
-  lv_obj_t *sonosBtn = makeListButton(s_settings, LV_SYMBOL_AUDIO "  Sonos Device", COL_SLATE, sonosBtnCb);
+  lv_obj_t *sonosBtn = makeListButton(s_settingsList, LV_SYMBOL_AUDIO "  Sonos Device", COL_SLATE, sonosBtnCb);
   s_sonosLabel = lv_obj_get_child(sonosBtn, 0);
-  lv_obj_t *trackBtn = makeListButton(s_settings, LV_SYMBOL_AUDIO "  Sleep Track", COL_SLATE, trackBtnCb);
+  lv_obj_t *trackBtn = makeListButton(s_settingsList, LV_SYMBOL_AUDIO "  Sleep Track", COL_SLATE, trackBtnCb);
   s_trackLabel = lv_obj_get_child(trackBtn, 0);
-  lv_obj_t *wifiBtn = makeListButton(s_settings, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
+  lv_obj_t *wifiBtn = makeListButton(s_settingsList, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
   s_wifiLabel = lv_obj_get_child(wifiBtn, 0);
-  makeLabel(s_settings, LV_SYMBOL_UP "  swipe up to close", &lv_font_montserrat_14, COL_SUBTLE);
+  lv_obj_t *nameBtn = makeListButton(s_settingsList, LV_SYMBOL_LIST "  Device Name", COL_SLATE, nameBtnCb);
+  s_nameLabel = lv_obj_get_child(nameBtn, 0);
 
   // ROOMS — Sonos device picker (scrollable list of discovered rooms).
   s_rooms = lv_obj_create(scr);
@@ -744,6 +804,26 @@ void uiInit() {
   lv_keyboard_set_textarea(s_kb, s_wifiPwArea);
   lv_obj_add_event_cb(s_kb, kbReadyCb, LV_EVENT_READY, nullptr);
   lv_obj_add_event_cb(s_kb, kbCancelCb, LV_EVENT_CANCEL, nullptr);
+
+  // DEVICE NAME — text field + on-screen keyboard (same pattern as the Wi-Fi password).
+  s_nameEdit = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_nameEdit);
+  lv_obj_set_size(s_nameEdit, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_nameEdit);
+  lv_obj_remove_flag(s_nameEdit, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *nameHdr = makeLabel(s_nameEdit, "Device Name", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(nameHdr, LV_ALIGN_TOP_MID, 0, SH(1));
+  s_nameArea = lv_textarea_create(s_nameEdit);
+  lv_textarea_set_one_line(s_nameArea, true);
+  lv_textarea_set_placeholder_text(s_nameArea, "name");
+  lv_obj_set_width(s_nameArea, SW(92));
+  lv_obj_align(s_nameArea, LV_ALIGN_TOP_MID, 0, SH(15));
+  s_nameKb = lv_keyboard_create(s_nameEdit);
+  lv_obj_set_size(s_nameKb, SCREEN_W, SH(58));
+  lv_obj_align(s_nameKb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_keyboard_set_textarea(s_nameKb, s_nameArea);
+  lv_obj_add_event_cb(s_nameKb, nameKbReadyCb, LV_EVENT_READY, nullptr);
+  lv_obj_add_event_cb(s_nameKb, backSettingsCb, LV_EVENT_CANCEL, nullptr);
 
   // SLEEP TRACK — picker listing the SD card's MP3s (same layout as the rooms picker).
   s_tracks = lv_obj_create(scr);

@@ -9,10 +9,22 @@
 #include "secrets.h"
 #endif
 
+#ifndef DEVICE_HOSTNAME
+#define DEVICE_HOSTNAME "sonos-sleep"
+#endif
+
 static volatile int s_result = WIFI_APPLY_IDLE;   // result of the last wifiApply()
+
+// The name the router shows (DHCP hostname): the user's name from NVS, else the firmware
+// default. Must be applied before WiFi.begin() to register with DHCP.
+static void applyHostname() {
+  String h = settingsDeviceName();
+  WiFi.setHostname(h.length() ? h.c_str() : DEVICE_HOSTNAME);
+}
 
 // Start a connection from the best available stored credentials (NVS first, then secrets.h).
 static bool beginFromStored() {
+  applyHostname();
   String ss = settingsWifiSsid(), pw = settingsWifiPass();
   if (ss.length()) { WiFi.begin(ss.c_str(), pw.c_str()); return true; }
 #if defined(WIFI_SSID) && defined(WIFI_PASS)
@@ -44,9 +56,19 @@ void wifiApplyResultReset() { s_result = WIFI_APPLY_IDLE; }
 
 // Blocking — call from netTask. Try the new creds; on success persist them; on failure revert
 // to the previously stored creds so the device isn't left offline.
+// Reconnect from stored creds — re-applies the hostname so a name change takes effect with
+// the router. Blocking; call from netTask.
+void wifiReconnect() {
+  WiFi.disconnect();
+  delay(100);
+  beginFromStored();
+  waitConnected(10000);
+}
+
 void wifiApply(const String &ssid, const String &pass) {
   WiFi.disconnect();
   delay(100);
+  applyHostname();
   WiFi.begin(ssid.c_str(), pass.c_str());
   if (waitConnected(12000)) {
     settingsSetWifi(ssid, pass);

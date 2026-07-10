@@ -41,3 +41,7 @@ void settingsSetWifi(const String &ssid, const String &pass) {
 String settingsSleepTrack() { return s_prefs.getString("track", ""); }
 
 void settingsSetSleepTrack(const String &path) { s_prefs.putString("track", path); }
+
+String settingsDeviceName() { return s_prefs.getString("devname", ""); }
+
+void settingsSetDeviceName(const String &name) { s_prefs.putString("devname", name); }

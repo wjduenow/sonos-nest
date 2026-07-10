@@ -42,6 +42,7 @@ struct PendingCmds {
   String localStreamTitle;    // dc:title shown by Sonos for the local stream
   String wifiSsid;            // non-empty: apply these WiFi creds (with wifiPass) on netTask
   String wifiPass;
+  bool   reconnectWifi = false;  // reconnect (e.g. after a device-name change) to re-register
 };
 
 // Bumped whenever the discovered zone list changes (after grouping ops / re-discovery) so
