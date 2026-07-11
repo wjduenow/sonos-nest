@@ -53,6 +53,9 @@ static const char    *HOME_LABELS[3] = {"Start Sleep Sounds",
                                         "Start on Device (No Wifi)"};
 static const uint32_t HOME_COLORS[3] = {COL_CLOUD, COL_LOCAL, COL_DEVICE};
 static const char    *HOME_ICONS[3]  = {LV_SYMBOL_AUDIO, LV_SYMBOL_SD_CARD, LV_SYMBOL_VOLUME_MAX};
+// Accent wash (top of the nightfall gradient) — a bold ~60% blend of each mode colour toward
+// the navy ground, so the chosen mode floods the top of the screen with its colour.
+static const uint32_t HOME_DEEP[3]   = {0x16516C, 0x205344, 0x443668};
 
 enum UiState { ST_HOME, ST_STARTING, ST_PLAYING };
 static UiState  s_state        = ST_HOME;
@@ -63,6 +66,8 @@ static String   s_sonosTitle;             // known title for a local-stream-on-S
 
 static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks, *s_nameEdit;
 static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
+static lv_obj_t *s_ghostL, *s_ghostR, *s_ghostLIcon, *s_ghostRIcon;
+static lv_obj_t *s_trace[4];   // border comet: [0] = glowing head, [1..3] = fading tail
 static int       s_homeIdx = 0;   // which carousel option (0..2) is showing
 static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
 static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_nameLabel;
@@ -222,6 +227,89 @@ static void homeBtnCb(lv_event_t *e) {
   else                     deviceCb(e);
 }
 
+// ---- concept 1: nightfall wash — the screen colour cross-fades with the mode ----
+static lv_color_t s_washFrom, s_washTo;
+static void washExec(void *obj, int32_t v) {              // v: 0..255 colour lerp
+  lv_obj_set_style_bg_color((lv_obj_t *)obj, lv_color_mix(s_washTo, s_washFrom, (uint8_t)v), 0);
+}
+static void washTo(uint32_t deepHex) {
+  lv_anim_delete(s_home, washExec);                       // cancel any in-flight fade
+  s_washFrom = lv_obj_get_style_bg_color(s_home, LV_PART_MAIN);
+  s_washTo   = lv_color_hex(deepHex);
+  lv_anim_t a; lv_anim_init(&a);
+  lv_anim_set_var(&a, s_home);
+  lv_anim_set_exec_cb(&a, washExec);
+  lv_anim_set_values(&a, 0, 255);
+  lv_anim_set_duration(&a, 500);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+}
+
+// ---- concept 3: living glow — the tile's coloured shadow breathes ----
+static void glowExec(void *obj, int32_t v) {              // v: 0..255 breathe
+  lv_obj_t *b = (lv_obj_t *)obj;
+  lv_obj_set_style_shadow_width(b, 14 + 16 * v / 255, 0);
+  lv_obj_set_style_shadow_opa(b, (lv_opa_t)(LV_OPA_40 + (LV_OPA_70 - LV_OPA_40) * v / 255), 0);
+}
+
+// ---- border trace: a glowing comet runs clockwise around the tile's rounded border ----
+// Map t in [0,1) to a point on the tile's rounded-rectangle outline (from the top-left corner).
+static void borderPoint(float t, lv_coord_t *ox, lv_coord_t *oy) {
+  const float W = SW(74), H = SH(54), R = SH(8);
+  const float cx = SCREEN_W / 2.0f, cy = SCREEN_H / 2.0f - SH(5);   // tile centre (align CENTER, -SH(5))
+  const float hw = W / 2, hh = H / 2;
+  const float Lh = W - 2 * R, Lv = H - 2 * R, La = 1.5707963f * R;  // edge + quarter-arc lengths
+  float d = t * (2 * Lh + 2 * Lv + 4 * La), x, y, a;
+  if      (d < Lh)         { x = cx - (hw - R) + d;              y = cy - hh; }                                    // top edge →
+  else if ((d -= Lh) < La) { a = -1.5708f + d / La * 1.5708f;    x = cx + (hw - R) + R * cosf(a); y = cy - (hh - R) + R * sinf(a); } // TR arc
+  else if ((d -= La) < Lv) { x = cx + hw;                        y = cy - (hh - R) + d; }                          // right edge ↓
+  else if ((d -= Lv) < La) { a = d / La * 1.5708f;               x = cx + (hw - R) + R * cosf(a); y = cy + (hh - R) + R * sinf(a); } // BR arc
+  else if ((d -= La) < Lh) { x = cx + (hw - R) - d;              y = cy + hh; }                                    // bottom edge ←
+  else if ((d -= Lh) < La) { a = 1.5708f + d / La * 1.5708f;     x = cx - (hw - R) + R * cosf(a); y = cy + (hh - R) + R * sinf(a); } // BL arc
+  else if ((d -= La) < Lv) { x = cx - hw;                        y = cy + (hh - R) - d; }                          // left edge ↑
+  else       { d -= Lv;      a = 3.14159f + d / La * 1.5708f;    x = cx - (hw - R) + R * cosf(a); y = cy - (hh - R) + R * sinf(a); } // TL arc
+  *ox = (lv_coord_t)(x + 0.5f); *oy = (lv_coord_t)(y + 0.5f);
+}
+static void traceExec(void *, int32_t v) {                // v: 0..1000 lap phase
+  for (int i = 0; i < 4; ++i) {
+    float t = v / 1000.0f - i * 0.02f;                    // each tail dot trails the head along the path
+    t -= (int)t; if (t < 0) t += 1.0f;                    // wrap into [0,1)
+    lv_coord_t x, y; borderPoint(t, &x, &y);
+    lv_coord_t half = lv_obj_get_width(s_trace[i]) / 2;
+    lv_obj_set_pos(s_trace[i], x - half, y - half);       // centre the dot on the outline point
+  }
+}
+static void traceShow(bool on) {                          // hidden during a slide so it doesn't float
+  for (int i = 0; i < 4; ++i) {
+    if (on) lv_obj_remove_flag(s_trace[i], LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(s_trace[i], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+static void slideDone(lv_anim_t *) { traceShow(true); }
+
+// ---- concept 4: depth carousel — a dim ghost of the neighbouring option peeks at each edge ----
+static lv_obj_t *makeGhost(lv_align_t align, lv_coord_t xoff, lv_obj_t **iconOut) {
+  lv_obj_t *g = lv_obj_create(s_home);
+  lv_obj_remove_style_all(g);
+  lv_obj_remove_flag(g, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+  lv_obj_add_flag(g, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_set_size(g, SW(20), SH(44));
+  lv_obj_align(g, align, xoff, -SH(5));
+  lv_obj_set_style_radius(g, SH(7), 0);
+  lv_obj_set_style_bg_color(g, lv_color_white(), 0);
+  lv_obj_set_style_bg_opa(g, LV_OPA_10, 0);
+  lv_obj_set_style_border_width(g, 1, 0);
+  lv_obj_set_style_border_color(g, lv_color_hex(COL_SUBTLE), 0);
+  lv_obj_set_style_border_opa(g, LV_OPA_30, 0);
+  lv_obj_set_style_opa(g, LV_OPA_40, 0);              // whole ghost is dim
+  lv_obj_t *ic = lv_label_create(g);
+  lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_color(ic, lv_color_hex(COL_SUBTLE), 0);
+  lv_obj_center(ic);
+  *iconOut = ic;
+  return g;
+}
+
 static void updateHome() {
   lv_color_t accent = lv_color_hex(HOME_COLORS[s_homeIdx]);
   lv_color_t light  = lv_color_lighten(accent, 90);   // bright accent for edge / text / icon
@@ -234,6 +322,12 @@ static void updateHome() {
   lv_obj_set_style_text_color(s_homeBtnLabel, light, 0);
   for (int i = 0; i < 3; ++i)
     lv_obj_set_style_bg_color(s_dot[i], lv_color_hex(i == s_homeIdx ? COL_SUBTLE : COL_SLATE), 0);
+  lv_label_set_text(s_ghostLIcon, HOME_ICONS[(s_homeIdx + 2) % 3]);   // prev option peeks left
+  lv_label_set_text(s_ghostRIcon, HOME_ICONS[(s_homeIdx + 1) % 3]);   // next option peeks right
+  for (int i = 0; i < 4; ++i)
+    lv_obj_set_style_bg_color(s_trace[i], light, 0);      // border comet takes the mode accent
+  lv_obj_set_style_shadow_color(s_trace[0], light, 0);    // its glowing head too
+  washTo(HOME_DEEP[s_homeIdx]);                            // cross-fade the screen wash
 }
 
 static void homeSlideXCb(void *obj, int32_t v) { lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0); }
@@ -247,6 +341,8 @@ static void homeSlide(int dir) {
   lv_anim_set_values(&a, dir * SCREEN_W, 0);
   lv_anim_set_duration(&a, 220);
   lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_set_completed_cb(&a, slideDone);   // re-show the border comet once the tile settles
+  traceShow(false);                          // hide it while the tile is mid-slide
   lv_anim_start(&a);
 }
 
@@ -605,9 +701,17 @@ void uiInit() {
   lv_obj_remove_flag(s_home, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(s_home, LV_OBJ_FLAG_EVENT_BUBBLE);   // let swipes reach the screen handler
 
+  // Nightfall wash (concept 1): vertical gradient from the mode's deep accent at the top down
+  // into the navy ground; washTo() cross-fades the top colour as the option changes.
+  lv_obj_set_style_bg_opa(s_home, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_home, lv_color_hex(HOME_DEEP[0]), 0);
+  lv_obj_set_style_bg_grad_color(s_home, lv_color_hex(COL_BG), 0);
+  lv_obj_set_style_bg_grad_dir(s_home, LV_GRAD_DIR_VER, 0);
+  s_washFrom = s_washTo = lv_color_hex(HOME_DEEP[0]);
+
   s_homeBtn = lv_button_create(s_home);
   lv_obj_remove_style_all(s_homeBtn);            // full control of the glass look
-  lv_obj_set_size(s_homeBtn, SW(82), SH(54));
+  lv_obj_set_size(s_homeBtn, SW(74), SH(54));    // narrowed so the depth ghosts peek at the edges
   lv_obj_align(s_homeBtn, LV_ALIGN_CENTER, 0, -SH(5));
   lv_obj_add_flag(s_homeBtn, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_event_cb(s_homeBtn, homeBtnCb, LV_EVENT_CLICKED, nullptr);
@@ -633,8 +737,53 @@ void uiInit() {
   s_homeBtnLabel = lv_label_create(s_homeBtn);
   lv_obj_set_style_text_font(s_homeBtnLabel, &lv_font_montserrat_24, 0);
   lv_label_set_long_mode(s_homeBtnLabel, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(s_homeBtnLabel, SW(72));
+  lv_obj_set_width(s_homeBtnLabel, SW(64));
   lv_obj_set_style_text_align(s_homeBtnLabel, LV_TEXT_ALIGN_CENTER, 0);
+
+  // Living glow (concept 3): the tile's coloured shadow breathes on a slow ping-pong loop.
+  { lv_anim_t g; lv_anim_init(&g);
+    lv_anim_set_var(&g, s_homeBtn);
+    lv_anim_set_exec_cb(&g, glowExec);
+    lv_anim_set_values(&g, 0, 255);
+    lv_anim_set_duration(&g, 2000);
+    lv_anim_set_reverse_duration(&g, 2000);
+    lv_anim_set_repeat_count(&g, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&g, lv_anim_path_ease_in_out);
+    lv_anim_start(&g); }
+
+  // Depth carousel (concept 4): dim ghost tiles peeking at each edge, showing the neighbouring
+  // options so the carousel reads as having somewhere to go. Icons set per mode in updateHome().
+  s_ghostL = makeGhost(LV_ALIGN_LEFT_MID,  -SW(9), &s_ghostLIcon);
+  s_ghostR = makeGhost(LV_ALIGN_RIGHT_MID,  SW(9), &s_ghostRIcon);
+
+  // Border trace: a glowing comet (bright head + short fading tail) runs around the tile's
+  // rounded border. Drawn on top of the tile; colour set per mode in updateHome().
+  static const lv_coord_t TR_SZ[4]  = {SH(4), SH(2), SH(2), SH(2)};
+  static const lv_opa_t   TR_OPA[4] = {LV_OPA_COVER, LV_OPA_70, (lv_opa_t)110, (lv_opa_t)55};
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_t *d = lv_obj_create(s_home);
+    s_trace[i] = d;
+    lv_obj_remove_style_all(d);
+    lv_obj_remove_flag(d, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+    lv_obj_add_flag(d, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_size(d, TR_SZ[i], TR_SZ[i]);
+    lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(d, TR_OPA[i], 0);
+    if (i == 0) {                                    // the head glows
+      lv_obj_set_style_shadow_width(d, SH(5), 0);
+      lv_obj_set_style_shadow_spread(d, SH(1), 0);
+      lv_obj_set_style_shadow_opa(d, LV_OPA_80, 0);
+    }
+  }
+  traceExec(nullptr, 0);                             // place them before the first render (no flash)
+  { lv_anim_t a; lv_anim_init(&a);                   // one continuous ~6 s lap (half speed)
+    lv_anim_set_var(&a, s_trace[0]);
+    lv_anim_set_exec_cb(&a, traceExec);
+    lv_anim_set_values(&a, 0, 1000);
+    lv_anim_set_duration(&a, 6000);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&a, lv_anim_path_linear);
+    lv_anim_start(&a); }
 
   // page-position dots
   lv_obj_t *dots = lv_obj_create(s_home);
