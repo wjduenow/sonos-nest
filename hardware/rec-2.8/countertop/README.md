@@ -139,6 +139,8 @@ inserts + machine screws there if you prefer repeated disassembly.
 - **Board** (Hosyond ES3C28P 2.8" ESP32-S3): https://www.amazon.com/dp/B0FKG7WRWV
 - **USB-C cable**: any normal cable — it plugs straight into the board through the side
   port. A **right-angle** plug keeps the stand close to the wall.
+- **Right-angle USB-C adapter** (plugs into the board's −X port through the open side
+  slot to redirect the cable): https://www.amazon.com/dp/B0CNGFZ1JD
 
 ## ⚠️ Verify before the final print
 
