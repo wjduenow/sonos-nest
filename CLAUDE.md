@@ -123,8 +123,10 @@ Sonos *or* the codec depending on the active output), and a **Wake** button that
 playing track for the wake track *on the output already in use*, at the current volume, looping.
 Settings: brightness, Sonos room, Sleep Track, Wake Track (same picker, retitled), Wi-Fi, device
 name, and **File Manager** (read-only — shows `localManagerUrl()` so you can type it into a
-browser). The Wake button hides itself when the card has no wake track; with no explicit pick,
-any file named `wake` (case-insensitive) is used, so a dropped-in `Wake.mp3` just works.
+browser). The Wake button appears only when there's something to switch *to*: it hides when the
+card has no wake track, and once the wake track is what's playing (including when the Sleep and
+Wake tracks are the same file). With no explicit pick, any file named `wake` (case-insensitive)
+is used, so a dropped-in `Wake.mp3` just works.
 
 ### sleep-machine HTTP server (`boards/es3c28p/local_stream.cpp`) — TWO ports, on purpose
 Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` connects later).
