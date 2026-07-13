@@ -42,6 +42,10 @@ String settingsSleepTrack() { return s_prefs.getString("track", ""); }
 
 void settingsSetSleepTrack(const String &path) { s_prefs.putString("track", path); }
 
+String settingsWakeTrack() { return s_prefs.getString("waketrack", ""); }
+
+void settingsSetWakeTrack(const String &path) { s_prefs.putString("waketrack", path); }
+
 String settingsDeviceName() { return s_prefs.getString("devname", ""); }
 
 void settingsSetDeviceName(const String &name) { s_prefs.putString("devname", name); }

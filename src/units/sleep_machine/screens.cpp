@@ -45,6 +45,7 @@ static const uint32_t COL_LOCAL  = 0x2F7D57;   // green  — Play from Local
 static const uint32_t COL_DEVICE = 0x6A4C93;   // purple — Play on Device
 static const uint32_t COL_SLATE  = 0x27324A;   // muted slate — secondary actions
 static const uint32_t COL_STOP   = 0x8C2B2B;   // muted red
+static const uint32_t COL_WAKE   = 0xC2841F;   // warm amber — sunrise, the opposite of sleep
 static const uint32_t COL_SUBTLE = 0x7C8AA5;   // grey-blue secondary text
 
 // Home carousel: one large button per screen, cycled by swiping left/right (wraps both ways).
@@ -69,9 +70,9 @@ static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
 static lv_obj_t *s_ghostL, *s_ghostR, *s_ghostLIcon, *s_ghostRIcon;
 static lv_obj_t *s_trace[4];   // border comet: [0] = glowing head, [1..3] = fading tail
 static int       s_homeIdx = 0;   // which carousel option (0..2) is showing
-static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel;
-static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_nameLabel;
-static lv_obj_t *s_settingsList, *s_roomsList, *s_tracksList;
+static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel, *s_wakeBtn;
+static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_wakeLabel, *s_nameLabel;
+static lv_obj_t *s_settingsList, *s_roomsList, *s_tracksList, *s_tracksHdr;
 static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb, *s_nameArea, *s_nameKb;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_screensaver, *s_ssBox, *s_clockLabel, *s_timerLabel;
@@ -85,6 +86,8 @@ static uint32_t  s_playStartMs = 0;       // when the current playback started (
 static uint32_t  s_toastUntil   = 0;
 static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume slider
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
+static String    s_localPath;          // file actually playing on the device speaker (Wake swaps it)
+static bool      s_pickWake     = false;   // the track picker is choosing the wake track, not sleep
 static std::vector<String> s_roomIps, s_roomNames;   // parallel to the device-picker rows
 static std::vector<String> s_ssids;                  // scanned Wi-Fi networks
 static String    s_pickedSsid;
@@ -123,12 +126,40 @@ static String currentTrack() {
   return t.length() ? t : String(LOCAL_OCEAN_FILE);
 }
 
-// Display name for the current track: basename without the ".mp3" (e.g. "Thunder Storm").
-static String trackDisplayName() {
-  String tr = currentTrack();
-  String d = tr.substring(tr.lastIndexOf('/') + 1);
+// Display name for a track path: basename without the ".mp3" (e.g. "Thunder Storm").
+static String displayNameOf(const String &path) {
+  String d = path.substring(path.lastIndexOf('/') + 1);
   if (d.endsWith(".mp3")) d.remove(d.length() - 4);
   return d;
+}
+
+static String trackDisplayName() { return displayNameOf(currentTrack()); }
+
+// The wake track, if there is one: the Settings pick when it's still on the card, else any file
+// named "wake" (case-insensitive) so a freshly dropped Wake.mp3 just works. "" => no wake track,
+// and the Now Playing screen hides the Wake button entirely.
+static String wakeTrackPath() {
+  String want = settingsWakeTrack();
+  int n = localTrackCount();               // (re)scans the card if something changed it
+  if (want.length()) {
+    for (int i = 0; i < n; ++i) {
+      const char *p = localTrackPath(i);
+      if (p && want == p) return want;     // still there
+    }
+  }
+  for (int i = 0; i < n; ++i) {            // no pick (or it's been deleted): fall back to /Wake.mp3
+    const char *nm = localTrackName(i);    // basename, ".mp3" already stripped
+    const char *p  = localTrackPath(i);
+    if (nm && p && String(nm).equalsIgnoreCase("wake")) return String(p);
+  }
+  return "";
+}
+
+// Show the Wake button only when a wake track actually exists.
+static void updateWakeBtn() {
+  if (!s_wakeBtn) return;
+  if (wakeTrackPath().length()) lv_obj_remove_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
+  else                          lv_obj_add_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void updateHome();   // fwd: refresh the carousel button + dots for s_homeIdx
@@ -162,16 +193,19 @@ static void gotoPlaying(const String &title, uint8_t vol) {
   s_localMode = false;
   lv_label_set_text(s_playTitle, sonosDisplayTitle(title).c_str());
   lv_slider_set_value(s_volSlider, vol, LV_ANIM_OFF);
+  updateWakeBtn();
   s_state = ST_PLAYING;
   showOnly(s_playing);
 }
 
-// Local playback (option 3): ocean track off the SD card through the onboard speaker.
+// Local playback (option 3): the chosen track off the SD card through the onboard speaker.
+// Titled from s_localPath, not currentTrack(), so a Wake swap shows the wake track's name.
 static void gotoLocalPlaying() {
   if (s_state != ST_PLAYING) s_playStartMs = millis();   // stamp the start on transition in
   s_localMode = true;
-  lv_label_set_text(s_playTitle, trackDisplayName().c_str());
+  lv_label_set_text(s_playTitle, displayNameOf(s_localPath).c_str());
   lv_slider_set_value(s_volSlider, s_localVol, LV_ANIM_OFF);
+  updateWakeBtn();
   s_state = ST_PLAYING;
   showOnly(s_playing);
 }
@@ -209,13 +243,37 @@ static void localCb(lv_event_t *) {
 // tap lazily mounts the SD + brings up the codec, so it can block briefly.
 static void deviceCb(lv_event_t *) {
   String track = currentTrack();
-  if (localAudioPlay(track.c_str())) gotoLocalPlaying();
-  else                               showToast("No SD card / audio unavailable");
+  if (localAudioPlay(track.c_str())) { s_localPath = track; gotoLocalPlaying(); }
+  else                                 showToast("No SD card / audio unavailable");
 }
 
 static void stopCb(lv_event_t *) {
   if (s_localMode) { localAudioStop(); gotoHome(); }
   else if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); }
+}
+
+// Wake: swap whatever is playing for the wake track, on the output that's already in use, at
+// the volume that's already set. Stays on Now Playing — it reads as a swap, not a restart.
+// Loops like the sleep tracks do (on-device loops by default; Sonos gets REPEAT_ALL).
+static void wakeCb(lv_event_t *) {
+  String wake = wakeTrackPath();
+  if (!wake.length()) { showToast("No wake track on the SD card"); return; }
+
+  if (s_localMode) {                       // on-device speaker: just hand the codec the new file
+    if (!localAudioPlay(wake.c_str())) { showToast("Playback failed"); return; }
+    s_localPath = wake;
+    lv_label_set_text(s_playTitle, displayNameOf(wake).c_str());
+  } else {                                 // Sonos — whether it was a playlist or our own stream
+    const char *url = localFileUrl(wake.c_str());
+    if (!url) { showToast("SD / network unavailable"); return; }
+    if (stateLock()) {
+      g_pending.localStreamUrl   = url;    // netTask: clear queue, enqueue, REPEAT_ALL, play
+      g_pending.localStreamTitle = displayNameOf(wake);
+      stateUnlock();                       // targetVolume deliberately untouched — volume stays put
+    }
+    s_sonosTitle = displayNameOf(wake);
+    lv_label_set_text(s_playTitle, s_sonosTitle.c_str());
+  }
 }
 
 // --- home carousel ---------------------------------------------------------
@@ -349,14 +407,23 @@ static void homeSlide(int dir) {
 static void homeNext() { s_homeIdx = (s_homeIdx + 1) % 3; updateHome(); homeSlide(+1); }  // swipe left
 static void homePrev() { s_homeIdx = (s_homeIdx + 2) % 3; updateHome(); homeSlide(-1); }  // swipe right
 
-// Bottom volume slider: drives the Sonos speaker volume (cloud) or the ES8311 codec volume
-// (on-device). Coalesced for Sonos via g_pending.targetVolume.
-static void volSliderCb(lv_event_t *) {
-  int v = lv_slider_get_value(s_volSlider);
-  s_volTouchedMs = millis();
+// Bottom volume row: drives the Sonos speaker volume (cloud) or the ES8311 codec volume
+// (on-device). Coalesced for Sonos via g_pending.targetVolume. The - / + buttons flanking the
+// slider nudge it by VOL_STEP — the slider itself is a small target for a fine adjustment.
+static const int VOL_STEP = 2;
+
+static void applyVolume(int v) {
+  if (v < 0)   v = 0;
+  if (v > 100) v = 100;
+  lv_slider_set_value(s_volSlider, v, LV_ANIM_OFF);   // keep the slider in step with the buttons
+  s_volTouchedMs = millis();                          // hold off the 1 Hz poll from overwriting us
   if (s_localMode) { s_localVol = (uint8_t)v; localAudioSetVolume((uint8_t)v); }
   else if (stateLock()) { g_pending.targetVolume = v; stateUnlock(); }
 }
+
+static void volSliderCb(lv_event_t *) { applyVolume(lv_slider_get_value(s_volSlider)); }
+static void volDownCb(lv_event_t *)   { applyVolume(lv_slider_get_value(s_volSlider) - VOL_STEP); }
+static void volUpCb(lv_event_t *)     { applyVolume(lv_slider_get_value(s_volSlider) + VOL_STEP); }
 
 // --- widget builders -------------------------------------------------------
 
@@ -455,7 +522,7 @@ static void openSettings();
 static void openRooms();
 static void openWifi();
 static void openWifiPw(const String &ssid);
-static void openTracks();
+static void openTracks(bool wake);   // one picker, two purposes: the sleep track or the wake track
 static void openNameEdit();
 
 // One gesture handler on the screen (gestures from pages/buttons bubble up to it): swipe down
@@ -479,7 +546,8 @@ static void briSliderCb(lv_event_t *) {
 
 static void sonosBtnCb(lv_event_t *)  { openRooms(); }
 static void wifiBtnCb(lv_event_t *)   { openWifi(); }
-static void trackBtnCb(lv_event_t *)  { openTracks(); }
+static void trackBtnCb(lv_event_t *)  { openTracks(false); }
+static void wakeBtnCb(lv_event_t *)   { openTracks(true); }
 static void nameBtnCb(lv_event_t *)   { openNameEdit(); }
 static void backSettingsCb(lv_event_t *) { openSettings(); }
 static void backHomeCb(lv_event_t *)     { gotoHome(); }
@@ -508,6 +576,9 @@ static void openSettings() {
   String disp = tr.substring(slash + 1);
   if (disp.endsWith(".mp3")) disp.remove(disp.length() - 4);
   lv_label_set_text(s_trackLabel, (String(LV_SYMBOL_AUDIO "  ") + disp).c_str());
+  String wk = wakeTrackPath();   // "" when the card has none — say so rather than showing blank
+  lv_label_set_text(s_wakeLabel,
+                    (String(LV_SYMBOL_BELL "  ") + (wk.length() ? displayNameOf(wk) : String("None"))).c_str());
   String dn = settingsDeviceName();
   lv_label_set_text(s_nameLabel, (String(LV_SYMBOL_LIST "  ") + (dn.length() ? dn : String(DEVICE_HOSTNAME))).c_str());
   showOnly(s_settings);
@@ -572,21 +643,27 @@ static void openWifiPw(const String &ssid) {
   showOnly(s_wifiPw);
 }
 
-// --- sleep-track picker (MP3s on the SD card) ------------------------------
+// --- track picker (MP3s on the SD card) ------------------------------------
+// Shared by both Settings rows; s_pickWake says which one opened it.
 
 static void trackClickCb(lv_event_t *e) {
   lv_obj_t *btn = (lv_obj_t *)lv_event_get_target(e);
   int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
   const char *p = localTrackPath(idx);
-  if (p) { settingsSetSleepTrack(p); showToast("Sleep track set"); }
+  if (p) {
+    if (s_pickWake) { settingsSetWakeTrack(p);  showToast("Wake track set");  }
+    else            { settingsSetSleepTrack(p); showToast("Sleep track set"); }
+  }
   openSettings();
 }
 
-static void openTracks() {
+static void openTracks(bool wake) {
+  s_pickWake = wake;
   localTracksRefresh();
   lv_obj_clean(s_tracksList);
   int n = localTrackCount();
-  String cur = currentTrack();
+  String cur = wake ? wakeTrackPath() : currentTrack();
+  lv_label_set_text(s_tracksHdr, wake ? "Wake Track" : "Sleep Track");
   if (n == 0) {
     makeLabel(s_tracksList, "No MP3s on the SD card", &lv_font_montserrat_20, COL_SUBTLE);
   }
@@ -824,23 +901,35 @@ void uiInit() {
   lv_label_set_long_mode(s_playTitle, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(s_playTitle, LV_TEXT_ALIGN_CENTER, 0);
 
-  makeGlassButton(s_playing, LV_SYMBOL_STOP "  Stop", COL_STOP, SW(50), SH(24), stopCb);
+  // Action row: Stop, plus Wake when the card has a wake track. Flex skips hidden children, so
+  // with no wake track this collapses to a centered Stop — exactly the old layout.
+  lv_obj_t *actRow = lv_obj_create(s_playing);
+  lv_obj_remove_style_all(actRow);
+  lv_obj_set_size(actRow, SW(94), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(actRow, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(actRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(actRow, SW(3), 0);
+  lv_obj_add_flag(actRow, LV_OBJ_FLAG_EVENT_BUBBLE);
+  makeGlassButton(actRow, LV_SYMBOL_STOP "  Stop", COL_STOP, SW(45), SH(24), stopCb);
+  s_wakeBtn = makeGlassButton(actRow, LV_SYMBOL_BELL "  Wake", COL_WAKE, SW(45), SH(24), wakeCb);
+  lv_obj_add_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);   // updateWakeBtn() reveals it when one exists
 
-  // Volume row: icon + slider as one flex item so it spaces evenly with the others.
+  // Volume row: [-] slider [+] as one flex item so it spaces evenly with the others.
   lv_obj_t *volRow = lv_obj_create(s_playing);
   lv_obj_remove_style_all(volRow);
   lv_obj_set_size(volRow, SW(94), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(volRow, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(volRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(volRow, SW(3), 0);
-  makeLabel(volRow, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, COL_SUBTLE);
+  makeGlassButton(volRow, LV_SYMBOL_MINUS, COL_CLOUD, SW(13), SH(11), volDownCb);
   s_volSlider = lv_slider_create(volRow);
   lv_slider_set_range(s_volSlider, 0, 100);
-  lv_obj_set_width(s_volSlider, SW(78));
+  lv_obj_set_width(s_volSlider, SW(60));
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_SLATE), LV_PART_MAIN);
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(s_volSlider, lv_color_hex(COL_CLOUD), LV_PART_KNOB);
   lv_obj_add_event_cb(s_volSlider, volSliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
+  makeGlassButton(volRow, LV_SYMBOL_PLUS, COL_CLOUD, SW(13), SH(11), volUpCb);
 
   // TOAST — transient bottom message for the placeholder actions / errors.
   s_toast = lv_label_create(scr);
@@ -889,6 +978,8 @@ void uiInit() {
   s_sonosLabel = lv_obj_get_child(sonosBtn, 0);
   lv_obj_t *trackBtn = makeListButton(s_settingsList, LV_SYMBOL_AUDIO "  Sleep Track", COL_SLATE, trackBtnCb);
   s_trackLabel = lv_obj_get_child(trackBtn, 0);
+  lv_obj_t *wakeRowBtn = makeListButton(s_settingsList, LV_SYMBOL_BELL "  Wake Track", COL_SLATE, wakeBtnCb);
+  s_wakeLabel = lv_obj_get_child(wakeRowBtn, 0);
   lv_obj_t *wifiBtn = makeListButton(s_settingsList, LV_SYMBOL_WIFI "  Wi-Fi Setup", COL_SLATE, wifiBtnCb);
   s_wifiLabel = lv_obj_get_child(wifiBtn, 0);
   lv_obj_t *nameBtn = makeListButton(s_settingsList, LV_SYMBOL_LIST "  Device Name", COL_SLATE, nameBtnCb);
@@ -974,7 +1065,8 @@ void uiInit() {
   lv_obj_add_event_cb(s_nameKb, nameKbReadyCb, LV_EVENT_READY, nullptr);
   lv_obj_add_event_cb(s_nameKb, backSettingsCb, LV_EVENT_CANCEL, nullptr);
 
-  // SLEEP TRACK — picker listing the SD card's MP3s (same layout as the rooms picker).
+  // TRACK PICKER — lists the SD card's MP3s (same layout as the rooms picker). Serves both the
+  // Sleep Track and Wake Track settings rows; openTracks(wake) retitles the header.
   s_tracks = lv_obj_create(scr);
   lv_obj_remove_style_all(s_tracks);
   lv_obj_set_size(s_tracks, SCREEN_W, SCREEN_H);
@@ -984,8 +1076,8 @@ void uiInit() {
   lv_obj_set_size(tback, SW(28), SH(15));
   lv_obj_set_style_text_font(lv_obj_get_child(tback, 0), &lv_font_montserrat_20, 0);
   lv_obj_align(tback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  lv_obj_t *thdr = makeLabel(s_tracks, "Sleep Track", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
-  lv_obj_align(thdr, LV_ALIGN_TOP_MID, 0, SH(6));
+  s_tracksHdr = makeLabel(s_tracks, "Sleep Track", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(s_tracksHdr, LV_ALIGN_TOP_MID, 0, SH(6));
   s_tracksList = lv_obj_create(s_tracks);
   lv_obj_remove_style_all(s_tracksList);
   lv_obj_set_size(s_tracksList, SCREEN_W, SH(70));

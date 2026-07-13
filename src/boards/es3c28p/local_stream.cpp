@@ -384,6 +384,13 @@ const char *localFileUrl(const char *path) {
 
   s_servePath = path;
   mediaServerStart();   // no-op if boardInit() already did it
-  s_url = "http://" + WiFi.localIP().toString() + ":" + String(STREAM_PORT) + STREAM_ROUTE;
+
+  // The route is a fixed path, so every file would otherwise get the SAME URL — and Sonos keys
+  // its cache (content AND metadata) off the URL. Swapping the sleep track for the wake track
+  // behind an unchanged URL makes it replay the cached sleep track. Bump a counter into the
+  // query string so each call is a distinct URL; WebServer matches on the path and ignores it.
+  static uint32_t seq = 0;
+  s_url = "http://" + WiFi.localIP().toString() + ":" + String(STREAM_PORT) + STREAM_ROUTE +
+          "?v=" + String(++seq);
   return s_url.c_str();
 }

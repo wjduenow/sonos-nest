@@ -20,5 +20,8 @@ void    settingsSetWifi(const String &ssid, const String &pass);
 String  settingsSleepTrack();            // selected local sleep-track path ("" = unit default)
 void    settingsSetSleepTrack(const String &path);
 
+String  settingsWakeTrack();             // selected local wake-track path ("" = auto: /Wake.mp3)
+void    settingsSetWakeTrack(const String &path);
+
 String  settingsDeviceName();            // network/DHCP hostname ("" = firmware default)
 void    settingsSetDeviceName(const String &name);
