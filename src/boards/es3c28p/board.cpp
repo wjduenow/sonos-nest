@@ -8,6 +8,7 @@
 #include "pins.h"
 #include "display.h"
 #include "touch.h"
+#include "local_stream.h"
 #include <Arduino.h>
 #include <Wire.h>
 
@@ -24,7 +25,11 @@ bool boardInit() {
   if (!displayInit()) { Serial.println("[board] es3c28p display init FAILED"); ok = false; }
   touchInit();     // registers the FT6336 as an LVGL pointer indev (needs LVGL up)
 
-  Serial.println("[board] es3c28p: display + touch up; SD/mic/LED not yet implemented");
+  // HTTP server: Sonos media streaming + the remote SD-management UI. Its task waits for
+  // WiFi on its own (appBoot() connects well after this), so starting it here is safe.
+  mediaServerStart();
+
+  Serial.println("[board] es3c28p: display + touch + httpd up; mic/LED not yet implemented");
   return ok;
 }
 

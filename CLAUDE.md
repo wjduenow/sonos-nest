@@ -111,6 +111,33 @@ bringup · phase1_test) and `src/boards/es3c28p/` (**stub**). Units: `src/units/
 nest UI screens (long-press knob = Menu hub): Now Playing (home), Rooms, Group, Playlists/
 Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe down** = clock.
 
+### sleep-machine HTTP server (`boards/es3c28p/local_stream.cpp`) — TWO ports, on purpose
+Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` connects later).
+
+- **:8080 — `WebServer`.** The SD-management UI at `/` (embedded HTML: list/upload/delete),
+  `GET /api/tracks`, `POST /api/delete?name=`, and `GET /ocean.mp3` — the fixed route Sonos
+  streams from (`localFileUrl()` in the board HAL points it at the real on-card filename, so
+  the URL handed to Sonos has no spaces to escape).
+- **:8081 — a bare `WiFiServer`.** Uploads only (`POST /upload?name=<basename>`, raw body).
+
+**Uploads deliberately bypass `WebServer` — do not "simplify" this back.** Both of its body
+paths are broken for our files on framework-arduinoespressif32 @ 3.20017: multipart reads the
+body **one byte at a time** (`Parsing.cpp _uploadReadByte`), and the raw path never calls
+`_parseArguments()` (so `arg("name")` is always empty → every upload refused) *and* its
+`readBytes(buf, HTTP_RAW_BUFLEN)` blocks for a **full** buffer, hanging on any file whose size
+isn't an exact multiple of it. So we own the read loop instead.
+
+Consequences worth knowing:
+- Two ports = **cross-origin**, so the upload socket answers the `OPTIONS` preflight *and* the
+  page sends `Content-Type: text/plain` (CORS-safelisted) to avoid triggering one. Test uploads
+  with a browser or a curl that sets `Origin` — plain curl skips preflight and hides the bug.
+- Upload speed is **the SD card** (~180 KB/s write), not the network or block size (16 KB and
+  64 KB measured identical). A few-minute track is ~5 MB / ~50 s; hour-long ones take ~14 min.
+- Upload/delete are refused (409) while `localAudioActive()` — the audio task streams MP3 off
+  the same card, and writing underneath it glitches playback.
+- Uploads are restricted to a bare `.mp3` basename (no dirs, no `..`); `localTracks*` only
+  scans the card root, and `localTracksRefresh()` is called after every mutation.
+
 ## Gotchas that cost real time (don't rediscover these)
 - **Group coordinator targeting:** transport/queue commands must go to the group
   **coordinator** IP, not the speaker. **Volume** is per-speaker. `ssdp.cpp` builds rooms from
