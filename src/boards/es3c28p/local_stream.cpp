@@ -378,6 +378,13 @@ void mediaServerStart() {
 
 // ---------------------------------------------------------------- board HAL
 
+const char *localManagerUrl() {
+  if (WiFi.status() != WL_CONNECTED) return nullptr;
+  static String url;
+  url = "http://" + WiFi.localIP().toString() + ":" + String(STREAM_PORT);
+  return url.c_str();
+}
+
 const char *localFileUrl(const char *path) {
   if (!sdEnsureMounted()) return nullptr;
   if (WiFi.status() != WL_CONNECTED) return nullptr;

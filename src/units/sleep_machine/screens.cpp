@@ -65,14 +65,14 @@ static bool     s_playRequested = false;  // have we posted requestPlay for this
 static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker, not Sonos
 static String   s_sonosTitle;             // known title for a local-stream-on-Sonos ("" = use live)
 
-static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks, *s_nameEdit;
+static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks, *s_nameEdit, *s_manager;
 static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
 static lv_obj_t *s_ghostL, *s_ghostR, *s_ghostLIcon, *s_ghostRIcon;
 static lv_obj_t *s_trace[4];   // border comet: [0] = glowing head, [1..3] = fading tail
 static int       s_homeIdx = 0;   // which carousel option (0..2) is showing
 static lv_obj_t *s_playTitle, *s_volSlider, *s_startingLabel, *s_wakeBtn;
 static lv_obj_t *s_briSlider, *s_sonosLabel, *s_wifiLabel, *s_trackLabel, *s_wakeLabel, *s_nameLabel;
-static lv_obj_t *s_settingsList, *s_roomsList, *s_tracksList, *s_tracksHdr;
+static lv_obj_t *s_settingsList, *s_roomsList, *s_tracksList, *s_tracksHdr, *s_managerUrl;
 static lv_obj_t *s_wifiList, *s_wifiSsidLabel, *s_wifiPwArea, *s_kb, *s_nameArea, *s_nameKb;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_screensaver, *s_ssBox, *s_clockLabel, *s_timerLabel;
@@ -98,8 +98,8 @@ static bool      s_wifiConnecting  = false;
 
 static void showOnly(lv_obj_t *keep) {
   s_curPage = keep;
-  lv_obj_t *pages[10] = {s_home, s_starting, s_playing, s_settings, s_rooms,
-                         s_wifi, s_wifiPw, s_tracks, s_nameEdit, s_screensaver};
+  lv_obj_t *pages[11] = {s_home, s_starting, s_playing, s_settings, s_rooms,
+                         s_wifi, s_wifiPw, s_tracks, s_nameEdit, s_manager, s_screensaver};
   for (lv_obj_t *p : pages) {
     if (p == keep) lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
     else           lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
@@ -524,6 +524,7 @@ static void openWifi();
 static void openWifiPw(const String &ssid);
 static void openTracks(bool wake);   // one picker, two purposes: the sleep track or the wake track
 static void openNameEdit();
+static void openManager();           // shows the file-management web UI's URL
 
 // One gesture handler on the screen (gestures from pages/buttons bubble up to it): swipe down
 // from Home opens Settings; swipe up from Settings closes it.
@@ -548,6 +549,7 @@ static void sonosBtnCb(lv_event_t *)  { openRooms(); }
 static void wifiBtnCb(lv_event_t *)   { openWifi(); }
 static void trackBtnCb(lv_event_t *)  { openTracks(false); }
 static void wakeBtnCb(lv_event_t *)   { openTracks(true); }
+static void managerBtnCb(lv_event_t *){ openManager(); }
 static void nameBtnCb(lv_event_t *)   { openNameEdit(); }
 static void backSettingsCb(lv_event_t *) { openSettings(); }
 static void backHomeCb(lv_event_t *)     { gotoHome(); }
@@ -675,6 +677,16 @@ static void openTracks(bool wake) {
     lv_obj_set_user_data(b, (void *)(intptr_t)i);
   }
   showOnly(s_tracks);
+}
+
+// --- file manager URL ------------------------------------------------------
+// Read-only: the address of the on-device web UI for adding/removing tracks. The board owns the
+// port, so we just display whatever localManagerUrl() hands back (nullptr => no WiFi yet).
+
+static void openManager() {
+  const char *url = localManagerUrl();
+  lv_label_set_text(s_managerUrl, url ? url : "Not connected to Wi-Fi");
+  showOnly(s_manager);
 }
 
 // --- device name (network hostname) ----------------------------------------
@@ -984,6 +996,7 @@ void uiInit() {
   s_wifiLabel = lv_obj_get_child(wifiBtn, 0);
   lv_obj_t *nameBtn = makeListButton(s_settingsList, LV_SYMBOL_LIST "  Device Name", COL_SLATE, nameBtnCb);
   s_nameLabel = lv_obj_get_child(nameBtn, 0);
+  makeListButton(s_settingsList, LV_SYMBOL_DRIVE "  File Manager", COL_SLATE, managerBtnCb);
 
   // ROOMS — Sonos device picker (scrollable list of discovered rooms).
   s_rooms = lv_obj_create(scr);
@@ -1064,6 +1077,30 @@ void uiInit() {
   lv_keyboard_set_textarea(s_nameKb, s_nameArea);
   lv_obj_add_event_cb(s_nameKb, nameKbReadyCb, LV_EVENT_READY, nullptr);
   lv_obj_add_event_cb(s_nameKb, backSettingsCb, LV_EVENT_CANCEL, nullptr);
+
+  // FILE MANAGER — read-only screen showing the URL of the on-device web UI, so you can type it
+  // into a browser to add/remove tracks without pulling the SD card.
+  s_manager = lv_obj_create(scr);
+  lv_obj_remove_style_all(s_manager);
+  lv_obj_set_size(s_manager, SCREEN_W, SCREEN_H);
+  lv_obj_center(s_manager);
+  lv_obj_remove_flag(s_manager, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *mback = makeButton(s_manager, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
+  lv_obj_set_size(mback, SW(28), SH(15));
+  lv_obj_set_style_text_font(lv_obj_get_child(mback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_align(mback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
+  lv_obj_t *mhdr = makeLabel(s_manager, "File Manager", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_align(mhdr, LV_ALIGN_TOP_MID, 0, SH(6));
+  // The URL wraps rather than ellipsizing — it's useless if you can't read all of it.
+  s_managerUrl = makeLabel(s_manager, "", &lv_font_montserrat_24, COL_CLOUD);
+  lv_obj_set_width(s_managerUrl, SW(92));
+  lv_label_set_long_mode(s_managerUrl, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(s_managerUrl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(s_managerUrl, LV_ALIGN_CENTER, 0, -SH(2));
+  lv_obj_t *mhint = makeLabel(s_manager, "Open in a browser to add or\nremove tracks on the SD card",
+                              &lv_font_montserrat_14, COL_SUBTLE);
+  lv_obj_set_style_text_align(mhint, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(mhint, LV_ALIGN_BOTTOM_MID, 0, -SH(8));
 
   // TRACK PICKER — lists the SD card's MP3s (same layout as the rooms picker). Serves both the
   // Sleep Track and Wake Track settings rows; openTracks(wake) retitles the header.

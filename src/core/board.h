@@ -42,6 +42,12 @@ void localAudioSetVolume(uint8_t pct);   // 0..100; no-op on boards without audi
 // is owned by the board; copy it before the next call.
 const char *localFileUrl(const char *path);
 
+// Base URL of the board's file-management web UI (add/remove tracks on its local storage from a
+// browser), e.g. "http://192.168.1.20:8080". nullptr on boards without one, or when there's no
+// network yet. The board owns the port; the UI just displays what it returns. Pointer is owned
+// by the board — copy it before the next call.
+const char *localManagerUrl();
+
 // Local track library — playable files (e.g. .mp3) on the board's SD card. Empty on boards
 // without local storage. Call localTracksRefresh() to (re)scan before listing.
 void        localTracksRefresh();

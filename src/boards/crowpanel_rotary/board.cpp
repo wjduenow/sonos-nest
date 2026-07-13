@@ -31,6 +31,7 @@ void localAudioStop() {}
 bool localAudioActive() { return false; }
 void localAudioSetVolume(uint8_t /*pct*/) {}
 const char *localFileUrl(const char * /*path*/) { return nullptr; }
+const char *localManagerUrl() { return nullptr; }   // no local storage, so nothing to manage
 void localTracksRefresh() {}
 int  localTrackCount() { return 0; }
 const char *localTrackName(int) { return nullptr; }

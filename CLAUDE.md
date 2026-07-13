@@ -117,8 +117,14 @@ Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe d
 
 sleep-machine UI: a 3-way home carousel (swipe left/right) picking where a track plays —
 **Sonos** (speaker's own library), **stream to Sonos** (SD file served over HTTP, see below),
-or **on-device speaker** (SD → Helix MP3 → ES8311) — plus Rooms, WiFi, track picker, Settings
-(device name, brightness), a sleep timer, and a screensaver that dims while playing.
+or **on-device speaker** (SD → Helix MP3 → ES8311) — plus a sleep timer and a screensaver that
+dims while playing. **Now Playing** has Stop, a volume row (`[-]` slider `[+]`, 2%/tap, driving
+Sonos *or* the codec depending on the active output), and a **Wake** button that swaps the
+playing track for the wake track *on the output already in use*, at the current volume, looping.
+Settings: brightness, Sonos room, Sleep Track, Wake Track (same picker, retitled), Wi-Fi, device
+name, and **File Manager** (read-only — shows `localManagerUrl()` so you can type it into a
+browser). The Wake button hides itself when the card has no wake track; with no explicit pick,
+any file named `wake` (case-insensitive) is used, so a dropped-in `Wake.mp3` just works.
 
 ### sleep-machine HTTP server (`boards/es3c28p/local_stream.cpp`) — TWO ports, on purpose
 Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` connects later).
@@ -128,6 +134,10 @@ Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` co
   streams from (`localFileUrl()` in the board HAL points it at the real on-card filename, so
   the URL handed to Sonos has no spaces to escape).
 - **:8081 — a bare `WiFiServer`.** Uploads only (`POST /upload?name=<basename>`, raw body).
+
+The board HAL exposes the base URL as `localManagerUrl()` (nullptr on boards without local
+storage, or before WiFi is up); Settings → **File Manager** just displays it. The port lives in
+the board, not the UI.
 
 **Uploads deliberately bypass `WebServer` — do not "simplify" this back.** Both of its body
 paths are broken for our files on framework-arduinoespressif32 @ 3.20017: multipart reads the
@@ -153,6 +163,11 @@ Consequences worth knowing:
   `GetZoneGroupState` (deduped, satellites excluded) and stores each room's coordinator IP.
 - **DIDL is double-escaped:** unescape the SOAP layer, then unescape each field value again,
   or the album-art URL's `&` arrives as `&amp;` and the speaker returns nothing.
+- **Sonos caches by URL — `localFileUrl()`'s `?v=N` is load-bearing, don't "clean it up".** The
+  media route is a *fixed* path (`/ocean.mp3`), so every file would otherwise get the same URL,
+  and Sonos keys both content **and** metadata off it. Without the counter, swapping the sleep
+  track for the wake track re-plays the **cached sleep track** — the swap looks wired up and
+  silently does nothing. `WebServer` strips the query before matching, so the route still hits.
 - **Album art is chunked HTTP:** read it with `HTTPClient::writeToStream()` (a raw stream
   read leaks chunk-size framing into the JPEG). Plain HTTP (no TLS). Buffer ≥220 KB
   (high-res covers). TJpg decodes **baseline only** (no progressive); buffers live in PSRAM.
