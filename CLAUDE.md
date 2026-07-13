@@ -6,9 +6,11 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
 
 - **sonos-nest** (`nest` env) — the original: ELECROW CrowPanel 2.1" round rotary display
   (ST7701 480×480, EC11 encoder + knob, CST816 touch, PCF8574 expander).
-- **sonos-sleep-machine** (`sleep-machine` env) — **STUB**: rectangular 2.8" Hosyond/LCDWIKI
-  ES3C28P (ILI9341 240×320 SPI, FT6336 touch, microSD, mic, RGB-LED). Board driver + UX
-  are skeletons that compile; real design is deferred.
+- **sonos-sleep-machine** (`sleep-machine` env) — a nightstand sleep-sound player: rectangular
+  2.8" Hosyond/LCDWIKI ES3C28P (ILI9341 240×320 SPI, FT6336 touch, microSD, ES8311 codec +
+  speaker, mic, RGB-LED). **Working**: display, touch, SD, on-device MP3 playback, HTTP media
+  server + remote SD management, and a touch UX (home carousel, rooms, WiFi, track picker,
+  settings, sleep timer). **Not yet wired**: the mic and the RGB-LED.
 
 Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
@@ -25,7 +27,7 @@ Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only
 export PATH="$PATH:$HOME/.platformio/penv/bin"
 pio run -e nest            # build the nest app (default env)
 pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
-pio run -e sleep-machine   # build the (stub) sleep-machine app
+pio run -e sleep-machine   # build the sleep-machine app
 ```
 Envs: **`nest`** / **`sleep-machine`** (the apps), **`nest-bringup`** (`-DPHASE0_BRINGUP`
 hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
@@ -65,7 +67,7 @@ required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfe
 - Display: **ST7701** 480×480 RGB-parallel. **Arduino_GFX pinned to 1.3.1** (older API:
   `Arduino_ESP32RGBPanel(CS,SCK,SDA,…)` + `Arduino_ST7701_RGBPanel`). **Do NOT bump** it
   without rewriting `boards/crowpanel_rotary/display.cpp`. (1.3.1 also ships
-  `Arduino_ESP32SPI` + `Arduino_ILI9341`, which the es3c28p board will use — no bump needed.)
+  `Arduino_ESP32SPI` + `Arduino_ILI9341`, which the es3c28p board uses — no bump needed.)
 - Touch: **CST816 @ 0x15** (not GT911). Encoder: EC11 on **GPIO42/4** (hardware PCNT).
 - Knob press button: **PCF8574 expander @ 0x21, pin P5** (active-low). It's a stiff separate
   tact switch (K112) — needs a firm, centered push.
@@ -105,11 +107,18 @@ Key modules (all under `src/core/` — device-agnostic):
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.
 
 Boards: `src/boards/crowpanel_rotary/` (display · touch · encoder · pcf8574 · pins.h ·
-bringup · phase1_test) and `src/boards/es3c28p/` (**stub**). Units: `src/units/sonos_nest/`
-(round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (**stub**).
+bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card · local_audio
+(ES8311 + Helix MP3) · local_stream (httpd) · local_tracks · pins.h; `sd_msc` and `audio_test`
+are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
+(round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (touch screens + ui_scale.h).
 
 nest UI screens (long-press knob = Menu hub): Now Playing (home), Rooms, Group, Playlists/
 Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe down** = clock.
+
+sleep-machine UI: a 3-way home carousel (swipe left/right) picking where a track plays —
+**Sonos** (speaker's own library), **stream to Sonos** (SD file served over HTTP, see below),
+or **on-device speaker** (SD → Helix MP3 → ES8311) — plus Rooms, WiFi, track picker, Settings
+(device name, brightness), a sleep timer, and a screensaver that dims while playing.
 
 ### sleep-machine HTTP server (`boards/es3c28p/local_stream.cpp`) — TWO ports, on purpose
 Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` connects later).

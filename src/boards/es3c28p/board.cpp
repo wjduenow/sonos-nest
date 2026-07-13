@@ -2,8 +2,9 @@
 // drivers. Like the nest's board.cpp, this file only provides boardInit() (the one-call
 // bring-up) plus the no-op rotary/knob HAL — backlightSet lives in display.cpp.
 //
-// Status: display (ILI9341V over SPI + LVGL) and touch (FT6336 @ 0x38) are implemented.
-// SD, mic, and RGB-LED are not yet wired.
+// Status: display (ILI9341V over SPI + LVGL), touch (FT6336 @ 0x38), microSD, on-device audio
+// (ES8311 codec) and the HTTP media/management server are implemented. The mic and the
+// RGB-LED are not yet wired.
 #include "core/board.h"
 #include "pins.h"
 #include "display.h"
