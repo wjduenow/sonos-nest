@@ -88,6 +88,7 @@ static uint32_t  s_volTouchedMs = 0;   // last time the user moved the volume sl
 static uint8_t   s_localVol     = 60;  // remembered on-device (codec) volume, 0..100
 static String    s_localPath;          // file actually playing on the device speaker (Wake swaps it)
 static bool      s_pickWake     = false;   // the track picker is choosing the wake track, not sleep
+static bool      s_wakePlaying  = false;   // the wake track is what's playing — hide the Wake button
 static std::vector<String> s_roomIps, s_roomNames;   // parallel to the device-picker rows
 static std::vector<String> s_ssids;                  // scanned Wi-Fi networks
 static String    s_pickedSsid;
@@ -155,11 +156,13 @@ static String wakeTrackPath() {
   return "";
 }
 
-// Show the Wake button only when a wake track actually exists.
+// Show the Wake button only when there's a wake track to switch TO: it needs to exist, and it
+// mustn't already be what's playing (swapping wake for wake does nothing).
 static void updateWakeBtn() {
   if (!s_wakeBtn) return;
-  if (wakeTrackPath().length()) lv_obj_remove_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
-  else                          lv_obj_add_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
+  bool show = wakeTrackPath().length() && !s_wakePlaying;
+  if (show) lv_obj_remove_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
+  else      lv_obj_add_flag(s_wakeBtn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void updateHome();   // fwd: refresh the carousel button + dots for s_homeIdx
@@ -168,6 +171,7 @@ static void gotoHome() {
   s_state = ST_HOME;
   s_playRequested = false;
   s_localMode = false;
+  s_wakePlaying = false;
   s_sonosTitle = "";
   s_homeIdx = 0;              // always return to the default option (Start Sleep Sounds)
   updateHome();
@@ -219,6 +223,7 @@ static void cloudCb(lv_event_t *) {
   //    (PLAY_PLAYLIST) clears the queue, enqueues, and starts playback.
   library::requestBrowse("SQ:", library::PLAY_PLAYLIST);
   s_sonosTitle = "";                 // cloud shows the live Sonos title (the Sleep playlist)
+  s_wakePlaying = false;
   gotoStarting("Ocean Waves");
 }
 
@@ -236,6 +241,7 @@ static void localCb(lv_event_t *) {
     stateUnlock();
   }
   s_sonosTitle = trackDisplayName();   // show the real track name (Sonos caches by URL)
+  s_wakePlaying = (track == wakeTrackPath());   // sleep track == wake track? nothing to swap to
   gotoStarting(trackDisplayName());
 }
 
@@ -243,8 +249,13 @@ static void localCb(lv_event_t *) {
 // tap lazily mounts the SD + brings up the codec, so it can block briefly.
 static void deviceCb(lv_event_t *) {
   String track = currentTrack();
-  if (localAudioPlay(track.c_str())) { s_localPath = track; gotoLocalPlaying(); }
-  else                                 showToast("No SD card / audio unavailable");
+  if (localAudioPlay(track.c_str())) {
+    s_localPath   = track;
+    s_wakePlaying = (track == wakeTrackPath());   // sleep track == wake track? nothing to swap to
+    gotoLocalPlaying();
+  } else {
+    showToast("No SD card / audio unavailable");
+  }
 }
 
 static void stopCb(lv_event_t *) {
@@ -274,6 +285,8 @@ static void wakeCb(lv_event_t *) {
     s_sonosTitle = displayNameOf(wake);
     lv_label_set_text(s_playTitle, s_sonosTitle.c_str());
   }
+  s_wakePlaying = true;   // wake IS the track now — drop the button, leaving Stop centered
+  updateWakeBtn();
 }
 
 // --- home carousel ---------------------------------------------------------
@@ -1092,7 +1105,7 @@ void uiInit() {
   lv_obj_t *mhdr = makeLabel(s_manager, "File Manager", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(mhdr, LV_ALIGN_TOP_MID, 0, SH(6));
   // The URL wraps rather than ellipsizing — it's useless if you can't read all of it.
-  s_managerUrl = makeLabel(s_manager, "", &lv_font_montserrat_24, COL_CLOUD);
+  s_managerUrl = makeLabel(s_manager, "", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
   lv_obj_set_width(s_managerUrl, SW(92));
   lv_label_set_long_mode(s_managerUrl, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(s_managerUrl, LV_TEXT_ALIGN_CENTER, 0);
