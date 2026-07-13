@@ -14,6 +14,7 @@
 // Mutating routes (upload/delete) are refused with 409 while local audio is playing: the audio
 // task streams MP3 off the same card, and writing to SD underneath it glitches playback.
 #include "core/board.h"
+#include "core/webconfig.h"   // what's remotely configurable + how to apply it (core owns that)
 #include "local_stream.h"
 #include "sd_card.h"
 #include <Arduino.h>
@@ -233,6 +234,21 @@ static void uploadPoll() {
   c.stop();
 }
 
+// GET /api/config — current picks + the choices available. The body is built by core; we only
+// carry it. Same for the setter below: routing here, meaning there.
+static void handleConfigGet() {
+  s_server->send(200, "application/json", webConfigJson());
+}
+
+// POST /api/config?field=<sleepTrack|wakeTrack|room>&value=<...>
+static void handleConfigSet() {
+  String field = s_server->arg("field");
+  String value = s_server->arg("value");
+  String err;
+  if (!webConfigApply(field, value, err)) { sendError(400, err.c_str()); return; }
+  s_server->send(200, "application/json", webConfigJson());   // echo back the new state
+}
+
 // POST /api/delete?name=<basename>
 static void handleDelete() {
   if (localAudioActive())        { sendError(409, "stop playback first"); return; }
@@ -244,6 +260,7 @@ static void handleDelete() {
   if (!SD_MMC.exists(path))      { sendError(404, "not found"); return; }
   if (!SD_MMC.remove(path))      { sendError(500, "delete failed"); return; }
   localTracksRefresh();
+  webConfigTrackDeleted(path);   // don't leave the sleep/wake pick aimed at a file that's gone
   Serial.printf("[httpd] deleted %s\n", path.c_str());
 
   JsonDocument doc;
@@ -272,9 +289,20 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
  #drop.over{border-color:#6c6cff;color:#e8e8f0}
  progress{width:100%;height:6px;margin-top:12px}
  .warn{color:#ffb86b;font-size:13px;margin-top:12px}
+ h2{font-size:13px;font-weight:600;color:#8a8aa0;text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px}
+ .cfg{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}
+ .cfg label{font-weight:500}
+ select{background:#12121a;color:#e8e8f0;border:1px solid #3a3a4e;border-radius:6px;padding:7px 10px;font:inherit;font-size:14px;min-width:55%}
+ select:disabled{opacity:.4}
 </style>
 <h1>Sleep Machine</h1>
 <div class=sub id=cap>loading…</div>
+<div class=card>
+  <h2>Settings</h2>
+  <div class=cfg><label for=sleepTrack>Sleep track</label><select id=sleepTrack></select></div>
+  <div class=cfg><label for=wakeTrack>Wake track</label><select id=wakeTrack></select></div>
+  <div class=cfg><label for=room>Sonos room</label><select id=room></select></div>
+</div>
 <div class=card id=list></div>
 <div class=card>
   <div id=drop>Drop an .mp3 here, or click to choose</div>
@@ -285,6 +313,42 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
 <script>
 const $=s=>document.querySelector(s), mb=b=>(b/1048576).toFixed(1)+' MB';
 let playing=false;
+
+// --- settings (sleep track / wake track / Sonos room) ---
+function fill(sel,items,cur,emptyLabel,autoLabel){
+  sel.innerHTML='';
+  if(!items.length){
+    sel.append(new Option(emptyLabel,''));
+    sel.disabled=true;
+    return;
+  }
+  sel.disabled=false;
+  if(autoLabel) sel.append(new Option(autoLabel,''));   // "" = no explicit pick
+  for(const it of items){
+    const o=new Option(it.label,it.value);
+    if(it.value===cur) o.selected=true;
+    sel.append(o);
+  }
+}
+async function loadCfg(){
+  const r=await fetch('/api/config');
+  if(!r.ok)return;
+  const c=await r.json();
+  const tracks=c.tracks.map(t=>({label:t.name,value:t.path}));
+  fill($('#sleepTrack'),tracks,c.sleepTrack,'No tracks on the card');
+  // wake has an Auto option: with no pick the device uses any file named "wake".
+  fill($('#wakeTrack'),tracks,c.wakeTrack,'No tracks on the card','Auto (a file named "wake")');
+  fill($('#room'),c.zones.map(z=>({label:z.name,value:z.name})),c.room,'No Sonos rooms found');
+}
+async function saveCfg(field,value){
+  const q=`/api/config?field=${field}&value=${encodeURIComponent(value)}`;
+  const r=await fetch(q,{method:'POST'});
+  if(!r.ok){ alert((await r.json()).error||'could not save'); }
+  loadCfg();   // re-read: the device is the source of truth
+}
+for(const f of ['sleepTrack','wakeTrack','room'])
+  $('#'+f).onchange=e=>saveCfg(f,e.target.value);
+
 async function load(){
   const r=await fetch('/api/tracks');
   if(!r.ok){$('#cap').textContent='SD card not readable';return}
@@ -306,6 +370,7 @@ async function load(){
     };
     row.appendChild(b);$('#list').appendChild(row);
   }
+  loadCfg();   // the track list drives the dropdowns, so refresh them together
 }
 function upload(f){
   if(!f)return;
@@ -369,6 +434,8 @@ void mediaServerStart() {
   s_server = new WebServer(STREAM_PORT);
   s_server->on("/",            HTTP_GET,  handleIndex);
   s_server->on("/api/tracks",  HTTP_GET,  handleList);
+  s_server->on("/api/config",  HTTP_GET,  handleConfigGet);
+  s_server->on("/api/config",  HTTP_POST, handleConfigSet);
   s_server->on("/api/delete",  HTTP_POST, handleDelete);
   s_server->on(STREAM_ROUTE,   HTTP_GET,  handleMedia);
   // 8 KB, not the 4 KB the stream-only server used: the upload path writes to SD from inside

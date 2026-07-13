@@ -102,6 +102,10 @@ Key modules (all under `src/core/` — device-agnostic):
 - `core/library.{h,cpp}` — async ContentDirectory browse/play (Playlists `SQ:`, Favorites
   `FV:2`, Queue `Q:0`); `PlayMode` selects favorite=SetURI / playlist=enqueue / queue=Seek.
 - `core/settings.{h,cpp}` — NVS (default room, brightness, cached zone IPs).
+- `core/webconfig.{h,cpp}` — what a board's web UI may configure (sleep/wake track, Sonos room)
+  and how to apply it (NVS + `g_pending`). **Boards must not reach into settings/`g_pending`
+  themselves** — a board's HTTP server does sockets + routing and calls this. Also clears a
+  sleep/wake pick when its file is deleted, so a pick can't dangle.
 - `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
 - `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env).
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.
@@ -131,10 +135,11 @@ is used, so a dropped-in `Wake.mp3` just works.
 ### sleep-machine HTTP server (`boards/es3c28p/local_stream.cpp`) — TWO ports, on purpose
 Started from `boardInit()` (its task waits for WiFi itself, since `appBoot()` connects later).
 
-- **:8080 — `WebServer`.** The SD-management UI at `/` (embedded HTML: list/upload/delete),
-  `GET /api/tracks`, `POST /api/delete?name=`, and `GET /ocean.mp3` — the fixed route Sonos
-  streams from (`localFileUrl()` in the board HAL points it at the real on-card filename, so
-  the URL handed to Sonos has no spaces to escape).
+- **:8080 — `WebServer`.** The SD-management UI at `/` (embedded HTML: list/upload/delete, plus
+  dropdowns for the sleep track, wake track and Sonos room), `GET /api/tracks`,
+  `GET|POST /api/config` (thin wrappers over `core/webconfig`), `POST /api/delete?name=`, and
+  `GET /ocean.mp3` — the fixed route Sonos streams from (`localFileUrl()` in the board HAL points
+  it at the real on-card filename, so the URL handed to Sonos has no spaces to escape).
 - **:8081 — a bare `WiFiServer`.** Uploads only (`POST /upload?name=<basename>`, raw body).
 
 The board HAL exposes the base URL as `localManagerUrl()` (nullptr on boards without local
