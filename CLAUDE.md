@@ -60,7 +60,7 @@ required (`OTA_PASSWORD` in `secrets.h`). Laggy WiFi → retry; a failed transfe
 ## Hardware — electrical, nest board (verified from Elecrow schematic + source — see `src/boards/crowpanel_rotary/pins.h`)
 
 > Physical/mechanical spec for designing mounts/cases (Ø79 rotating bezel, Ø58 rear
-> body, 3×M3 Ø12-BC rear holes, USB-C on back):
+> body, 3×M3 Ø12-BC rear holes, **4-pin MX1.25 JST on the back — not USB-C**):
 > **`hardware/round-nest-2.8/crowpanel-2.1-physical-spec.md`**.
 
 - ESP32-S3R8: 240 MHz, **8 MB OPI PSRAM, 16 MB flash**.
@@ -116,8 +116,11 @@ bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card �
 are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
 (round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (touch screens + ui_scale.h).
 
-nest UI screens (long-press knob = Menu hub): Now Playing (home), Rooms, Group, Playlists/
-Favorites (shared browse list), Settings, Clock. **Swipe up** = queue, **swipe down** = clock.
+nest UI screens: Now Playing (home), Menu hub, Rooms, Group, Playlists/Favorites (shared browse
+list), Settings, Clock. From Now Playing: **swipe right** (drag in from the left edge) = Menu,
+**swipe up** = queue, **swipe down** = clock; twist = volume, press = play/pause. On list
+screens, long-press = back. (The Menu is *not* a knob long-press — some in-tree comments still
+claim it is; they're stale.)
 
 sleep-machine UI: a 3-way home carousel (swipe left/right) picking where a track plays —
 **Sonos** (speaker's own library), **stream to Sonos** (SD file served over HTTP, see below),

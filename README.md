@@ -11,13 +11,15 @@ Multi-unit reorg rationale: [`plans/02-multi-unit-reorg.html`](plans/02-multi-un
 
 | Unit | Board | Form factor / UX | Use case | Build env |
 |------|-------|------------------|----------|-----------|
-| **sonos-nest** | ELECROW CrowPanel 2.1" (ST7701 480×480 round, EC11 rotary encoder + knob button, CST816 touch, PCF8574 expander) | Round rotary knob — twist = volume, press = play/pause, touch/gesture to browse | Wall-mounted knob controller | `nest` |
-| **sonos-sleep-machine** | Hosyond/LCDWIKI ES3C28P 2.8" (ILI9341 240×320 SPI, FT6336 touch, microSD, mic, RGB-LED) | Rectangular, touch-first | Nightstand / countertop (clock, alarms, sleep timer, ambient — **UX TBD**) | `sleep-machine` |
+| **[sonos-nest](docs/sonos-nest.md)** | ELECROW CrowPanel 2.1" (ST7701 480×480 round, EC11 rotary encoder + knob button, CST816 touch, PCF8574 expander) | Round rotary knob — twist = volume, press = play/pause, touch/gesture to browse | Wall-mounted knob controller | `nest` |
+| **[sonos-sleep-machine](docs/sonos-sleep-machine.md)** | Hosyond/LCDWIKI ES3C28P 2.8" (ILI9341 240×320 SPI, FT6336 touch, microSD, ES8311 codec + speaker, mic, RGB-LED) | Rectangular, touch-first | Nightstand sleep-sound player — plays off its SD card or through Sonos, with a wake track and a web UI for managing the card | `sleep-machine` |
+
+**→ Full guides: [sonos-nest](docs/sonos-nest.md) · [sonos-sleep-machine](docs/sonos-sleep-machine.md)**
+— hardware, cases, features, setup and day-to-day management for each unit.
 
 Both run the same **ESP32-S3R8** (8 MB OPI PSRAM, 16 MB flash) and share all Sonos control,
 discovery, browsing, settings, networking, and OTA. They differ only in their board drivers
-and screen UX. `sonos-sleep-machine` is currently a **stub** (board + UX skeleton that
-compiles and shows now-playing); its real driver and UX are deferred.
+and screen UX.
 
 ## Architecture — shared core + pluggable board/unit
 
@@ -36,13 +38,13 @@ src/
     net/                wifi · ota
   boards/               one dir per board — implements board.h
     crowpanel_rotary/   ST7701 display · CST816 touch · EC11 encoder · PCF8574 · pins.h
-    es3c28p/            STUB: pins.h + board.cpp (ILI9341/FT6336 = TODO)
+    es3c28p/            ILI9341 display · FT6336 touch · microSD · ES8311 audio · web server
   units/                one dir per UX — implements unit.h
     sonos_nest/         round/rotary LVGL screens + ui_scale.h (480×480)
-    sleep_machine/      STUB: placeholder screen + ui_scale.h (240×320)
+    sleep_machine/      touch screens + ui_scale.h (320×240 landscape)
 hardware/               3D-printed mounts/cases (user-owned; see hardware/README.md)
 plans/                  design plans + reorg doc
-docs/                   flashing-wsl.md
+docs/                   per-unit guides + flashing-wsl.md
 include/                lv_conf.h, secrets.h (gitignored)
 ```
 
@@ -63,7 +65,7 @@ TJpg_Decoder, ESP32Encoder.
 ```bash
 pio run -e nest                       # build the nest app (default env)
 pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
-pio run -e sleep-machine              # build the (stub) sleep-machine app
+pio run -e sleep-machine              # build the sleep-machine app
 ```
 
 Env variants: `nest-bringup` (Phase-0 hardware self-test), `nest-phase1` (interactive SOAP
