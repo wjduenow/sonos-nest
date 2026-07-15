@@ -5,9 +5,9 @@
 
 #include <Arduino.h>
 
-// The standalone bring-up modes (SD-as-USB, audio) replace the whole app and don't link the
+// The standalone bring-up modes (SD-as-USB, audio, mic) replace the whole app and don't link the
 // core/board/unit — so skip the app headers (and their LVGL/TJpg deps) in those builds.
-#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP)
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP)
 #include "core/player_state.h"
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
@@ -28,6 +28,9 @@
 #endif
 #ifdef AUDIO_BRINGUP
 #include "boards/es3c28p/audio_test.h"
+#endif
+#ifdef MIC_BRINGUP
+#include "boards/es3c28p/mic_test.h"
 #endif
 
 // Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Default keeps
@@ -52,6 +55,8 @@ void setup() {
   sdMscRun();    // does not return — expose the SD card to the host as a USB drive
 #elif defined(AUDIO_BRINGUP)
   audioTestRun();  // does not return — play the ocean MP3 from SD through the ES8311 speaker
+#elif defined(MIC_BRINGUP)
+  micTestRun();    // does not return — capture the ES8311 mic and print a live level meter
 #else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
@@ -67,7 +72,7 @@ void setup() {
 }
 
 void loop() {
-#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP)
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP)
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
 #endif

@@ -10,7 +10,9 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   2.8" Hosyond/LCDWIKI ES3C28P (ILI9341 240×320 SPI, FT6336 touch, microSD, ES8311 codec +
   speaker, mic, RGB-LED). **Working**: display, touch, SD, on-device MP3 playback, HTTP media
   server + remote SD management, and a touch UX (home carousel, rooms, WiFi, track picker,
-  settings, sleep timer). **Not yet wired**: the mic and the RGB-LED.
+  settings, sleep timer). The **mic captures** (ES8311 ADC record path proven via the
+  `sleep-machine-mic` bring-up env — see below), but is not yet wired into the app UX.
+  **Not yet wired**: the RGB-LED.
 
 Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
@@ -31,7 +33,9 @@ pio run -e sleep-machine   # build the sleep-machine app
 ```
 Envs: **`nest`** / **`sleep-machine`** (the apps), **`nest-bringup`** (`-DPHASE0_BRINGUP`
 hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
-**`sleep-machine-ota`** (espota WiFi upload). Each env selects one board + one unit + the
+**`sleep-machine-ota`** (espota WiFi upload). Also standalone es3c28p bring-ups: **`sleep-machine-audio`**
+(ES8311 speaker playback), **`sleep-machine-mic`** (ES8311 mic capture — prints a live level meter),
+**`sleep-machine-sdreader`** (SD-as-USB). Each env selects one board + one unit + the
 core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
@@ -112,8 +116,8 @@ Key modules (all under `src/core/` — device-agnostic):
 
 Boards: `src/boards/crowpanel_rotary/` (display · touch · encoder · pcf8574 · pins.h ·
 bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card · local_audio
-(ES8311 + Helix MP3) · local_stream (httpd) · local_tracks · pins.h; `sd_msc` and `audio_test`
-are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
+(ES8311 + Helix MP3) · local_stream (httpd) · local_tracks · pins.h; `sd_msc`, `audio_test`, and
+`mic_test` are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
 (round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (touch screens + ui_scale.h).
 
 nest UI screens: Now Playing (home), Menu hub, Rooms, Group, Playlists/Favorites (shared browse
@@ -191,6 +195,12 @@ Consequences worth knowing:
   the overlay must **not** flush LVGL between progress steps (panel tears during flash writes).
 - **Internal SRAM is the tight resource** (~150 KB free heap); flash (~4.9 MB/app slot,
   dual-OTA) and PSRAM (~7 MB free) are wide open.
+- **ES8311 mic (es3c28p) needs an explicit ADC power-up — `arduino-audio-driver` only inits for
+  playback.** Setting I2S RX + ADC volume/gain yields a DC-centered dither floor that ignores
+  sound; you must also power the analog ADC (`REG0E=0x02`, its suspend value `0xFF`=off), enable
+  the ADC clock (`REG01=0x3F`), route ADC data (`REG44=0x50`), unmute ADC onto SDOUT, select the
+  analog mic (`REG14=0x1A`), and give it real gain (low-output mic — analog PGA `REG16` near max
+  is best SNR). Full sequence + a live level meter: `mic_test.cpp` / the `sleep-machine-mic` env.
 
 ## secrets.h (gitignored — `include/secrets.h`)
 `WIFI_SSID`, `WIFI_PASS` required. Optional: `SONOS_DEFAULT_ROOM`, `CLOCK_TZ` (POSIX),
