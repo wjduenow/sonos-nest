@@ -1,0 +1,27 @@
+{
+  "name": "tflm",
+  "version": "0.0.0-esp-tflite-micro-vendored",
+  "description": "Vendored esp-tflite-micro (Espressif's current TensorFlow Lite Micro) + the classic external microfrontend, for microWakeWord on arduino-esp32. Reference kernels only (esp-nn removed).",
+  "license": "Apache-2.0",
+  "build": {
+    "flags": [
+      "-I.",
+      "-Ithird_party/flatbuffers/include",
+      "-Ithird_party/gemmlowp",
+      "-Ithird_party/ruy",
+      "-Ithird_party/kissfft",
+      "-DTF_LITE_STATIC_MEMORY",
+      "-DTF_LITE_DISABLE_X86_NEON",
+      "-fno-rtti",
+      "-fno-exceptions",
+      "-w"
+    ],
+    "srcFilter": [
+      "-<*>",
+      "+<tensorflow/>",
+      "+<signal/>",
+      "-<tensorflow/lite/micro/micro_time.cc>"
+    ],
+    "libArchive": false
+  }
+}
