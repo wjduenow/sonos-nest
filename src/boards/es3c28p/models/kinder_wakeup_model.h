@@ -1,5 +1,6 @@
 // Auto-generated from kinder_wakeup.tflite — custom microWakeWord model trained locally
-// (Piper TTS positives + cross-phrase hard negatives, 10k steps). Regenerate via xxd-equivalent.
+// (Piper TTS positives + cross-phrase hard negatives, 10k steps).
+// Regenerate: python3 training/wake-word/make_model_header.py kinder_wakeup
 #pragma once
 #include <cstdint>
 
