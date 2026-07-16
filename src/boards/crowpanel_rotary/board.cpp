@@ -36,3 +36,9 @@ void localTracksRefresh() {}
 int  localTrackCount() { return 0; }
 const char *localTrackName(int) { return nullptr; }
 const char *localTrackPath(int) { return nullptr; }
+
+// No microphone on this board — wake-word detection is a no-op here.
+bool wakeWordInit() { return false; }
+int  wakeWordPoll() { return -1; }
+const char *wakeWordPhrase(int) { return nullptr; }
+int  wakeWordCount() { return 0; }

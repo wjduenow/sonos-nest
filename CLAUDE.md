@@ -9,10 +9,9 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
 - **sonos-sleep-machine** (`sleep-machine` env) — a nightstand sleep-sound player: rectangular
   2.8" Hosyond/LCDWIKI ES3C28P (ILI9341 240×320 SPI, FT6336 touch, microSD, ES8311 codec +
   speaker, mic, RGB-LED). **Working**: display, touch, SD, on-device MP3 playback, HTTP media
-  server + remote SD management, and a touch UX (home carousel, rooms, WiFi, track picker,
-  settings, sleep timer). The **mic captures** (ES8311 ADC record path proven via the
-  `sleep-machine-mic` bring-up env — see below), but is not yet wired into the app UX.
-  **Not yet wired**: the RGB-LED.
+  server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
+  settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
+  (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
 
 Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
@@ -196,8 +195,19 @@ Consequences worth knowing:
   the overlay must **not** flush LVGL between progress steps (panel tears during flash writes).
 - **Internal SRAM is the tight resource** (~150 KB free heap); flash (~4.9 MB/app slot,
   dual-OTA) and PSRAM (~7 MB free) are wide open.
-- **Wake word (microWakeWord) — WORKS on real voice with custom-trained models.**
-  `sleep-machine-wake` (`wake_test.cpp`) runs mic → TFLM microfrontend (40-ch log-mel, 30 ms/10 ms,
+- **Wake word (microWakeWord) — live in the app, 2 of 3 phrases.** Full story + the "Kinder Rise"
+  next step: **`plans/03-wake-word-integration.md`**. `boards/es3c28p/wake_word.cpp` is the real
+  engine (`sleep-machine`); `wake_test.cpp` / `sleep-machine-wake` is the standalone bring-up. The
+  board only reports **which phrase it heard** (`wakeWord*` in `core/board.h`); the unit decides what
+  that means (`handleWakeWord()` in `units/sleep_machine/screens.cpp`), since boards must not touch
+  `g_pending`/`settings`. Each phrase calls the same callback as its on-screen button, so voice and
+  touch can't drift: **Bedtime** → the **Sonos Sleep playlist** (`cloudCb`, *not* the SD-stream
+  card), **Wake-Up** → stop. **"Kinder Rise and Shine" is vendored but NOT shipped** — it scores
+  0.00 on most real utterances while the other two hit 0.96-1.00 on the same audio, and a lower
+  cutoff doesn't help (the failures are zeros, not near-misses). Set `WAKE_DEBUG 1` in
+  `wake_word.cpp` for a 2 s heartbeat (mic rms + per-model peak) — it's the tool for tuning a new
+  phrase, and it distinguishes "scored 0.7, retune" from "scored 0.00, retrain".
+  Both run mic → TFLM microfrontend (40-ch log-mel, 30 ms/10 ms,
   int8 `real×9.8−128` quant) → streaming model (3-frame windows, resource-variable state). TFLM is
   **vendored** in `lib/tflm` (esp-tflite-micro + classic microfrontend, reference kernels — Arduino
   has no working TFLM package for streaming models; see `lib/tflm/VENDORING.md`). The three custom
@@ -218,6 +228,30 @@ Consequences worth knowing:
   -mlongcalls`, and the 7 reference kernels it replaces (add/conv/depthwise_conv/fully_connected/
   mul/pooling/softmax) must be excluded from the build or they collide. `kOnlyModel` in
   `wake_test.cpp` still selects a single model for isolating tests (-1 = run all three).
+- **Any `src/` file including a TFLM header MUST repeat lib/tflm's flags in its env**, at minimum
+  `-DTF_LITE_STATIC_MEMORY` (plus `-fno-exceptions`). `library.json`'s `build.flags` configure only
+  the library's OWN sources — they do not propagate to `src/`. `TF_LITE_STATIC_MEMORY` selects a
+  **different `TfLiteTensor` field order**, so a mismatch is not a link error: `AllocateTensors()`
+  returns OK, `interp->input(0)` returns a sane-looking pointer, and every field read through it is
+  garbage (`params.scale=-nan`, `dims->data[1]`=poison) → `StoreProhibited` on the first inference.
+  The `sleep-machine-wake` env had these; adding wake_word.cpp to `sleep-machine` without them cost
+  hours. Symptom to recognise: valid pointers + nonsense quant params = ABI mismatch, not memory.
+- **Wake word costs ~31 KB of internal SRAM, and internal SRAM is what breaks Sonos first.** The
+  models are nearly free (~228 B each; arenas are PSRAM) — the cost is I2S buffers and task stacks.
+  `buffer_count=8/buffer_size=1024` cost **33.8 KB** (audio-tools allocates well past the DMA
+  descriptors); `4/512` costs 9 KB and detection is unchanged (0.96-0.99). Stacks are sized off
+  measured high-water marks. When internal free fell to ~15 KB (largest block 7.6 KB), LWIP couldn't
+  get socket buffers and the **symptom was Sonos `connection refused` + "File system is not
+  mounted"** — nothing pointing at the wake word. Healthy is ~47 KB free / ~35 KB largest.
+- **Wake tasks are pinned to core 1 — core 0 belongs to the network.** netTask (prio 2) and
+  media-httpd (prio 1, streams SD → Sonos) live on core 0; the wake capture task must be high-prio
+  (or I2S goes stale), so on core 0 it starves them. That failure only appears **while streaming** —
+  an idle device polls Sonos fine, so a "does the network work?" control test that isn't playing
+  anything proves nothing. Always test the *streaming* path.
+- **A corrupt incremental build looks like "every model silently scores 0.00"** — not a compile
+  error. This machine has a known hardware fault (BIOS update pending; random SIGKILL/ICE under
+  load). If detection dies after a change that couldn't affect it, **`pio run -t clean` before
+  debugging the code** — a clean rebuild of identical source restored it. Build with `-j 2`.
 - **Wake-word testing: the mic needs LOUD, close speech (pcmRms >~10000) to fire.** At pcmRms ~4000
   *nothing* fires — with any kernel set. Several hours were lost concluding "esp-nn miscomputes"
   from tests that were really just too quiet. Always check `pcmRms` in the heartbeat before

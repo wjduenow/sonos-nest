@@ -72,6 +72,8 @@ void setup() {
   if (!albumArtInit()) Serial.println("[boot] album art buffer alloc failed (no PSRAM?)");
 
   appBoot();            // WiFi + time + OTA + Sonos discovery + zone selection
+  wakeWordInit();       // mic -> wake-word engine (no-op / false on boards without a mic).
+                        // After appBoot so it doesn't compete with WiFi/discovery for CPU at boot.
   appStartTasks();      // launch ui / net / art tasks
 #endif  // bring-up modes
 }

@@ -289,6 +289,54 @@ static void wakeCb(lv_event_t *) {
   updateWakeBtn();
 }
 
+// --- wake word -------------------------------------------------------------
+// The board hears a phrase; deciding what it MEANS is ours. Each phrase runs exactly the same
+// path as the equivalent on-screen button, so voice and touch can't drift apart:
+//   "Kinder Bedtime"        -> play the Sonos Sleep playlist     (same as the Sleep Sounds card)
+//   "Kinder Wake-Up"        -> stop                              (same as the Stop button)
+//   "Kinder Rise and Shine" -> swap in the wake track            (same as the Wake button)
+// Bedtime is the *Sonos playlist*, not the SD-stream card — the SD path is a no-internet fallback
+// you pick deliberately, and the wake track (Rise and Shine) is the only voice action that uses it.
+// Matched by phrase text, not index — the board owns the ordering.
+//
+// The Rise-and-Shine branch is DORMANT: the board doesn't ship that model (it detects unreliably —
+// see wake_word.cpp), so wakeWordPhrase() never returns it. It's kept intact because the action is
+// correct and tested; a shorter "Kinder Rise" replacement only needs the model re-added there and
+// the string changed here. See plans/03-wake-word-integration.md.
+static void handleWakeWord() {
+  int i = wakeWordPoll();
+  if (i < 0) return;
+  const char *p = wakeWordPhrase(i);
+  if (!p) return;
+  showToast(p);                                   // visible confirmation it heard you
+
+  if (!strcmp(p, "Kinder Bedtime")) {
+    cloudCb(nullptr);
+  } else if (!strcmp(p, "Kinder Wake-Up")) {
+    if (s_state == ST_HOME) return;               // nothing playing — ignore rather than poke Sonos
+    stopCb(nullptr);
+  } else if (!strcmp(p, "Kinder Rise and Shine")) {
+    String wake = wakeTrackPath();
+    if (!wake.length()) { showToast("No wake track on the SD card"); return; }
+    if (s_state == ST_PLAYING) {
+      wakeCb(nullptr);                            // swap on whatever output is already in use
+    } else {
+      // Nothing playing: start the wake track on Sonos. wakeCb alone would start audio but leave
+      // the UI on Home, so mirror the Local path (minus the sleep volume — a wake-up isn't quiet).
+      const char *url = localFileUrl(wake.c_str());
+      if (!url) { showToast("SD / network unavailable"); return; }
+      if (stateLock()) {
+        g_pending.localStreamUrl   = url;
+        g_pending.localStreamTitle = displayNameOf(wake);
+        stateUnlock();
+      }
+      s_sonosTitle  = displayNameOf(wake);
+      s_wakePlaying = true;
+      gotoStarting(displayNameOf(wake));
+    }
+  }
+}
+
 // --- home carousel ---------------------------------------------------------
 
 // The one big button dispatches to the current option's action.
@@ -1161,6 +1209,8 @@ void uiInit() {
 
 void uiTick() {
   lv_timer_handler();
+
+  handleWakeWord();   // no-op on boards without a mic (wakeWordPoll() returns -1)
 
   // Snapshot shared state under the lock.
   TransportState tr = TransportState::Unknown;

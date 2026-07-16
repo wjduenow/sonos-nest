@@ -36,6 +36,23 @@ void localAudioStop();
 bool localAudioActive();           // true while a local file is playing
 void localAudioSetVolume(uint8_t pct);   // 0..100; no-op on boards without audio
 
+// --- Wake word (optional; boards without a mic are no-ops) ---
+// On-device wake-word detection. The board owns the microphone, the feature frontend and the
+// models, and runs them on its own task — it reports *which phrase was heard* and nothing more.
+// Deciding what a phrase DOES is the unit's job (boards must not reach into g_pending/settings),
+// so this HAL is deliberately just "did you hear something".
+//
+// wakeWordInit()  — start the engine. false if the board has no mic or bring-up failed.
+// wakeWordPoll()  — non-blocking: index of a phrase detected since the last call, else -1.
+//                   Only the most recent detection is kept; call it from a loop (uiTick).
+// wakeWordPhrase()— human-readable phrase for an index (nullptr out of range), for logs/UI.
+// The index order is the board's, and matches wakeWordPhrase() — a unit should map by asking,
+// not by hard-coding numbers.
+bool        wakeWordInit();
+int         wakeWordPoll();
+const char *wakeWordPhrase(int i);
+int         wakeWordCount();
+
 // Serve a local file (e.g. off the SD card) over HTTP so a network player (Sonos) can stream
 // it, and return the URL to hand the player. Starts a small HTTP server on first use. Returns
 // nullptr if the board has no local storage/server or it couldn't start. The returned pointer
