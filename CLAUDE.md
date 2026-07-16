@@ -208,11 +208,20 @@ Consequences worth knowing:
   `operator delete` + placement-new); the inference must run in a **separate task** off a feature
   queue or it starves I2S capture (stale audio); capture stereo and take the LEFT slot (REG44=0x50
   routes the mono ADC there); arena goes in PSRAM (~19 KB/model).
-- **Wake word: only ONE model fits real-time until esp-nn is vendored.** Each inference is ~17 ms
-  (TFLM *reference* kernels) and a 3-frame feature window arrives every 30 ms, so running all three
-  costs 51 ms/30 ms = 170% of real-time → the feature queue overflows (`drops` climbs) and the
-  models see discontinuous audio. `kOnlyModel` in `wake_test.cpp` selects one. Restoring the
-  `esp_nn` kernels (deleted during vendoring) should give ~2-4x and make 3-up viable.
+- **Wake word: all 3 models run concurrently thanks to esp-nn (~4 ms/inference).** With TFLM's
+  *reference* kernels each inference is ~17 ms, and a 3-frame feature window arrives every 30 ms, so
+  3-up cost 51 ms/30 ms = 170% of real-time → the feature queue overflowed (`drops` climbed) and the
+  models saw discontinuous audio. **esp-nn** (Espressif's SIMD kernels, vendored at
+  `lib/tflm/esp-nn`) cuts that to ~4 ms → 3-up is ~40% of real-time, `drops=0`. It lives *inside*
+  lib/tflm on purpose: nothing in `src/` includes `esp_nn.h`, so PlatformIO's LDF would never build
+  it as a standalone lib. Needs `-DESP_NN -DCONFIG_NN_OPTIMIZED -DCONFIG_IDF_TARGET_ESP32S3
+  -mlongcalls`, and the 7 reference kernels it replaces (add/conv/depthwise_conv/fully_connected/
+  mul/pooling/softmax) must be excluded from the build or they collide. `kOnlyModel` in
+  `wake_test.cpp` still selects a single model for isolating tests (-1 = run all three).
+- **Wake-word testing: the mic needs LOUD, close speech (pcmRms >~10000) to fire.** At pcmRms ~4000
+  *nothing* fires — with any kernel set. Several hours were lost concluding "esp-nn miscomputes"
+  from tests that were really just too quiet. Always check `pcmRms` in the heartbeat before
+  believing a negative result.
 - **ES8311 mic (es3c28p) needs an explicit ADC power-up — `arduino-audio-driver` only inits for
   playback.** Setting I2S RX + ADC volume/gain yields a DC-centered dither floor that ignores
   sound; you must also power the analog ADC (`REG0E=0x02`, its suspend value `0xFF`=off), enable

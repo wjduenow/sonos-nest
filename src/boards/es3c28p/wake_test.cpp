@@ -58,7 +58,7 @@ static constexpr int   kNumOps         = 20;
 // and a 3-frame window arrives every 30 ms, so running all THREE (51 ms/30 ms = 170% of real-time)
 // overflows the feature queue and feeds the models discontinuous audio. Until esp-nn is vendored,
 // test ONE model at a time: set to 0/1/2 to pick, or -1 to run all (expect drops).
-static constexpr int   kOnlyModel      = 0;   // 0=Bedtime  1=Wake-Up  2=Rise-and-Shine
+static constexpr int   kOnlyModel      = -1;   // 0=Bedtime  1=Wake-Up  2=Rise-and-Shine
 
 // ================= ES8311 mic capture (proven in mic_test.cpp) =================
 static DriverDeviceInfo s_pins;

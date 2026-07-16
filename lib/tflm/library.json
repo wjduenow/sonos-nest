@@ -1,7 +1,7 @@
 {
   "name": "tflm",
   "version": "0.0.0-esp-tflite-micro-vendored",
-  "description": "Vendored esp-tflite-micro (Espressif's current TensorFlow Lite Micro) + the classic external microfrontend, for microWakeWord on arduino-esp32. Reference kernels only (esp-nn removed).",
+  "description": "Vendored esp-tflite-micro (Espressif's current TensorFlow Lite Micro) + the classic external microfrontend + esp-nn SIMD kernels, for microWakeWord on arduino-esp32 / ESP32-S3. esp-nn lives inside this library on purpose: nothing in src/ includes esp_nn.h, so PlatformIO's LDF would never build it as a standalone lib.",
   "license": "Apache-2.0",
   "build": {
     "flags": [
@@ -10,8 +10,15 @@
       "-Ithird_party/gemmlowp",
       "-Ithird_party/ruy",
       "-Ithird_party/kissfft",
+      "-Iesp-nn/include",
+      "-Iesp-nn/src/common",
       "-DTF_LITE_STATIC_MEMORY",
       "-DTF_LITE_DISABLE_X86_NEON",
+      "-DESP_NN",
+      "-DCONFIG_NN_OPTIMIZED",
+      "-DCONFIG_IDF_TARGET_ESP32S3",
+      "-mlongcalls",
+      "-fno-unroll-loops",
       "-fno-rtti",
       "-fno-exceptions",
       "-w"
@@ -20,7 +27,15 @@
       "-<*>",
       "+<tensorflow/>",
       "+<signal/>",
-      "-<tensorflow/lite/micro/micro_time.cc>"
+      "+<esp-nn/src/>",
+      "-<tensorflow/lite/micro/micro_time.cc>",
+      "-<tensorflow/lite/micro/kernels/add.cc>",
+      "-<tensorflow/lite/micro/kernels/conv.cc>",
+      "-<tensorflow/lite/micro/kernels/depthwise_conv.cc>",
+      "-<tensorflow/lite/micro/kernels/fully_connected.cc>",
+      "-<tensorflow/lite/micro/kernels/mul.cc>",
+      "-<tensorflow/lite/micro/kernels/pooling.cc>",
+      "-<tensorflow/lite/micro/kernels/softmax.cc>"
     ],
     "libArchive": false
   }
