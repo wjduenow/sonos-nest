@@ -196,17 +196,23 @@ Consequences worth knowing:
   the overlay must **not** flush LVGL between progress steps (panel tears during flash writes).
 - **Internal SRAM is the tight resource** (~150 KB free heap); flash (~4.9 MB/app slot,
   dual-OTA) and PSRAM (~7 MB free) are wide open.
-- **Wake word (microWakeWord) — pipeline is proven; the gap is real-voice acoustics, not firmware.**
+- **Wake word (microWakeWord) — WORKS on real voice with custom-trained models.**
   `sleep-machine-wake` (`wake_test.cpp`) runs mic → TFLM microfrontend (40-ch log-mel, 30 ms/10 ms,
   int8 `real×9.8−128` quant) → streaming model (3-frame windows, resource-variable state). TFLM is
   **vendored** in `lib/tflm` (esp-tflite-micro + classic microfrontend, reference kernels — Arduino
-  has no working TFLM package for streaming models; see `lib/tflm/VENDORING.md`). A golden diff
-  (`pymicro-features` + `tflite-runtime`) proved a clean Piper-TTS "okay nabu" fires the model at
-  254/255 through this exact path; live speech through the ES8311 mic peaks at only ~5-20/255 (needs
-  247). Fix = a better-matched/custom-trained model, NOT code. Key gotchas that cost time: TFLM
-  needs `-fno-exceptions` (private `operator delete` + placement-new); the inference must run in a
-  **separate task** off a feature queue or it starves I2S capture (stale audio); capture stereo and
-  take the LEFT slot (REG44=0x50 routes the mono ADC there); arena goes in PSRAM (~19 KB).
+  has no working TFLM package for streaming models; see `lib/tflm/VENDORING.md`). The three custom
+  "Kinder Bedtime / Wake-Up / Rise and Shine" models (`models/kinder_*`, trained per
+  `training/wake-word/`) each fire at **0.95-1.00 on real voice**, silent on the other phrases.
+  Stock TTS-trained models (okay_nabu) peaked at only 5-20/255 on a real voice — custom training is
+  what closed that gap. Key gotchas that cost time: TFLM needs `-fno-exceptions` (private
+  `operator delete` + placement-new); the inference must run in a **separate task** off a feature
+  queue or it starves I2S capture (stale audio); capture stereo and take the LEFT slot (REG44=0x50
+  routes the mono ADC there); arena goes in PSRAM (~19 KB/model).
+- **Wake word: only ONE model fits real-time until esp-nn is vendored.** Each inference is ~17 ms
+  (TFLM *reference* kernels) and a 3-frame feature window arrives every 30 ms, so running all three
+  costs 51 ms/30 ms = 170% of real-time → the feature queue overflows (`drops` climbs) and the
+  models see discontinuous audio. `kOnlyModel` in `wake_test.cpp` selects one. Restoring the
+  `esp_nn` kernels (deleted during vendoring) should give ~2-4x and make 3-up viable.
 - **ES8311 mic (es3c28p) needs an explicit ADC power-up — `arduino-audio-driver` only inits for
   playback.** Setting I2S RX + ADC volume/gain yields a DC-centered dither floor that ignores
   sound; you must also power the analog ADC (`REG0E=0x02`, its suspend value `0xFF`=off), enable
