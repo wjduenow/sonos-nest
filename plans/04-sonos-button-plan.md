@@ -121,46 +121,85 @@ door open to deep-sleep-wake-on-button later if you ever run it off the battery 
 | Switch function | **SELF-RESET** = momentary, and the drawing labels the contacts **NO / C** → **normally-open**, exactly what `INPUT_PULLUP` wants. No latching to design around; §1's toggle is done in software, which the datasheet itself says ("if a self-locking function needs to be achieved, it should be controlled through a program"). |
 | Termination | **4-pin MX1.25 board-to-wire**, pre-crimped **150 ± 5 mm** 26 AWG PTFE pigtail — **no soldering to the button.** |
 | Contacts | **NO**, **C**, **LED+**, **LED−** |
-| LED | **5–24 V** ⚠️ see below. Black wire = LED−; the colored wire = LED+ (its color matches the light). |
+| LED | **5–24 V**, and the ring is **WHITE** ⚠️ — see "the LED is the problem" below. |
 
-### Wiring: 4 wires → **3 pins on the board**
+### The harness: **black, white, two brown** (as received)
 
-The connector has four contacts, but **C and LED− both land on GND**, so there are only three
-distinct board connections:
+Four wires, and the datasheet's legend decodes all of them without a meter:
+
+| Wire | Is | Why we know |
+|---|---|---|
+| **brown** | switch **NO** | §4 wiring text: *"connect the positive terminal of the power supply to the brown wire of the switch, and the other brown wire … to the device"* — i.e. **both browns are the switch**. |
+| **brown** | switch **C** | ditto — and see the polarity note below. |
+| **black** | **LED−** | *"the black wire represents the negative pole."* |
+| **white** | **LED+** | *"the colored wires corresponding to the lights indicate the positive pole"* + *"the color of the lamp wire matches the color of the light."* |
+
+**The two browns are interchangeable.** NO/C is a dry mechanical contact with no polarity, so it
+does not matter which brown goes to GPIO14 and which to GND. Don't waste a meter session on it.
+
+**White is not a wire color choice — it's the LED's color**, per the datasheet's own rule that
+the lamp wire matches the light. That single fact is what makes the section below a plan rather
+than a maybe.
+
+### Wiring
 
 ```
-   NO    ──────►  GPIO14        switch, active-low (internal pull-up)
-   C     ──────►  GND       ┐   shared — this is why 4 wires = 3 pins
-   LED−  ──────►  GND       ┘
-   LED+  ──────►  GPIO2         status LED (but read the 3.3 V caveat below)
+   brown ──────►  GPIO14        switch, active-low (internal pull-up)
+   brown ──────►  GND           the other switch leg (either brown; no polarity)
+   white ──────►  LED+  ┐
+   black ──────►  LED−  ┘       ring — DO NOT drive from a 3.3 V GPIO; see below
 ```
 
 **The button's own LED ring supersedes the onboard-LED question.** `pins.h:18-21` flags the
 green LED on GPIO2 as an unverified guess from the schematic. It no longer matters much either
 way: the button ring is *better* status feedback than an LED buried inside the case — it's the
-one thing the user is already looking at. GPIO2 is free regardless, so drive the ring from it
-and treat the onboard LED as a bonus if bring-up proves it exists.
+one thing the user is already looking at. Treat the onboard LED as a bonus if bring-up proves it
+exists.
 
-⚠️ **The LED is rated 5–24 V and the ESP32 drives 3.3 V — it may be dim or dead.** The ring
-almost certainly has an internal series resistor sized for ≥5 V, so at 3.3 V the current will be
-well under spec. How badly depends on the LED color: a red ring (Vf ≈ 2 V) will likely still
-light usably, while white/blue (Vf ≈ 3 V) may barely glow. **This is a Phase 0 test, not a
-design decision to agonize over now** — wire LED+ to GPIO2 and look at it.
+### ⚠️ The LED is the problem: a **white** ring on a **3.3 V** micro
 
-- **If it lights acceptably at 3.3 V** → done, three pins, full software control, no parts.
-- **If it's too dim** → LED+ to the **5 V rail** and low-side-switch LED− to GND through a small
-  N-MOSFET (e.g. 2N7002 / AO3400) gated by GPIO2. That costs a fourth connection and one part.
-  **Do not** simply tie LED+ to 5 V and LED− to GND unless you accept an always-on ring with no
-  status feedback at all — which throws away Phase 4.
+A white LED has a **forward voltage of ≈3.0–3.2 V**, and the ring is specced **5–24 V**, so it
+carries an internal series resistor sized for **≥5 V**. Drive it from a 3.3 V GPIO and you leave
+roughly **0.1–0.3 V** across that resistor — microamps. **It will be dark, or a useless glimmer.**
+This is not the coin-flip an earlier draft of this plan described; that draft hedged on ring
+color, and the color is now known to be the bad one.
+
+**So plan for the 5 V path from the start:**
+
+```
+        5V rail ──────► white (LED+)
+                          │
+                        [ring]
+                          │
+        black (LED−) ───► D
+                       ┌──┴──┐
+             GPIO2 ───►│ G   │  N-MOSFET, logic-level (2N7002 / AO3400)
+                       └──┬──┘
+                          S
+                          │
+                         GND
+```
+
+Low-side switching keeps the gate referenced to GND, so a 3.3 V GPIO drives it fine even though
+the LED sits on 5 V. **Cost: one part, and the "three pins" becomes four connections** —
+GPIO14, GND, 5 V, GPIO2. Worth it: the ring is the entire UI of a screenless box.
+
+- **Confirm the board actually exposes 5 V on a header** before committing — it has USB-C and a
+  PH2.0 battery charger, so a 5 V/VBUS pin is very likely, but ⚠️ **VERIFY** it.
+- **Don't** just tie white→5 V and black→GND. That "works" and is tempting, but it's an always-on
+  ring with no status feedback, which throws Phase 4 away entirely.
+- **Still worth 30 seconds in Phase 0:** poke white straight onto GPIO2 and look. If it somehow
+  lights usably, take the win and drop the MOSFET. Expect it not to.
 
 Current draw is unstated (the datasheet's "MICROVOLTAGE" is a mistranslation, not a spec).
-Expect ~10–20 mA, which is inside an ESP32-S3 GPIO's ~20 mA comfortable source — but **measure
-it during Phase 0** rather than trusting that.
+Expect ~10–20 mA at 5 V — trivial for the MOSFET, but **measure it in Phase 0**.
 
 ```cpp
 // src/boards/esp32s3cam/pins.h
-#define PIN_BUTTON        14    // FLM12-FJ-6 "NO" — momentary to GND, active-low, pull-up
-#define PIN_STATUS_LED     2    // FLM12-FJ-6 "LED+" — ring; VERIFY it lights at 3.3 V
+#define PIN_BUTTON        14    // FLM12-FJ-6 — either brown; momentary to GND, active-low
+#define PIN_STATUS_LED     2    // FLM12-FJ-6 white ring, via a low-side MOSFET off 5V.
+                                // NOT a direct drive: the ring is white (Vf ~3.1 V) and
+                                // specced 5-24 V, so 3.3 V will not light it.
 ```
 
 ```cpp
@@ -297,7 +336,7 @@ units don't collide on mDNS/OTA (UDP 3232).
 
 | # | Phase | Deliverable / proof |
 |---|---|---|
-| **0** | **Bring-up** (`sleep-button-bringup`) | Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6's LED question (§4): does the 5–24 V ring light usably when GPIO2 drives it at 3.3 V, and what does it draw?** A dim ring here means a MOSFET + the 5 V rail, which is a wiring change worth knowing before the case is designed around three wires. |
+| **0** | **Bring-up** (`sleep-button-bringup`) | Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6 ring (§4):** confirm the board exposes **5 V** on a header, measure the ring's draw, and — 30 seconds, expect failure — poke white straight onto GPIO2 to see whether a **white** (Vf ≈ 3.1 V) ring specced 5–24 V does anything at 3.3 V. Assume it doesn't and that the MOSFET is real; this phase is where that's cheap to find out. |
 | **1** | **Headless skeleton** | `-DHEADLESS` guards + stub board + no-op unit. Boots, joins WiFi (`secrets.h`), discovers Sonos, OTA answers. **No button yet.** Proves the core is portable. |
 | **2** | **Button → playlist** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Hardcode room/playlist/volume. **The device does its job.** |
 | **3** | **Config server** | :8080 page + `webconfig` fields for playlist/volume. Room picker comes free. |
@@ -333,8 +372,12 @@ hardware/cam-button/
   the other two boards — **caliper-check before printing bosses.** ⚠️ **VERIFY**
 - **USB-C is centered on one short (30.4 mm) edge**
 - BOOT and RESET buttons flank the USB-C on that same edge
+- **`BOARD_STACK_T` = 14.5 mm** — measured, thickest point, driven by the **pre-soldered header
+  pins**. ⚠️ **Removing the camera does not reduce this**; the headers are the tall part. Any Z
+  figure taken from the vendor's 2D outline drawing is the bare PCB and will mislead you.
 - Vendor publishes a **3D STEP/model** (`releases/download/V0.0.1/esp32s3_cam_3d.zip`) — pull it
-  and measure rather than trusting the 2D drawing for Z heights. ⚠️ **VERIFY**
+  for the *lateral* keep-outs, but the measured 14.5 mm governs Z (the model almost certainly
+  omits the headers). ⚠️ **VERIFY which way the pins protrude** — see §6.
 
 ### Design
 
@@ -388,37 +431,73 @@ hardware/cam-button/
     ~23   mm of clear interior height under the bore
   ```
 
-  …against a board that is only ~5 mm tall once the camera comes off. **The button, not the PCB,
-  sets the height of this box.** Two ways to pay for it:
+  …and the board is **not** the ~5 mm slab an earlier draft of this plan assumed. **Measured:
+  `BOARD_STACK_T` = 14.5 mm at its thickest, because the board ships with pre-soldered header
+  pins.** The camera coming off does *not* recover this — the headers, not the lens, are the
+  tall thing.
 
-  - **Site the bore off the PCB footprint** (over the free area beside the board) so the button
-    and its connector hang down *next to* the board rather than above it. **Preferred** — costs
-    shell floor area, which is cheap on a 38 × 30 mm board that doesn't fill its own box, instead
-    of shell height, which is not. It also keeps the pigtail's 150 mm of slack out from over the
-    PCB, and keeps the nut's 18.5 mm across-corners circle clear of the screw bosses.
-  - **Raise the top face** to ~23 mm above the PCB. Simple, but the whole enclosure gets tall to
-    suit one component.
+  **This makes siting the bore beside the board the whole ballgame.** The two are no longer a
+  tall part next to a flat one; they are two tall parts, and whether they overlap in *plan* view
+  decides the height of the product:
 
-  Either way this is a **hard floor on the shell's internal Z**, so `BUTTON_BEHIND_T` belongs in
-  `button_params.py` *upstream* of the shell height, which should be derived from it rather than
-  set independently.
+  ```
+  bore BESIDE the board     interior Z = max(23, 14.5)  = ~23 mm   ✅
+  bore OVER the board       interior Z = 23 + 14.5      = ~37.5 mm ❌  (button hangs from the
+                                                                        lid, board sits on the
+                                                                        floor — they stack)
+  ```
+
+  A 14.5 mm difference is the box looking deliberate versus looking like a brick. So:
+
+  - **Site the bore off the PCB footprint** — over free floor area beside the board, so the
+    button and its connector hang down *next to* it. **Strongly preferred.** It costs floor area,
+    which is cheap, instead of height, which is not. Floor grows to roughly **38.4 + gap + 18.5
+    ≈ 60 mm** in one axis — fine for a shelf/wall appliance, and it also keeps the pigtail's
+    150 mm of slack off the PCB and the nut's 18.5 mm across-corners circle clear of the screw
+    bosses.
+  - **Raise the top face** to ~37.5 mm above the floor. Simple and compact in plan, but the box
+    becomes noticeably tall to suit one button.
+
+  **Don't reach for desoldering the headers to get the board thin.** It doesn't win: even at a
+  bare ~5 mm, a bore *over* the board still needs ~28 mm of interior, which is worse than
+  **23 mm** from just moving the bore sideways and keeping them. And the headers are actively
+  useful here — the FLM12-FJ-6's three connections (§4) can land on female DuPont crimps and
+  stay serviceable, instead of being soldered to pads that a tug on the pigtail could lift.
+
+  This is a **hard floor on the shell's internal Z**, so `BUTTON_BEHIND_T` and `BOARD_STACK_T`
+  both belong in `button_params.py` *upstream* of the shell height, which should be derived as
+  `max()` / `sum()` of them per the layout above rather than set independently.
+
+  ⚠️ **Check which way the headers face before fixing the floor plan.** If the pins protrude
+  *below* the PCB, the mounting bosses must be tall enough to keep them off the floor (and the
+  14.5 mm is measured pin-tip to pin-tip); if they stand *above* it, the bosses can be short but
+  the 14.5 mm eats headroom under the lid. Same number, different consequence for the design.
 
   Everything downstream is `BUTTON_BORE_D` / `BUTTON_BEHIND_T` / `BUTTON_PANEL_T` /
   `BUTTON_NUT_AF` in `button_params.py`.
-- **Button wiring** — the FLM12-FJ-6 ships a **4-wire MX1.25 pigtail, 150 mm**, so there is
-  nothing to solder *at the button*; the four wires land on **three** header points (GPIO14, GND,
-  GPIO2 — see §4). 150 mm is far more slack than a ~40 mm box needs: leave a **channel or a pair
-  of posts to coil the excess**, and a **strain-relief rib** at the header end so tugging the
-  button can't lift a pad. The button itself is captive in its nut, so the rib protects the
-  *board*, not the button.
+- **Button wiring** — the FLM12-FJ-6 ships a **4-wire MX1.25 pigtail, 150 mm** (black / white /
+  two brown), so there is nothing to solder *at the button*. The four wires land on **GPIO14,
+  GND, 5 V and GPIO2**, with a **low-side MOSFET on the white ring's return** — see §4, and note
+  that little board needs somewhere to live. **Leave room for a small perfboard or a blob of
+  heat-shrink near the header end**; it's one SOT-23 and nothing else, but it is not zero volume.
+  150 mm is also far more slack than a ~60 mm box needs: leave a **channel or a pair of posts to
+  coil the excess**, and a **strain-relief rib** at the header end so tugging the button can't
+  lift a pad. The button itself is captive in its nut, so the rib protects the *board*.
 - **Lid** — screwed or snap-fit; whichever the other parts in `hardware/` favor.
 
 ### Camera: unplug it
 
-The camera sits on an **FPC ribbon into a connector** — it lifts out without desoldering. Doing so
-removes the tallest thing on the board and lets the shell be materially thinner. **Recommend
-removing it and designing the case with no lens boss.** If you'd rather keep the option open,
-say so and I'll leave a blanked-off lens pocket.
+The camera sits on an **FPC ribbon into a connector** — it lifts out without desoldering, and the
+unit never reads it (§1). **Still recommend removing it and designing the case with no lens
+boss.** If you'd rather keep the option open, say so and I'll leave a blanked-off lens pocket.
+
+> **The height argument for removing it is dead — take it for the footprint instead.** An earlier
+> draft called the camera "the tallest thing on the board" and expected its removal to make the
+> shell materially thinner. The measured **14.5 mm header stack** (§3) is what sets Z, and pulling
+> the lens does not touch it. Removing the camera now buys **lateral clearance, a simpler top
+> face, and one less thing to rattle** — real, but not height. Don't let this plan claim
+> otherwise; it's exactly the kind of stale rationale that survives into a design nobody
+> re-derives.
 
 ### Antenna
 
@@ -436,6 +515,8 @@ bury it against a screw boss. If range disappoints in the final spot, the IPEX m
    **(a)** is 13.35/13.5 mm the overall length or the behind-panel depth? **(b)** how long is the
    threaded section — if it's really ~4 mm, the top face needs a thinned pocket at the bore.
 2. **Caliper the board's mounting-hole Ø** (M2 vs M3) — the drawing omits it.
-3. **A decision on WiFi provisioning** (§1) — or just take the recommendation: `secrets.h` now,
+3. **Which way do the header pins protrude** — above the PCB, below it, or both? The 14.5 mm
+   stack (§3) is settled; this decides whether it costs boss height or lid headroom (§6).
+4. **A decision on WiFi provisioning** (§1) — or just take the recommendation: `secrets.h` now,
    portal in Phase 5.
-4. **Confirm the camera comes off.**
+5. **Confirm the camera comes off** — for footprint, not height (§6).
