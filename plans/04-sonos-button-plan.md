@@ -8,6 +8,27 @@ Press again to stop. All configuration happens in a browser; the device has no s
 This is the **third unit** in the repo (after `nest` and `sleep-machine`) and the first
 **headless** one. It reuses the shared core wholesale — see "Why this is cheap" below.
 
+> ## Status — the device works; the case is printable; only WiFi provisioning is left
+>
+> **Built, on hardware, verified against real Sonos** (env `sleep-button`, branch
+> `worktree-button-measurements`, draft PR #1):
+> - **Phases 0–3 done.** Button → playlist toggle, and a config page on `:8080` with ring
+>   on/off + dimming, room, playlist (listed live from Sonos), volume, and device name.
+> - **The ring needs no MOSFET** — a bare GPIO sinks it low-side (§4). One fewer part, one less
+>   thing in the case.
+> - **Case built** — `hardware/cam-button/`, 26.81 mm, both meshes watertight (§6).
+>
+> **Not done:**
+> - **Phase 4 (status-LED blink codes)** — mostly moot: GPIO2's LED is real but *not broken out*
+>   (§3), so it can only blink inside a closed case. The button's own ring is the real indicator,
+>   and it's already driven. This phase shrank to "maybe a boot/fault blink on the ring."
+> - **Phase 5 (WiFi provisioning portal)** — the remaining real work. Full spec below in §1 and
+>   the phase table. Today WiFi is compile-time `secrets.h`; changing networks means a USB
+>   reflash of a box taped under a nightstand.
+> - The button's **long-press** is reserved and does nothing yet (earmarked for the portal
+>   re-open trigger, below).
+> - **Auto-stop timer** — does not exist anywhere in this repo; would be new work, not a port.
+
 ---
 
 ## 1. Decisions (settled)
@@ -18,26 +39,29 @@ This is the **third unit** in the repo (after `nest` and `sleep-machine`) and th
 | Playlist source | **Sonos saved playlist (`SQ:`)**, enqueued + `REPEAT_ALL` — the proven path. |
 | Volume | **Configurable fixed volume.** Set the room's volume, *then* play. |
 | Camera | **Not used.** Unplug the FPC ribbon and remove the module (see §6). |
-| Config surface | Small embedded web UI: room, playlist, volume. Modeled on `sleep-machine`. |
+| Config surface | Embedded web UI on `:8080` — ring, room, playlist, volume, device name. ✅ built. |
 
-### Open decision: WiFi provisioning
+### WiFi provisioning — **A is built; B (the portal) is the next phase**
 
 There is **no screen**, so there is no on-device way to type an SSID. Three options:
 
-- **A — `secrets.h` (compile-time).** Zero new code, works today. Changing networks = rebuild
-  + USB reflash. Fine for phase 1 / your own house.
-- **B — SoftAP captive portal.** No creds in NVS → raise an AP (`sonos-button-setup`), serve a
-  join page, persist to NVS. ~200 lines, genuinely standalone.
-- **C — Both (recommended).** Try `secrets.h`/NVS; fall back to the portal. Also gives a
-  recovery path when the unit can't reach the network.
+- **A — `secrets.h` (compile-time).** ✅ **Done.** Works today; changing networks = rebuild +
+  USB reflash. Fine for your own house, painful for a taped-down box.
+- **B — SoftAP captive portal.** ⏳ **Next.** No creds → raise an AP, serve a join page, persist
+  to NVS. Spec below and in Phase 5.
+- **C — Both.** A, with B as fallback + recovery. This is the target end state.
 
-**Recommendation: build A in Phase 1, add B in Phase 5 to reach C.** The plumbing for B already
-exists — `PendingCmds::wifiSsid/wifiPass` (`player_state.h:43-45`) is applied by `processPending()`
-at `app.cpp:166-174`, and `settingsSetWifi()` persists it. Only the AP + portal page are new.
+**The credential half of B already exists and is proven** (it's how the config page'd Wi-Fi row
+would work): `wifiApply(ssid, pass)` in `core/net/wifi.cpp` tries new creds, **persists on
+success and reverts to the old ones on failure** so a typo can't strand the device;
+`settingsSetWifi()` persists; `g_pending.wifiSsid/wifiPass` carries it across tasks. `DNSServer`
+ships with the Arduino core, so **no new dependency**. What's new is the AP + join page + the
+entry logic — see the Phase 5 spec below.
 
-> Note: because the button is a plain toggle, re-opening the portal needs a separate trigger.
-> Use **hold the button while powering on** (checked once in `boardInit()`), which cannot
-> collide with the runtime toggle.
+> Re-opening the portal after it's configured needs a trigger that can't collide with the
+> runtime toggle. Use **hold the button through power-on**: `knobDown()` already exists, GPIO14
+> is not a strapping pin so a press at boot is harmless, and `main.cpp` can check it between
+> `boardInit()` and `appBoot()`. The reserved **long-press** is the runtime equivalent.
 
 ---
 
@@ -492,14 +516,66 @@ units don't collide on mDNS/OTA (UDP 3232).
 | # | Phase | Deliverable / proof |
 |---|---|---|
 | **0** | **Bring-up** (`sleep-button-bringup`) — ✅ **essentially done** | ✅ **GPIO14 + button proven** (§4: 4/4 then 8/8 presses, ~2 bounces/press absorbed by the 30 ms window, no external resistor). ✅ **PSRAM 8 MB + flash 8 MB read back correct** — the 8 MB partition config took. ✅ **GPIO2/D5 confirmed real** from the schematic (but not broken out — case-internal only). ✅ **J4.1 supplies 5 V** and ✅ **the ring switches off a bare GPIO (IO47, low-side) — no MOSFET**, button press toggles it end-to-end. ⏳ Remaining: the **Short/Long held-time** classification (never observed — the 700 ms threshold is still a guess Phase 2 would inherit) and the **ring's current draw** (expected ~10–20 mA vs the pin's ~28 mA sink; nice-to-know, not blocking). |
-| **1** | **Headless skeleton** | `-DHEADLESS` guards + stub board + no-op unit. Boots, joins WiFi (`secrets.h`), discovers Sonos, OTA answers. **No button yet.** Proves the core is portable. |
-| **2** | **Button → playlist** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Hardcode room/playlist/volume. **The device does its job.** |
-| **3** | **Config server** | :8080 page + `webconfig` fields for playlist/volume. Room picker comes free. |
-| **4** | **Status LED** | GPIO2 blink codes: booting / no-WiFi / playing. Only real feedback on a screenless box. |
-| **5** | **WiFi portal** *(optional)* | SoftAP + captive portal; hold-button-at-boot to re-open. Reaches option C. |
+| **1** | **Headless skeleton** — ✅ **done** | `-DHEADLESS` drops `album_art` (the core's only graphics coupling); stub board + unit. Boots, joins WiFi, discovers Sonos, OTA answers. |
+| **2** | **Button → playlist** — ✅ **done** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Verified against real Sonos; reads the speaker's actual transport so app-side changes don't desync it. |
+| **3** | **Config server** — ✅ **done** | `:8080` page + `webconfig` fields for ring, room, playlist (live from Sonos), volume, device name. |
+| **4** | **Status LED** — ⚠️ **mostly moot** | GPIO2's LED is **not broken out** (§3), so blink codes only show inside a sealed case. The button ring is the real indicator and is already driven. Shrinks to an optional boot/fault blink on the ring. |
+| **5** | **WiFi portal** — ⏳ **next; full spec below** | SoftAP + captive portal, so the box is configurable and recoverable **without a USB reflash**. This is the one piece that turns a your-house prototype into something you could hand to someone. |
 
 Test loop per the repo convention: build → flash → you confirm on device → commit + push.
-Phase 0–1 need USB (`usbipd attach`, download mode on first flash); Phase 2+ can go over `/ota`.
+Phase 0–1 needed USB; **Phase 2+ can go over `/ota`** (env `sleep-button-ota`, host
+`sonos-button.local`). Phase 5 itself is testable over OTA right up until you clear creds.
+
+### Phase 5 in detail — the initial-config / recovery portal
+
+**Goal.** When the device has no working WiFi, it raises its own access point and serves a page
+where you join it to your network from a phone. First-boot config *and* recovery, in one path.
+
+**Entry — get this exactly right; the naive version is worse than no portal.**
+
+- ⚠️ **Never open the portal just because `wifiConnect()` failed.** `beginFromStored()` falls back
+  to compile-time `WIFI_SSID`/`WIFI_PASS`, so a configured device *always* has creds to try. If a
+  failed connect opened the portal, a **router reboot or a 30-second outage would drop your
+  nightstand button into AP mode and it would never rejoin on its own** — a worse failure than the
+  one being fixed. A failed connect must **retry**, not give up.
+- **Open the portal only when:**
+  1. **there are genuinely no credentials** — nothing in NVS *and* no `secrets.h` creds compiled
+     in (so this never fires on your own build, which has them); or
+  2. **you asked for it** — hold the button through power-on (`knobDown()` between `boardInit()`
+     and `appBoot()`), the deliberate recovery trigger.
+- Everything else — creds present but the AP is down right now — is a **retry loop**, not a portal.
+
+**The AP + page.**
+
+- `WiFi.mode(WIFI_AP)` (or `WIFI_AP_STA` to scan while serving), SSID `sonos-button-setup`, open
+  or a fixed WPA2 pass printed in the README. `softAPIP()` is `192.168.4.1`.
+- **Captive-portal auto-popup needs port 80.** Phones probe `http://<gateway>/` on **:80** and pop
+  the "sign in to network" sheet on a 200/redirect. Our config server is on **:8080**, which the
+  probe never hits — so the portal needs its **own :80 server** (or bind the existing one to :80
+  while in AP mode). Without it you'd have to type `192.168.4.1` by hand, which defeats the point.
+- **`DNSServer` on :53, wildcard** — answer every name with `192.168.4.1` so any URL the phone
+  tries lands on the join page. Ships with the Arduino core; no new dep.
+- **Page:** scan SSIDs (`WiFi.scanNetworks()` — needs `WIFI_AP_STA`), a list + password field,
+  POST to apply. Keep it one self-contained PROGMEM page like `config_server.cpp`'s.
+
+**Apply — reuse what's proven, don't reinvent it.**
+
+- On submit, call the **existing `wifiApply(ssid, pass)`** (`core/net/wifi.cpp`): it tries the
+  creds, **persists on success, reverts on failure**. That revert is exactly right here — a
+  mistyped password must not brick the portal. Report the result on the page
+  (`wifiApplyResult()`), and on success tear down the AP + DNS and continue to `appBoot()`.
+- ⚠️ **`config_server.cpp:174` waits for `WL_CONNECTED` before binding** — that never happens in
+  pure `WIFI_AP`. Either the portal owns its own server, or that wait becomes "STA connected *or*
+  AP up." Don't let the config task silently never start.
+
+**Scope.** ~200 lines in a new `core/net/portal.{h,cpp}` (device-agnostic — the nest/sleep-machine
+could use it too), plus ~15 lines of wiring in `main.cpp`/`appBoot()`. Half a day. `DNSServer`
+is the only moving part that's new; everything else is glue over code that already works.
+
+**Honest cost/benefit.** For *your* house with creds compiled in, day-to-day value is low — it
+earns its keep only when you change SSID, move the device, or give one away. The reason to build
+it is **recovery**: today a WiFi change means peeling a taped-down box off the nightstand and
+carrying it to a USB port. The portal makes it fixable from a phone, in place.
 
 ---
 
@@ -669,16 +745,31 @@ bury it against a screw boss. If range disappoints in the final spot, the IPEX m
 
 ---
 
-## 7. What I need from you
+## 7. Open items
 
-1. ~~**Button measurements** — bore Ø, body depth, panel thickness, nut OD~~ ✅ **answered by the
-   FILN FLM12-FJ-6 datasheet** (§4/§6): M12 × 0.75 → 12.0 mm bore, ø14 head, 16 mm hex nut
-   (18.5 across corners). Two **caliper checks** remain, and both change the shell:
-   **(a)** is 13.35/13.5 mm the overall length or the behind-panel depth? **(b)** how long is the
-   threaded section — if it's really ~4 mm, the top face needs a thinned pocket at the bore.
-2. **Caliper the board's mounting-hole Ø** (M2 vs M3) — the drawing omits it.
-3. **Which way do the header pins protrude** — above the PCB, below it, or both? The 14.5 mm
-   stack (§3) is settled; this decides whether it costs boss height or lid headroom (§6).
-4. **A decision on WiFi provisioning** (§1) — or just take the recommendation: `secrets.h` now,
-   portal in Phase 5.
-5. **Confirm the camera comes off** — for footprint, not height (§6).
+Most of the original list is closed. What's genuinely left splits into **bench checks before you
+print the case** and **one build decision**.
+
+**Firmware — settled.** The button, ring, config page (room/playlist/volume/ring/device-name),
+and the Sonos toggle are built and verified on hardware. The only firmware work left is **Phase 5
+(the WiFi portal)** — spec in §1 and the phase table. Say the word and I'll build it.
+
+**Before printing the case — caliper checks that still move geometry (§6):**
+
+1. **Header pin direction** — up, down, or both? The design *assumes down* (button hangs into the
+   space beside the board). The vendor CAD can't answer this; you can, by looking. **This is the
+   load-bearing assumption of the whole case** — confirm it first.
+2. **Is the FLM12-FJ-6 body 13.35 mm overall or behind-panel?** Errs safe (wastes height, never
+   fouls the lid), so it doesn't block printing — but it sets internal Z.
+3. **Thread length** — if it's really ~4 mm, the top face needs a thinned ~2 mm pocket at the
+   bore. Caliper it.
+
+**Resolved, recorded so they don't come back:** button measurements (FLM12-FJ-6 datasheet, §4/§6);
+mounting holes are **M3, not M2** (vendor CAD, §6); **must solder to J4** — DuPont won't fit (§6);
++5 V is live, ring needs no MOSFET, GPIO2 not broken out (§3/§4); camera comes off **for
+footprint, not height** (§6).
+
+**One build decision:** do you want **Phase 5 (the portal)** now, or is compile-time `secrets.h`
+fine for your own use? It's the difference between "fixable from a phone" and "peel it off the
+nightstand and reflash over USB" when the network changes. No wrong answer for a one-house
+device; the portal is what makes it *giftable*.
