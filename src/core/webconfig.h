@@ -11,6 +11,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <vector>
 
 // The whole config document: current picks plus the choices available for each.
 //   {"sleepTrack":"/Ocean.mp3","wakeTrack":"/Wake.mp3","room":"Nursery",
@@ -19,13 +20,23 @@
 // wakeTrack is "" when nothing is explicitly picked (the unit then auto-detects a "wake" file).
 String webConfigJson();
 
-// Apply one field: "sleepTrack" | "wakeTrack" | "room" | "ring".
+// Apply one field: "sleepTrack" | "wakeTrack" | "room" | "ring" | "playlist" | "volume".
 //   sleepTrack/wakeTrack — value is a track path; "" clears the pick (back to the default).
 //   room                 — value is a zone name; persists it and asks netTask to switch.
 //   ring                 — value is 0..100, the button-ring level (0 = off). Persisted only;
 //                          the unit applies it (see webConfigGen below).
+//   playlist             — value is a Sonos saved-playlist name (sonos-button).
+//   volume               — value is 0..100, the fixed volume the button plays at.
 // Returns false and fills err (a short human-readable reason) if the field or value is bad.
 bool webConfigApply(const String &field, const String &value, String &err);
+
+// The Sonos saved-playlist names, for the config page's dropdown.
+//
+// These can't be read synchronously the way zones() can: a playlist list is a ContentDirectory
+// browse, which is async by design (library.h — the UI posts, netTask runs the SOAP). So the
+// unit browses "SQ:" once its zone is up and publishes the labels here, and webConfigJson()
+// serves the cache. Empty until that first browse lands, which the page handles.
+void webConfigPlaylistsSet(const std::vector<String> &names);
 
 // Bumped by webConfigApply() whenever it changes something a unit must act on *locally* (today:
 // the ring level). A unit polls this in uiTick and re-reads the setting only when it moves.

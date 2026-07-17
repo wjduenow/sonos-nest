@@ -31,3 +31,10 @@ void    settingsSetWakeTrack(const String &path);
 
 String  settingsDeviceName();            // network/DHCP hostname ("" = firmware default)
 void    settingsSetDeviceName(const String &name);
+
+// --- sonos-button ---
+String  settingsPlaylist();              // Sonos saved-playlist name to start, default "Sleep"
+void    settingsSetPlaylist(const String &name);
+
+uint8_t settingsVolume();                // fixed volume the button plays at (0..100), default 30
+void    settingsSetVolume(uint8_t pct);

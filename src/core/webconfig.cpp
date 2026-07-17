@@ -23,12 +23,29 @@ static bool knownTrack(const String &path) {
 static uint32_t s_gen = 0;
 uint32_t webConfigGen() { return s_gen; }
 
+// Playlist-name cache, published by the unit after its "SQ:" browse — see webconfig.h.
+static std::vector<String> s_playlists;
+void webConfigPlaylistsSet(const std::vector<String> &names) { s_playlists = names; }
+
+// Strict 0..100: digits only, non-empty, in range.
+static bool parsePct(const String &value, long &out) {
+  if (value.length() == 0) return false;
+  for (unsigned i = 0; i < value.length(); ++i) if (!isdigit((int)value[i])) return false;
+  out = value.toInt();
+  return out >= 0 && out <= 100;
+}
+
 String webConfigJson() {
   JsonDocument doc;
   doc["sleepTrack"] = settingsSleepTrack();
   doc["wakeTrack"]  = settingsWakeTrack();
   doc["room"]       = settingsRoom();
   doc["ring"]       = settingsRing();
+  doc["playlist"]   = settingsPlaylist();
+  doc["volume"]     = settingsVolume();
+
+  JsonArray pls = doc["playlists"].to<JsonArray>();
+  for (const String &n : s_playlists) pls.add(n);
 
   JsonArray tracks = doc["tracks"].to<JsonArray>();
   int n = localTrackCount();
@@ -76,17 +93,28 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     return false;
   }
 
-  if (field == "ring") {
-    // toInt() yields 0 on garbage, and 0 is a legitimate value ("off"), so validate the text
-    // rather than trusting the parse — otherwise "banana" silently turns the ring off.
-    for (unsigned i = 0; i < value.length(); ++i) {
-      if (!isdigit((int)value[i])) { err = "ring must be a number 0..100"; return false; }
+  if (field == "ring" || field == "volume") {
+    // toInt() yields 0 on garbage, and 0 is legitimate for both of these, so validate the text
+    // rather than trusting the parse — otherwise "banana" silently means "off"/"silent".
+    long v;
+    if (!parsePct(value, v)) { err = field + " must be a number 0..100"; return false; }
+    if (field == "ring") settingsSetRing((uint8_t)v);   // the unit applies it via webConfigGen
+    else                 settingsSetVolume((uint8_t)v); // read at press time; nothing to apply
+    s_gen++;
+    return true;
+  }
+
+  if (field == "playlist") {
+    if (value.length() == 0) { err = "pick a playlist"; return false; }
+    // Validate against the browsed list when we have one: a typo'd name fails at 2am with the
+    // button doing nothing, which is the worst possible time to discover it. Before the first
+    // browse lands the cache is empty — accept then, rather than refusing to configure at all.
+    if (!s_playlists.empty()) {
+      bool known = false;
+      for (const String &n : s_playlists) if (n == value) { known = true; break; }
+      if (!known) { err = "no such playlist"; return false; }
     }
-    if (value.length() == 0) { err = "ring must be a number 0..100"; return false; }
-    long v = value.toInt();
-    if (v < 0 || v > 100) { err = "ring must be 0..100"; return false; }
-    settingsSetRing((uint8_t)v);
-    s_gen++;                 // the unit picks this up in uiTick and drives the pin
+    settingsSetPlaylist(value);
     return true;
   }
 

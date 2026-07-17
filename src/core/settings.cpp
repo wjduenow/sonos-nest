@@ -38,6 +38,21 @@ void settingsSetRing(uint8_t pct) {
   s_prefs.putUChar("ring", pct);
 }
 
+// --- sonos-button ---
+// "Sleep" matches the playlist the sleep-machine's Bedtime button already starts, so a fresh
+// device does the right thing before anyone opens the config page.
+String settingsPlaylist() { return s_prefs.getString("playlist", "Sleep"); }
+void   settingsSetPlaylist(const String &name) { s_prefs.putString("playlist", name); }
+
+uint8_t settingsVolume() {
+  uint8_t v = s_prefs.getUChar("btnvol", 30);
+  return v > 100 ? 100 : v;
+}
+void settingsSetVolume(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  s_prefs.putUChar("btnvol", pct);
+}
+
 String settingsZones() { return s_prefs.getString("zones", ""); }
 
 void settingsSetZones(const String &blob) { s_prefs.putString("zones", blob); }

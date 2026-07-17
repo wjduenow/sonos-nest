@@ -62,6 +62,25 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     <label for=room>Sonos room</label>
     <select id=room></select>
   </div>
+  <div class=row style="margin-top:12px">
+    <label for=playlist>Playlist</label>
+    <select id=playlist></select>
+  </div>
+  <div class=hint id=plhint></div>
+  <div class=row style="margin-top:12px">
+    <label for=vol>Volume</label>
+    <span id=volval></span>
+  </div>
+  <input type=range id=vol min=0 max=100 step=1>
+  <div class=hint>The room is set to this volume each time the button starts the playlist.</div>
+</div>
+
+<div class=card>
+  <div class=row>
+    <label>Button</label>
+    <span id=state style="opacity:.7">press it to start / stop</span>
+  </div>
+  <div class=hint>Press once: play the playlist above, looped. Press again: stop.</div>
 </div>
 
 <div id=msg></div>
@@ -79,20 +98,32 @@ async function post(field,value){
   st=j; draw(); $('#msg').textContent='saved';
 }
 
+function fill(sel,items,cur,empty){
+  sel.innerHTML='';
+  items.forEach(v=>{
+    const o=document.createElement('option');
+    o.value=o.textContent=v; o.selected=(v===cur); sel.append(o);
+  });
+  if(!items.length){const o=document.createElement('option');o.textContent=empty;sel.append(o)}
+}
+
 function draw(){
   const on = st.ring>0;
   $('#ringbtn').textContent = on ? `On (${st.ring}%)` : 'Off';
   $('#ringbtn').classList.toggle('on', on);
   $('#ring').value = st.ring;
-  const sel=$('#room'); sel.innerHTML='';
-  (st.zones||[]).forEach(z=>{
-    const o=document.createElement('option');
-    o.value=o.textContent=z.name; o.selected=(z.name===st.room); sel.append(o);
-  });
-  if(!(st.zones||[]).length){
-    const o=document.createElement('option');
-    o.textContent='(no rooms found yet)'; sel.append(o);
-  }
+
+  fill($('#room'), (st.zones||[]).map(z=>z.name), st.room, '(no rooms found yet)');
+
+  const pls = st.playlists||[];
+  fill($('#playlist'), pls, st.playlist, '(loading playlists…)');
+  // The list arrives from an async browse. Until it does, say so rather than letting the box
+  // look like an empty/broken choice.
+  $('#plhint').textContent = pls.length ? ''
+    : `Still reading playlists from Sonos. Currently set to "${st.playlist}".`;
+
+  $('#vol').value = st.volume;
+  $('#volval').textContent = st.volume + '%';
 }
 
 // Toggle remembers the last non-zero level, so Off->On restores your brightness rather than
@@ -103,6 +134,17 @@ $('#ringbtn').onclick=()=>{
 };
 $('#ring').onchange=e=>post('ring',e.target.value);
 $('#room').onchange=e=>post('room',e.target.value);
+$('#playlist').onchange=e=>post('playlist',e.target.value);
+$('#vol').oninput=e=>$('#volval').textContent=e.target.value+'%';  // live while dragging
+$('#vol').onchange=e=>post('volume',e.target.value);               // save on release only
+
+// The playlist list lands a moment after boot; re-poll a few times so a page opened immediately
+// after power-up fills in without a manual refresh.
+let tries=0;
+const poll=setInterval(async()=>{
+  if((st.playlists||[]).length || ++tries>10){clearInterval(poll);return}
+  st=await (await fetch('/api/config')).json(); draw();
+},2000);
 
 (async()=>{ st=await (await fetch('/api/config')).json(); draw(); })();
 </script>)HTML";
