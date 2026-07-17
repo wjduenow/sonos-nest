@@ -31,11 +31,14 @@ static uint32_t s_startMs = 0;
 static bool     s_played  = false;   // requestPlay() already issued for this Starting pass
 static bool     s_listed  = false;   // the config page's playlist list has been published once
 static uint32_t s_cfgGen  = 0;
+static uint8_t  s_lastVol = 0;       // last volume we pushed to Sonos; seeded in uiInit()
 
 void uiInit() {
   // Apply the persisted ring level. Until this runs the ring is dark (boardInit leaves it off),
   // so a reboot never flashes the ring at full brightness in a dark room.
-  s_cfgGen = webConfigGen();
+  s_cfgGen  = webConfigGen();
+  s_lastVol = settingsVolume();   // seed, don't apply: a reboot must not shove the room's
+                                  // volume around on its own
   backlightSet(settingsRing());
 
   // Saved playlists are enqueued, so looping is REPEAT_ALL on the queue. Set once: this unit
@@ -50,7 +53,10 @@ void uiInit() {
 // targetVolume to the SPEAKER while transport goes to the group COORDINATOR — app.cpp already
 // handles that split, so don't re-derive it here.
 static void startPlaylist() {
+  // Still set it here as well as on change: the room may have been turned up from the Sonos app
+  // since we last pushed, and the whole point is that the button plays at a KNOWN volume.
   const uint8_t vol = settingsVolume();
+  s_lastVol = vol;
   if (stateLock()) { g_pending.targetVolume = vol; stateUnlock(); }
   library::requestBrowse("SQ:", library::PLAY_PLAYLIST);   // clears queue, enqueues, plays
   s_st      = St::Starting;
@@ -72,9 +78,20 @@ void uiTick() {
   const uint32_t gen = webConfigGen();
   if (gen != s_cfgGen) {
     s_cfgGen = gen;
+
     const uint8_t pct = settingsRing();
     backlightSet(pct);
-    Serial.printf("[unit   ] ring -> %u%%\n", pct);
+
+    // Push volume changes to Sonos immediately, not just at the next press. Reading it only in
+    // startPlaylist() made the page's slider look broken: you drag it while the playlist is
+    // playing and nothing happens, because the value silently waits for a press that may be
+    // hours away. A slider labelled "Volume" has to move the volume.
+    const uint8_t vol = settingsVolume();
+    if (vol != s_lastVol) {
+      s_lastVol = vol;
+      if (stateLock()) { g_pending.targetVolume = vol; stateUnlock(); }
+      Serial.printf("[unit   ] volume -> %u\n", vol);
+    }
   }
 
   // --- snapshot the shared state once -----------------------------------------------------
