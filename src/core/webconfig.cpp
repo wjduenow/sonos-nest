@@ -19,11 +19,16 @@ static bool knownTrack(const String &path) {
   return false;
 }
 
+// Bumped on every change a unit has to act on locally — see webconfig.h.
+static uint32_t s_gen = 0;
+uint32_t webConfigGen() { return s_gen; }
+
 String webConfigJson() {
   JsonDocument doc;
   doc["sleepTrack"] = settingsSleepTrack();
   doc["wakeTrack"]  = settingsWakeTrack();
   doc["room"]       = settingsRoom();
+  doc["ring"]       = settingsRing();
 
   JsonArray tracks = doc["tracks"].to<JsonArray>();
   int n = localTrackCount();
@@ -69,6 +74,20 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     }
     err = "no such room";
     return false;
+  }
+
+  if (field == "ring") {
+    // toInt() yields 0 on garbage, and 0 is a legitimate value ("off"), so validate the text
+    // rather than trusting the parse — otherwise "banana" silently turns the ring off.
+    for (unsigned i = 0; i < value.length(); ++i) {
+      if (!isdigit((int)value[i])) { err = "ring must be a number 0..100"; return false; }
+    }
+    if (value.length() == 0) { err = "ring must be a number 0..100"; return false; }
+    long v = value.toInt();
+    if (v < 0 || v > 100) { err = "ring must be 0..100"; return false; }
+    settingsSetRing((uint8_t)v);
+    s_gen++;                 // the unit picks this up in uiTick and drives the pin
+    return true;
   }
 
   err = "unknown field";

@@ -13,7 +13,9 @@
 #include "core/player_state.h"
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
+#ifndef HEADLESS
 #include "core/album_art.h"
+#endif
 #include "core/settings.h"
 #include "core/net/ota.h"      // otaHandle()
 #include "core/app.h"          // appBoot(), appStartTasks()
@@ -76,7 +78,9 @@ void setup() {
   if (!boardInit()) Serial.println("[boot] board init FAILED");  // display + touch + input
   backlightSet(settingsBrightness());   // restore saved brightness
   uiInit();             // build the unit's LVGL screens
+#ifndef HEADLESS
   if (!albumArtInit()) Serial.println("[boot] album art buffer alloc failed (no PSRAM?)");
+#endif
 
   appBoot();            // WiFi + time + OTA + Sonos discovery + zone selection
   wakeWordInit();       // mic -> wake-word engine (no-op / false on boards without a mic).

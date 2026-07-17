@@ -6,7 +6,12 @@
 
 #include "player_state.h"
 #include "unit.h"                 // uiTick() — provided by whichever unit the build links
+// Album art is the core's ONLY graphics coupling (LVGL + TJpg). A headless unit has nothing to
+// show it on, so -DHEADLESS drops it — the include, the task, and its creation below. Nothing
+// depends on artTask running: it only reads g_player.artUri and calls albumArt*.
+#ifndef HEADLESS
 #include "album_art.h"
+#endif
 #include "settings.h"
 #include "library.h"
 #include "net/wifi.h"
@@ -27,7 +32,9 @@
 // --- FreeRTOS tasks (mutex-guarded shared PlayerState) ---
 static void uiTask(void *arg);     // LVGL render + input (encoder, button, touch)
 static void netTask(void *arg);    // drain pending commands + poll transport/position/volume
+#ifndef HEADLESS
 static void artTask(void *arg);    // on track change: fetch art -> TJpg decode -> cache
+#endif
 
 // Volume + now-playing-room are the selected speaker; transport must hit its group
 // COORDINATOR (plan §3), which differs when the speaker is grouped.
@@ -240,6 +247,7 @@ static void netTask(void *) {
   }
 }
 
+#ifndef HEADLESS
 static void artTask(void *) {
   String last;
   int    fails = 0;
@@ -262,6 +270,7 @@ static void artTask(void *) {
     vTaskDelay(pdMS_TO_TICKS(250));
   }
 }
+#endif  // !HEADLESS
 
 void appBoot() {
   wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
@@ -275,5 +284,7 @@ void appStartTasks() {
   // UI pinned to core 1; network work on core 0.
   xTaskCreatePinnedToCore(uiTask,  "ui",  8192, nullptr, 3, nullptr, 1);
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 2, nullptr, 0);
+#ifndef HEADLESS
   xTaskCreatePinnedToCore(artTask, "art", 8192, nullptr, 1, nullptr, 0);
+#endif
 }

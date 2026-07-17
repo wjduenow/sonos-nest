@@ -26,6 +26,18 @@ void settingsSetBrightness(uint8_t pct) {
   s_prefs.putUChar("bright", pct);
 }
 
+// No 10% floor here, unlike settingsBrightness() above — see settings.h. 0 means "ring off",
+// which is a state a bedside device genuinely wants.
+uint8_t settingsRing() {
+  uint8_t r = s_prefs.getUChar("ring", 100);
+  return r > 100 ? 100 : r;
+}
+
+void settingsSetRing(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  s_prefs.putUChar("ring", pct);
+}
+
 String settingsZones() { return s_prefs.getString("zones", ""); }
 
 void settingsSetZones(const String &blob) { s_prefs.putString("zones", blob); }
