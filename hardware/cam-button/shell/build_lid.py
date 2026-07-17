@@ -17,6 +17,10 @@ round head stands proud, and anything proud of this face is a bump under the adh
 ../../rec-2.8/countertop/README.md already offers the flat head as an option ("a 90° flat
 head seats flush if you prefer"); here it is mandatory.
 
+FOUR holes, and only four -- asserted at the bottom of this file.  Nothing else earns a
+hole in the adhesive face; see button_params.py's BOOT/RESET note for the one that was
+tried and cut.
+
     python3 build_lid.py   # -> lid.stl
 
 Printed FLAT, TAPE FACE DOWN: the adhesive then lands on a bed-smooth surface, which is
@@ -64,20 +68,8 @@ def build_lid(world=False):
             h.apply_translation([sx * P.LID_POST_X, sy * P.LID_POST_Y, 0])
             cuts.append(h)
 
-    # BOOT / RESET paper-clip access.  Both tacts are TOP-side and stand 4.17 mm off the
-    # PCB's back face, leaving 1.29 mm under this plate -- a pin reaches them fine.
-    #
-    # These land in the adhesive face, so they are taped over in normal use: they are an
-    # emergency path (poke through the tape), not a feature.  They are here because they
-    # cost two Ø3 holes and the alternative is unscrewing a taped-down lid the one time
-    # you need download mode.  After the first USB flash, auto-reset and OTA make them
-    # dead weight -- delete them from this list if you'd rather keep the face pristine.
-    for bx in (P.BOOT_BOX, P.RESET_BOX):
-        cx, cy = (bx[0] + bx[1]) / 2, (bx[2] + bx[3]) / 2
-        pin = cylinder(radius=P.BOOT_PIN_D / 2, height=P.LID_T + 2.0, sections=SEG)
-        pin.apply_translation([cx, cy, P.LID_T / 2])
-        cuts.append(pin)
-
+    # No BOOT / RESET pin holes: this face is the adhesive face, and they would be the
+    # only holes in it that buy nothing.  Reasoning lives in button_params.py.
     lid = difference([plate] + cuts, engine='manifold')
     if world:
         lid.apply_translation([0, 0, P.CEIL_Z])
@@ -93,5 +85,9 @@ if __name__ == "__main__":
     print(f"lid.stl    watertight={m.is_watertight}  winding={m.is_winding_consistent}  "
           f"volume={m.volume/1000:.2f} cm^3  tris={len(m.faces)}")
     print(f"           bbox(XxYxZ)={np.round(m.extents, 2)} mm")
-    print(f"           tape face {P.OUT_X:.1f} x {P.OUT_Y:.1f} = {tape:.0f} mm^2 "
-          f"(4 x Ø{P.LID_SCREW_HEAD} countersinks + 2 x Ø{P.BOOT_PIN_D} pin holes)")
+    # A plate with n through-holes has euler = 2 - 2n, so 4 holes -> -6.  This is here to
+    # stop a hole quietly creeping back into the adhesive face.
+    holes = (2 - m.euler_number) // 2
+    assert holes == 4, f"the tape face must have exactly 4 holes, this lid has {holes}"
+    print(f"           tape face {P.OUT_X:.1f} x {P.OUT_Y:.1f} = {tape:.0f} mm^2, "
+          f"{holes} holes (Ø{P.LID_SCREW_HEAD} countersinks) and nothing else")

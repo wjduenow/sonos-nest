@@ -218,10 +218,24 @@ USB_SLOT_W  = 16.0    # X -- vs the 9.58 connector: room for a chunky overmold
 USB_SLOT_Z0 = 16.0    # floor of the notch (the connector's own underside is at 19.15)
 
 # ---------------------------------------------------------------- BOOT / RESET access
-# Free to add and it saves a disassembly during bring-up (plans/04 §6).  Both tacts are on
-# the TOP side flanking the USB-C, so they are poked through the LID.
-BOOT_PIN_D  = 3.0
-RESET_PIN_D = 3.0
+# NO ACCESS FEATURE -- deliberately, and against plans/04 §6's "Keep BOOT/RESET reachable
+# through the same face if you can -- it costs nothing".  On THIS unit it does cost
+# something, because of where the buttons ended up.
+#
+# Both tacts are TOP-side (BOOT_BOX / RESET_BOX above), so the only face they can be poked
+# through is the lid -- which is the ADHESIVE face.  Two Ø3 holes there are not free: they
+# are holes in the one surface whose whole job is to be an uninterrupted flat slab, and
+# they would be under the tape anyway.  "Poke through the tape" is not a real recovery
+# path either -- you cannot reach the lid without peeling the box off the nightstand, and
+# once it is off, the four lid screws are right there.
+#
+# And they would be dead weight after one use: only the FIRST USB flash needs download
+# mode (hold BOOT, tap RST), and that is done with the case open.  After that auto-reset
+# works and /ota takes over -- plans/04 §5 puts Phase 2+ on the air.
+#
+# So the lid has FOUR holes: the four screw countersinks, asserted in build_lid.py.  If
+# you ever want them back, cut cylinders at the BOOT_BOX / RESET_BOX centres there -- the
+# tact tops sit 1.29 mm under the lid, so a paper-clip would reach.
 
 # ---------------------------------------------------------------- wire retainers
 # The pigtail is 150 mm and the button-to-J4 run is ~14 mm, so ~135 mm has to live

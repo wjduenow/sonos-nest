@@ -9,7 +9,7 @@ Firmware plan (board facts, pinout, phases): **`plans/04-sonos-button-plan.md`**
 | | |
 |---|---|
 | **Overall** | **48.2 × 44.2 × 26.81 mm** — height is **derived**, never typed (see below) |
-| **Tape face** | 48.2 × 44.2 = **2130 mm²**, flat, printed against the bed |
+| **Tape face** | 48.2 × 44.2 = **2130 mm²**, flat, printed against the bed, **4 holes total** |
 | Parts | `shell/shell.stl` + `shell/lid.stl` |
 | Screws | **8 × M3 self-tapping** — the *same* screws as the sleep-machine |
 | Camera | **removed** (it unplugs from its FPC connector) — no lens boss modelled |
@@ -209,8 +209,19 @@ or generic coarse-thread). **No nuts, no heat-set inserts.**
   heat-set inserts + machine screws there if you want repeated disassembly.
 
 **Servicing a taped-down unit:** the 4 lid screws are under the tape. Peel the box off the
-nightstand, unscrew, re-tape with fresh VHB. The 4 countersinks cost ~4 % of the adhesive
+nightstand, unscrew, re-tape with fresh VHB. The 4 countersinks cost ~2 % of the adhesive
 area and stay flush, so the tape still lands on a flat face.
+
+**Four holes in the tape face, and only four** — `build_lid.py` asserts it (a plate with
+*n* through-holes has Euler number 2 − 2*n*, so it checks for −6). An earlier draft added
+BOOT/RESET paper-clip holes, per `plans/04` §6's "keep BOOT/RESET reachable … it costs
+nothing". **On this unit it does cost something.** Both tacts are top-side, so the only
+face they can be poked through is the adhesive face — and poking through the tape was
+never a real recovery path, because you cannot reach the lid without peeling the box off
+the nightstand, and once it is off the four screws are right there. They would also be
+dead weight after one use: only the *first* USB flash needs download mode, and that is
+done with the case open; after that auto-reset and `/ota` take over. Two permanent holes
+in the one surface that must be an uninterrupted slab, to save nothing. Cut.
 
 ---
 
