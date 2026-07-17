@@ -359,13 +359,46 @@ that group-coordinator distinction is already handled; don't re-derive it.
    (`app.cpp:9`), `artTask` (`:243-264`), its task create (`:278`), and `main.cpp:14`/`:72`
    (`albumArtInit()`), behind a `-DHEADLESS` flag; drop `+<core/album_art.cpp>` from
    `build_src_filter`. `main.cpp:10` already establishes this exact guard idiom.
-2. **`core/webconfig.cpp`** — add three fields to `webConfigApply()`: **`playlist`**, **`volume`**,
-   and (with option B/C) **`wifi`**. `webConfigJson()` gains `playlist`/`volume` and a
-   `playlists[]` list. This is the right home for it per `webconfig.h:6-7` — the board's HTTP
-   server must stay sockets-and-routing only.
-3. **`core/settings.cpp`** — add `settingsPlaylist()` / `settingsSetPlaylist()` and
-   `settingsVolume()` / `settingsSetVolume()`. Mechanical; mirrors `settingsSleepTrack()`.
+2. **`core/webconfig.cpp`** — add fields to `webConfigApply()`: **`playlist`**, **`volume`**,
+   **`ring`** (see below), and (with option B/C) **`wifi`**. `webConfigJson()` gains
+   `playlist`/`volume`/`ring` and a `playlists[]` list. This is the right home for it per
+   `webconfig.h:6-7` — the board's HTTP server must stay sockets-and-routing only.
+3. **`core/settings.cpp`** — add `settingsPlaylist()` / `settingsSetPlaylist()`,
+   `settingsVolume()` / `settingsSetVolume()`, and `settingsRing()` / `settingsSetRing()`.
+   Mechanical; mirrors `settingsSleepTrack()`.
 4. **`platformio.ini`** — new `sleep-button` + `sleep-button-ota` envs.
+
+### Ring brightness from the web page — **make it a level, not a switch**
+
+The ring should be configurable from the config page (§3's `+5V` caveat permitting). Two
+decisions worth making deliberately:
+
+**Make it 0–100 %, not on/off.** The MOSFET gate (IO47) is a normal GPIO, so **LEDC PWM** gives
+dimming for the same effort as a toggle, and `0` *is* off — a switch is the degenerate case of a
+level, so building the level costs nothing extra and can't be retrofitted for free later. This is
+a **bedside** device: a white ring at full tilt in a dark bedroom is genuinely unpleasant, and
+"off or blinding" is a worse product than a dim glow. Ship the slider.
+
+**⚠️ Do NOT reuse `settingsBrightness()` for it.** It looks like the obvious fit — a screenless
+box's "brightness" is the ring, and `backlightSet()` is already a no-op here (§5) — but it
+**hard-clamps to 10..100** in both directions (`settings.cpp:18-27`: the getter floors at 10, the
+setter clamps). That floor is deliberate LCD-safety on the other two units: it stops anyone
+blanking the screen and losing the UI they'd need to un-blank it. **A ring has no such problem
+and 0 is a legitimate, desirable state** — so reusing brightness would mean the ring can never be
+turned off, which is precisely the thing being asked for. Relaxing the clamp in core to suit this
+board would hand the nest/sleep-machine units a way to brick their own UI. **Add a separate
+`settingsRing()` (0..100, default 100, no floor).**
+
+Which HAL call drives it is a smaller question: either reuse `backlightSet(pct)` (this plan's
+"reuse `knobEvent()` rather than invent `buttonEvent()`" instinct, §5) with the board mapping pct
+→ LEDC duty, or add a `ringSet(pct)` that the other two boards stub like they stub `localAudio*`.
+**Prefer `backlightSet()`** — it needs no core-header change and "the only light on the device" is
+a fair reading of backlight.
+
+> **Interaction with Phase 4:** if the ring is the status indicator *and* the user can set it to
+> 0, the blink codes go with it. That's the right call — it's their box — but the "no-WiFi" code
+> is the one that explains a device that looks broken, so consider letting **fault** codes ignore
+> the setting while **idle/playing** states respect it.
 
 ### Config web server (~120 lines)
 
