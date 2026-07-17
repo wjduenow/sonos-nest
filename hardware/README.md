@@ -13,6 +13,7 @@ machine the toolchain lives in the `img23d` conda env
 |------|-----------------|-------|
 | **[round-nest-2.8/](round-nest-2.8/)** | ELECROW CrowPanel **2.1"** ESP32-S3 rotary display (round, Ø79 rotating bezel) | **[wall/](round-nest-2.8/wall/)** — magnetic pull-off wall mount |
 | **[rec-2.8/](rec-2.8/)** | Hosyond / LCDWIKI **ES3C28P 2.8"** ESP32-S3 board (microSD, rectangular) | **[countertop/](rec-2.8/countertop/)** — angled nightstand stand |
+| **[cam-button/](cam-button/)** | nulllab / emakefun **ESP32-S3-CAM** + one FILN FLM12-FJ-6 button (headless) | **[shell/](cam-button/shell/)** — box taped under a nightstand, button facing down |
 
 > Note: `round-nest-2.8` holds the **2.1"** round unit — the `2.8` is a chosen folder
 > name, not the display size. See that dir's README.
