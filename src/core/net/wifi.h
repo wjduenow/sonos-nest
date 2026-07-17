@@ -7,6 +7,12 @@ bool wifiConnect();       // connect from stored creds (NVS -> secrets.h)
 bool wifiIsConnected();
 String wifiSsid();        // currently-associated SSID ("" if not connected)
 
+// The DHCP hostname actually registered with the router: the user's name from NVS, else the
+// firmware default (DEVICE_HOSTNAME). Single source of truth — wifi.cpp is what sets it, so
+// anything that wants to *display* the effective name asks here rather than re-deriving the
+// "stored, else default" rule and drifting from it.
+String wifiHostname();
+
 // Runtime WiFi change (Settings -> Wi-Fi). The UI posts new creds; netTask runs wifiApply()
 // (blocking): it tries them, persists on success, and reverts to the previous creds on
 // failure. The UI polls wifiApplyResult() for the outcome.

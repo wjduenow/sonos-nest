@@ -17,9 +17,13 @@ static volatile int s_result = WIFI_APPLY_IDLE;   // result of the last wifiAppl
 
 // The name the router shows (DHCP hostname): the user's name from NVS, else the firmware
 // default. Must be applied before WiFi.begin() to register with DHCP.
-static void applyHostname() {
+String wifiHostname() {
   String h = settingsDeviceName();
-  WiFi.setHostname(h.length() ? h.c_str() : DEVICE_HOSTNAME);
+  return h.length() ? h : String(DEVICE_HOSTNAME);
+}
+
+static void applyHostname() {
+  WiFi.setHostname(wifiHostname().c_str());
 }
 
 // Start a connection from the best available stored credentials (NVS first, then secrets.h).

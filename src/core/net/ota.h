@@ -5,6 +5,11 @@
 // The build host must be able to reach the device's IP on the LAN.
 #pragma once
 
+// The mDNS/OTA name this firmware advertises (the compile-time DEVICE_HOSTNAME). Single source
+// of truth — this is NOT the DHCP hostname (see wifiHostname()), which the user can change at
+// runtime. Anything that displays "where do I reach this device" must not conflate the two.
+const char *otaHostname();
+
 void otaBegin();    // start the OTA listener (call after WiFi connects)
 void otaHandle();   // pump the OTA handler (call from loop())
 bool otaActive();   // true while an update is in progress (pause heavy tasks)

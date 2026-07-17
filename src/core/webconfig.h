@@ -27,6 +27,8 @@ String webConfigJson();
 //                          the unit applies it (see webConfigGen below).
 //   playlist             — value is a Sonos saved-playlist name (sonos-button).
 //   volume               — value is 0..100, the fixed volume the button plays at.
+//   deviceName           — value is the DHCP hostname shown by the router. Sanitized to
+//                          letters/digits/hyphen; reconnects so the new name registers.
 // Returns false and fills err (a short human-readable reason) if the field or value is bad.
 bool webConfigApply(const String &field, const String &value, String &err);
 

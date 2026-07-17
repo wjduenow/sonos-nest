@@ -16,9 +16,11 @@
 static volatile bool s_active = false;
 static volatile int  s_progress = -1;
 
+const char *otaHostname() { return DEVICE_HOSTNAME; }
+
 void otaBegin() {
   if (WiFi.status() != WL_CONNECTED) return;
-  ArduinoOTA.setHostname(DEVICE_HOSTNAME);
+  ArduinoOTA.setHostname(otaHostname());
 #ifdef OTA_PASSWORD
   ArduinoOTA.setPassword(OTA_PASSWORD);
 #endif
@@ -30,7 +32,7 @@ void otaBegin() {
   });
   ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; Serial.printf("[ota] error %u\n", e); });
   ArduinoOTA.begin();
-  Serial.printf("[ota] ready as %s @ %s\n", DEVICE_HOSTNAME, WiFi.localIP().toString().c_str());
+  Serial.printf("[ota] ready as %s @ %s\n", otaHostname(), WiFi.localIP().toString().c_str());
 }
 
 void otaHandle() { ArduinoOTA.handle(); }

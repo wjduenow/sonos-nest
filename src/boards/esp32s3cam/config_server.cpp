@@ -77,6 +77,18 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
 
 <div class=card>
   <div class=row>
+    <label for=dname>Device name</label>
+    <span><input id=dname size=14 autocapitalize=off autocorrect=off spellcheck=false>
+      <button id=dsave>Save</button></span>
+  </div>
+  <div class=hint>The name your router lists this device under, so you can find its IP.
+    Letters, digits and hyphens; spaces become hyphens. Saving reconnects Wi-Fi, so this page
+    may hiccup for a few seconds.<br>
+    This does <b>not</b> change the mDNS/OTA name, which stays <code id=mdns></code>.</div>
+</div>
+
+<div class=card>
+  <div class=row>
     <label>Button</label>
     <span id=state style="opacity:.7">press it to start / stop</span>
   </div>
@@ -124,6 +136,10 @@ function draw(){
 
   $('#vol').value = st.volume;
   $('#volval').textContent = st.volume + '%';
+
+  // Don't clobber what someone is mid-way through typing.
+  if(document.activeElement !== $('#dname')) $('#dname').value = st.deviceName||'';
+  $('#mdns').textContent = st.mdnsName||'';
 }
 
 // Toggle remembers the last non-zero level, so Off->On restores your brightness rather than
@@ -135,6 +151,8 @@ $('#ringbtn').onclick=()=>{
 $('#ring').onchange=e=>post('ring',e.target.value);
 $('#room').onchange=e=>post('room',e.target.value);
 $('#playlist').onchange=e=>post('playlist',e.target.value);
+$('#dsave').onclick=()=>post('deviceName',$('#dname').value);
+$('#dname').onkeydown=e=>{ if(e.key==='Enter') post('deviceName',$('#dname').value) };
 $('#vol').oninput=e=>$('#volval').textContent=e.target.value+'%';  // live while dragging
 $('#vol').onchange=e=>post('volume',e.target.value);               // save on release only
 
