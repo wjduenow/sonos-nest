@@ -98,7 +98,7 @@ Two 8-pin headers, **J4** and **J5**. This is the whole external interface:
 
 | J4 | net | | J5 | net |
 |---|---|---|---|---|
-| 1 | **+5V** ⚠️ *(see §4 — may not be driven)* | | 1 | **+3V3** |
+| 1 | **+5V** ✅ *(live — measured; the schematic disagrees, see §4)* | | 1 | **+3V3** |
 | 2 | **GND** | | 2 | **GND** |
 | 3 | IO1 | | 3 | IO46 *(LOG strap)* |
 | 4 | IO48 | | 4 | IO41 *(MTDI)* |
@@ -141,11 +141,11 @@ Two things this picture confirms independently:
 
 **Consequences that matter:**
 
-- **Everything the button needs is on J4**: +5 V (1), GND (2), IO14 (7), and a free IO47 (6) for
-  the ring's gate. One connector, four adjacent-ish pins.
+- **The whole product wires to J4 and nothing else**: +5 V (1) and GND (2) for power, IO14 (7) for
+  the button, IO47 (6) for the ring. Four pins, one connector, no support components.
 - **IO2 is NOT on either header.** It goes only to the onboard D5. So `PIN_STATUS_LED 2` **cannot
-  drive the button's ring** — the ring needs a header pin. Free candidates: **IO1** (J4.3),
-  **IO48** (J4.4), **IO47** (J4.6).
+  drive the button's ring** — the ring needs a header pin. **IO47 (J4.6) is the one**, proven;
+  IO1 (J4.3) and IO48 (J4.4) are the free alternates.
 - The free-pin list this plan gave earlier was optimistic: **IO1, IO47, IO48** are the genuinely
   free ones. IO41/IO42 cost JTAG, IO43/IO44 are the console, IO46 is a strap, IO0 is BOOT.
 
@@ -222,7 +222,7 @@ than a maybe.
    brown ──────►  J4.7  IO14     switch, active-low (internal pull-up)   ✅ proven
    brown ──────►  J4.2  GND      the other switch leg (either brown; no polarity)
    white ──────►  J4.1  +5V      ring + — ⚠️ verify this pin is live, see below
-   black ──────►  ring −  ───►   MOSFET drain; gate ◄── J4.6 IO47; source ──► GND
+   black ──────►  J4.6  IO47     ring − — the GPIO sinks it. No MOSFET; see below.
 ```
 
 **The onboard GPIO2 LED is real — and useless to us.** The schematic confirms `IO2 → R6 1K → D5`
@@ -231,33 +231,44 @@ so it can only blink *inside* a sealed box. It stays worth blinking during bring
 liveness tell; it cannot be the ring's gate. **Use IO47 (J4.6)** for that — IO1 and IO48 are the
 alternates.
 
-### ⚠️ The LED is the problem: a **white** ring on a **3.3 V** micro
+### ✅ The ring: **switch the GROUND side from a bare GPIO. No MOSFET.** *(proven on hardware)*
 
 A white LED has a **forward voltage of ≈3.0–3.2 V**, and the ring is specced **5–24 V**, so it
-carries an internal series resistor sized for **≥5 V**. Drive it from a 3.3 V GPIO and you leave
-roughly **0.1–0.3 V** across that resistor — microamps. **It will be dark, or a useless glimmer.**
-This is not the coin-flip an earlier draft of this plan described; that draft hedged on ring
-color, and the color is now known to be the bad one.
+carries an internal series resistor sized for **≥5 V**. A 3.3 V GPIO cannot **source** enough to
+light it — you'd leave ~0.1–0.3 V across that resistor. That much of the earlier analysis holds.
 
-**So plan for the 5 V path from the start:**
+**But the pin never needed to source. It only needs to sink.** Put white on the full 5 V and land
+black on a GPIO: the pin pulls the ring's cathode to ground, which is precisely the job a low-side
+MOSFET would have done. **So the MOSFET is unnecessary** — the ESP32's own output driver *is* the
+low-side switch.
 
 ```
-   J4.1  +5V ──────► white (LED+)
+   J4.1  +5V ──────► white (ring +)
                           │
                         [ring]
                           │
-        black (LED−) ───► D
-                       ┌──┴──┐
-   J4.6  IO47 ───────►│ G   │  N-MOSFET, logic-level (2N7002 / AO3400)
-                       └──┬──┘
-                          S
-                          │
-                    J4.2  GND
+   J4.6  IO47 ◄────── black (ring −)      LOW  -> ring sees 5 V      -> ON
+                                          HIGH -> ring sees 1.7 V    -> OFF
+                                                  (under Vf, so no current, and
+                                                   nothing flows back into the pin)
 ```
 
-Low-side switching keeps the gate referenced to GND, so a 3.3 V GPIO drives it fine even though
-the LED sits on 5 V. **Cost: one part, and the "three pins" becomes four connections** —
-GPIO14, GND, 5 V, GPIO2. Worth it: the ring is the entire UI of a screenless box.
+**Verified end-to-end with `sleep-button-bringup`:** each button press toggles the ring, on and
+off, cleanly (`presses=8`, `bounces=16` — the same 2-edges-per-press ratio as the button-only
+test). The ring lights on the IO47 sweep step and is dark on every other.
+
+**Why this is safe:**
+- **Sink current** is ~10–20 mA; an ESP32-S3 pin is good for ~28 mA. Comfortable.
+- **Nothing sees 5 V.** When the pin drives HIGH (3.3 V), the ring has only 1.7 V across it —
+  below Vf — so it cannot conduct and cannot push current back into the pin.
+- ⚠️ **The one rule: always drive this pin, never leave it as an INPUT.** Floating, the node
+  drifts toward 5 V and only the pin's ESD clamp stops it at ~4 V — over the 3.6 V abs-max, albeit
+  at leakage currents. `pins.h` documents this; the bring-up sets OUTPUT+HIGH before anything else.
+
+**What this buys:** one fewer part, no perfboard or heat-shrink blob to house inside the shell
+(§6), and **LEDC PWM still works** — the vendor pinout marks every header GPIO as PWM-capable, so
+the §5 brightness slider is unaffected. The ring is the entire UI of a screenless box, and it now
+costs zero components.
 
 #### ✅ **J4.1 supplies 5 V — CONFIRMED on hardware. The schematic is wrong.**
 
@@ -293,20 +304,21 @@ problem today.
 **Design consequences now that the rail is real:**
 - **Don't** leave it wired as tested (white→5 V, black→GND). That's an always-on ring with no
   status feedback, which throws Phase 4 away. It was a *test*, not the design.
-- The MOSFET plan stands as written: white→J4.1, black→drain, gate→J4.6 (IO47), source→J4.2.
+- The ring wiring is settled and proven: white→J4.1, black→J4.6 (IO47). No MOSFET (see above).
 - **Measure the ring's current** while it's lit — it sizes nothing critical (any logic-level FET
   handles it) but it's free to know now, and it confirms the "~10–20 mA" guess above.
 
 Current draw is unstated (the datasheet's "MICROVOLTAGE" is a mistranslation, not a spec).
-Expect ~10–20 mA at 5 V — trivial for the MOSFET, but **measure it in Phase 0**.
+Expect ~10–20 mA at 5 V — inside a GPIO's ~28 mA sink, but **measure it** to be sure of the margin.
 
 ```cpp
 // src/boards/esp32s3cam/pins.h
 #define PIN_BUTTON        14    // J4.7 — FLM12-FJ-6, either brown; to GND, active-low. PROVEN.
-#define PIN_RING_GATE     47    // J4.6 — gate of the low-side MOSFET on the white ring's return.
-                                // NOT a direct LED drive: the ring is white (Vf ~3.1 V) and
-                                // specced 5-24 V, so 3.3 V will not light it. Ring + goes to
-                                // J4.1 (+5V) -- verify that pin is actually driven first.
+#define PIN_RING_GATE     47    // J4.6 — the white ring's return (black), switched LOW-SIDE by
+                                // this pin directly. No MOSFET: a 3.3 V pin can't SOURCE a white
+                                // ring specced 5-24 V, but it sinks it fine. LOW=on, HIGH=off.
+                                // Ring + (white) sits on J4.1 (+5V). ALWAYS drive this pin --
+                                // floating, the node drifts to ~4 V on the ESD clamp. PROVEN.
 #define PIN_STATUS_LED     2    // Onboard D5 (IO2 -> R6 1K -> D5, active-HIGH). CONFIRMED real
                                 // from the schematic -- but NOT broken out, so it is only ever
                                 // visible with the case open. Bring-up liveness tell, not UI.
@@ -402,7 +414,7 @@ that group-coordinator distinction is already handled; don't re-derive it.
 The ring should be configurable from the config page (§3's `+5V` caveat permitting). Two
 decisions worth making deliberately:
 
-**Make it 0–100 %, not on/off.** The MOSFET gate (IO47) is a normal GPIO, so **LEDC PWM** gives
+**Make it 0–100 %, not on/off.** The ring pin (IO47) is a normal GPIO, so **LEDC PWM** gives
 dimming for the same effort as a toggle, and `0` *is* off — a switch is the degenerate case of a
 level, so building the level costs nothing extra and can't be retrofitted for free later. This is
 a **bedside** device: a white ring at full tilt in a dark bedroom is genuinely unpleasant, and
@@ -479,7 +491,7 @@ units don't collide on mDNS/OTA (UDP 3232).
 
 | # | Phase | Deliverable / proof |
 |---|---|---|
-| **0** | **Bring-up** (`sleep-button-bringup`) — 🟡 **part done** | ✅ **GPIO14 + the button are proven** (§4: 4/4 presses, clean debounce, no resistor needed). ⏳ Still open here: the **Short/Long timing**, the **PSRAM/flash banner** (8 MB partition sanity — the boot print hasn't been captured yet), and the LED work below. Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6 ring (§4):** confirm the board exposes **5 V** on a header, measure the ring's draw, and — 30 seconds, expect failure — poke white straight onto GPIO2 to see whether a **white** (Vf ≈ 3.1 V) ring specced 5–24 V does anything at 3.3 V. Assume it doesn't and that the MOSFET is real; this phase is where that's cheap to find out. |
+| **0** | **Bring-up** (`sleep-button-bringup`) — ✅ **essentially done** | ✅ **GPIO14 + button proven** (§4: 4/4 then 8/8 presses, ~2 bounces/press absorbed by the 30 ms window, no external resistor). ✅ **PSRAM 8 MB + flash 8 MB read back correct** — the 8 MB partition config took. ✅ **GPIO2/D5 confirmed real** from the schematic (but not broken out — case-internal only). ✅ **J4.1 supplies 5 V** and ✅ **the ring switches off a bare GPIO (IO47, low-side) — no MOSFET**, button press toggles it end-to-end. ⏳ Remaining: the **Short/Long held-time** classification (never observed — the 700 ms threshold is still a guess Phase 2 would inherit) and the **ring's current draw** (expected ~10–20 mA vs the pin's ~28 mA sink; nice-to-know, not blocking). |
 | **1** | **Headless skeleton** | `-DHEADLESS` guards + stub board + no-op unit. Boots, joins WiFi (`secrets.h`), discovers Sonos, OTA answers. **No button yet.** Proves the core is portable. |
 | **2** | **Button → playlist** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Hardcode room/playlist/volume. **The device does its job.** |
 | **3** | **Config server** | :8080 page + `webconfig` fields for playlist/volume. Room picker comes free. |
@@ -620,9 +632,8 @@ hardware/cam-button/
   `BUTTON_NUT_AF` in `button_params.py`.
 - **Button wiring** — the FLM12-FJ-6 ships a **4-wire MX1.25 pigtail, 150 mm** (black / white /
   two brown), so there is nothing to solder *at the button*. The four wires land on **GPIO14,
-  GND, 5 V and GPIO2**, with a **low-side MOSFET on the white ring's return** — see §4, and note
-  that little board needs somewhere to live. **Leave room for a small perfboard or a blob of
-  heat-shrink near the header end**; it's one SOT-23 and nothing else, but it is not zero volume.
+  GND, IO14 and IO47 — all four on J4** (§3), and thanks to the low-side-GPIO trick (§4) there is
+  **no MOSFET and no support board to house**. Nothing but wire goes in the shell.
   150 mm is also far more slack than a ~60 mm box needs: leave a **channel or a pair of posts to
   coil the excess**, and a **strain-relief rib** at the header end so tugging the button can't
   lift a pad. The button itself is captive in its nut, so the rib protects the *board*.
