@@ -86,9 +86,39 @@ Just set `board_build.partitions = default_8MB.csv` and `board_upload.flash_size
 
 - **Camera (DVP):** 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18
 - **TF card (MMC):** 38 (CMD), 39 (CLK), 40 (DAT0)
-- **Flashlight LEDs:** GPIO3 · **Green pilot LED:** GPIO2 *(schematic shows an LED on IO2 —
-  **VERIFY** on hardware; if real, it's free status feedback)*
+- **Flashlight LEDs:** GPIO3 · **Green pilot LED:** GPIO2 — ✅ **CONFIRMED REAL** from the vendor
+  schematic (`esp32s3_cam_sch.pdf`, "Extension Interface / LED" block): **IO2 → R6 1 K → D5
+  (yellow-green) → GND**, i.e. **active-HIGH**, ~1.2 mA. No hardware test needed; the guess was
+  right. ⚠️ **But see below — IO2 is not broken out**, so it can only ever blink *inside* the case.
 - **PSRAM/flash (OPI):** 26–37 — never touch
+
+### The actual header pinout — **read off the vendor schematic** (this supersedes guesswork)
+
+Two 8-pin headers, **J4** and **J5**. This is the whole external interface:
+
+| J4 | net | | J5 | net |
+|---|---|---|---|---|
+| 1 | **+5V** ⚠️ *(see §4 — may not be driven)* | | 1 | **+3V3** |
+| 2 | **GND** | | 2 | **GND** |
+| 3 | IO1 | | 3 | IO46 *(LOG strap)* |
+| 4 | IO48 | | 4 | IO41 *(MTDI)* |
+| 5 | **NC** | | 5 | IO42 *(MTMS)* |
+| 6 | IO47 | | 6 | IO43_TX *(console)* |
+| 7 | **IO14** ← the button | | 7 | IO44_RX *(console)* |
+| 8 | BOOT *(IO0)* | | 8 | EN |
+
+Plus **J2**, a **PH2.0 4-pin** connector: **1=IO48, 2=IO47, 3=+5V, 4=GND**. (The README's "PH2.0
+battery JST" is **J1**, a separate 2-pin — don't confuse them.)
+
+**Consequences that matter:**
+
+- **Everything the button needs is on J4**: +5 V (1), GND (2), IO14 (7), and a free IO47 (6) for
+  the ring's gate. One connector, four adjacent-ish pins.
+- **IO2 is NOT on either header.** It goes only to the onboard D5. So `PIN_STATUS_LED 2` **cannot
+  drive the button's ring** — the ring needs a header pin. Free candidates: **IO1** (J4.3),
+  **IO48** (J4.4), **IO47** (J4.6).
+- The free-pin list this plan gave earlier was optimistic: **IO1, IO47, IO48** are the genuinely
+  free ones. IO41/IO42 cost JTAG, IO43/IO44 are the console, IO46 is a strap, IO0 is BOOT.
 
 ---
 
@@ -157,18 +187,20 @@ than a maybe.
 
 ### Wiring
 
+**Everything lands on J4** (§3's pinout — one connector does the whole job):
+
 ```
-   brown ──────►  GPIO14        switch, active-low (internal pull-up)
-   brown ──────►  GND           the other switch leg (either brown; no polarity)
-   white ──────►  LED+  ┐
-   black ──────►  LED−  ┘       ring — DO NOT drive from a 3.3 V GPIO; see below
+   brown ──────►  J4.7  IO14     switch, active-low (internal pull-up)   ✅ proven
+   brown ──────►  J4.2  GND      the other switch leg (either brown; no polarity)
+   white ──────►  J4.1  +5V      ring + — ⚠️ verify this pin is live, see below
+   black ──────►  ring −  ───►   MOSFET drain; gate ◄── J4.6 IO47; source ──► GND
 ```
 
-**The button's own LED ring supersedes the onboard-LED question.** `pins.h:18-21` flags the
-green LED on GPIO2 as an unverified guess from the schematic. It no longer matters much either
-way: the button ring is *better* status feedback than an LED buried inside the case — it's the
-one thing the user is already looking at. Treat the onboard LED as a bonus if bring-up proves it
-exists.
+**The onboard GPIO2 LED is real — and useless to us.** The schematic confirms `IO2 → R6 1K → D5`
+(§3), so `pins.h:18-21`'s "unverified guess" was correct. But **IO2 is not broken out to J4/J5**,
+so it can only blink *inside* a sealed box. It stays worth blinking during bring-up as a
+liveness tell; it cannot be the ring's gate. **Use IO47 (J4.6)** for that — IO1 and IO48 are the
+alternates.
 
 ### ⚠️ The LED is the problem: a **white** ring on a **3.3 V** micro
 
@@ -181,25 +213,56 @@ color, and the color is now known to be the bad one.
 **So plan for the 5 V path from the start:**
 
 ```
-        5V rail ──────► white (LED+)
+   J4.1  +5V ──────► white (LED+)
                           │
                         [ring]
                           │
         black (LED−) ───► D
                        ┌──┴──┐
-             GPIO2 ───►│ G   │  N-MOSFET, logic-level (2N7002 / AO3400)
+   J4.6  IO47 ───────►│ G   │  N-MOSFET, logic-level (2N7002 / AO3400)
                        └──┬──┘
                           S
                           │
-                         GND
+                    J4.2  GND
 ```
 
 Low-side switching keeps the gate referenced to GND, so a 3.3 V GPIO drives it fine even though
 the LED sits on 5 V. **Cost: one part, and the "three pins" becomes four connections** —
 GPIO14, GND, 5 V, GPIO2. Worth it: the ring is the entire UI of a screenless box.
 
-- **Confirm the board actually exposes 5 V on a header** before committing — it has USB-C and a
-  PH2.0 battery charger, so a 5 V/VBUS pin is very likely, but ⚠️ **VERIFY** it.
+#### ⚠️⚠️ Can this board actually supply the 5 V? **The schematic says maybe not.**
+
+There **is** a `+5V` pin — **J4 pin 1**, and again on **J2 pin 3**. But tracing the net in
+`esp32s3_cam_sch.pdf` turns up something alarming: **`+5V` appears exactly twice on the whole
+sheet, and both are those connector pins.** Nothing drives it. The USB input is labelled `VBUS`,
+and the power path is:
+
+```
+   VBUS ──►|── D7 (K24 Schottky) ──┐
+                                   ├──► VOUT ──► U4 XC6220B331MR-G ──► +3V3
+   VBAT ──── Q3 AO3401A (P-FET) ───┘            (Q3's gate is pulled to VBUS via R8 1M, so
+              source=VBAT drain=VOUT             USB present => battery disconnected)
+```
+
+`VOUT` is the merged rail (≈ VBUS − 0.3 V on USB, or VBAT on battery). **Neither `VBUS` nor
+`VOUT` is the `+5V` net**, and no `+5V` symbol sits on either. On this sheet the `+5V` net is a
+two-pin island with no source — which should be a KiCad ERC error, so either the vendor shipped
+that error and joins it in the PCB layout, or **those pins are dead**.
+
+**Do not design around J4.1 until it is measured.** One multimeter probe settles it:
+**J4 pin 1 → GND, USB plugged in.** ~5 V means the schematic is merely incomplete; **0 V means
+the pin is dead** and the ring needs another source.
+
+**If J4.1 is dead**, in preference order:
+1. **Tap VBUS at the USB-C input** — solder to the `C10`/`C1` pad. The unit is permanently
+   USB-powered (§6), so VBUS is always present. One ugly wire, zero parts, real 5 V.
+2. **Use `VOUT`** (≈4.7 V on USB) if a pad is easier to reach — still lights a white LED fine.
+3. **A 3.3 V → 5 V boost module.** Costs a part and volume; only if soldering is off the table.
+
+⚠️ **Note for a battery future:** `+5V`/VBUS exists *only while USB is connected*. If this ever
+runs off the PH2.0 battery (J1), the ring goes dark no matter which of the above you pick —
+VOUT would drop to VBAT (3.0–4.2 V), which a white ring resistored for ≥5 V will barely light.
+The ring and battery operation are mutually exclusive unless you add a boost.
 - **Don't** just tie white→5 V and black→GND. That "works" and is tempting, but it's an always-on
   ring with no status feedback, which throws Phase 4 away entirely.
 - **Still worth 30 seconds in Phase 0:** poke white straight onto GPIO2 and look. If it somehow
@@ -210,10 +273,14 @@ Expect ~10–20 mA at 5 V — trivial for the MOSFET, but **measure it in Phase 
 
 ```cpp
 // src/boards/esp32s3cam/pins.h
-#define PIN_BUTTON        14    // FLM12-FJ-6 — either brown; momentary to GND, active-low
-#define PIN_STATUS_LED     2    // FLM12-FJ-6 white ring, via a low-side MOSFET off 5V.
-                                // NOT a direct drive: the ring is white (Vf ~3.1 V) and
-                                // specced 5-24 V, so 3.3 V will not light it.
+#define PIN_BUTTON        14    // J4.7 — FLM12-FJ-6, either brown; to GND, active-low. PROVEN.
+#define PIN_RING_GATE     47    // J4.6 — gate of the low-side MOSFET on the white ring's return.
+                                // NOT a direct LED drive: the ring is white (Vf ~3.1 V) and
+                                // specced 5-24 V, so 3.3 V will not light it. Ring + goes to
+                                // J4.1 (+5V) -- verify that pin is actually driven first.
+#define PIN_STATUS_LED     2    // Onboard D5 (IO2 -> R6 1K -> D5, active-HIGH). CONFIRMED real
+                                // from the schematic -- but NOT broken out, so it is only ever
+                                // visible with the case open. Bring-up liveness tell, not UI.
 ```
 
 ```cpp
