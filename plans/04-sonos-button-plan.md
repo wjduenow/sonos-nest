@@ -112,15 +112,55 @@ It is a plain GPIO with **no strapping role**, has an **internal pull-up**, is n
 camera or the TF slot, is broken out on the header, and is **RTC-capable** — which leaves the
 door open to deep-sleep-wake-on-button later if you ever run it off the battery JST.
 
+### The button: **FILN FLM12-FJ-6** (datasheet in hand)
+
+| | |
+|---|---|
+| Model | **FLM12-FJ-6** — "IP67 waterproof tactile thin metal button" |
+| Thread / size | **M12 × 0.75**, 12 mm nominal → confirms `BUTTON_BORE_D` 12.0 mm |
+| Switch function | **SELF-RESET** = momentary, and the drawing labels the contacts **NO / C** → **normally-open**, exactly what `INPUT_PULLUP` wants. No latching to design around; §1's toggle is done in software, which the datasheet itself says ("if a self-locking function needs to be achieved, it should be controlled through a program"). |
+| Termination | **4-pin MX1.25 board-to-wire**, pre-crimped **150 ± 5 mm** 26 AWG PTFE pigtail — **no soldering to the button.** |
+| Contacts | **NO**, **C**, **LED+**, **LED−** |
+| LED | **5–24 V** ⚠️ see below. Black wire = LED−; the colored wire = LED+ (its color matches the light). |
+
+### Wiring: 4 wires → **3 pins on the board**
+
+The connector has four contacts, but **C and LED− both land on GND**, so there are only three
+distinct board connections:
+
 ```
-   Button leg 1  ──────►  GPIO14   (header, left side)
-   Button leg 2  ──────►  GND      (header, either side)
+   NO    ──────►  GPIO14        switch, active-low (internal pull-up)
+   C     ──────►  GND       ┐   shared — this is why 4 wires = 3 pins
+   LED−  ──────►  GND       ┘
+   LED+  ──────►  GPIO2         status LED (but read the 3.3 V caveat below)
 ```
+
+**The button's own LED ring supersedes the onboard-LED question.** `pins.h:18-21` flags the
+green LED on GPIO2 as an unverified guess from the schematic. It no longer matters much either
+way: the button ring is *better* status feedback than an LED buried inside the case — it's the
+one thing the user is already looking at. GPIO2 is free regardless, so drive the ring from it
+and treat the onboard LED as a bonus if bring-up proves it exists.
+
+⚠️ **The LED is rated 5–24 V and the ESP32 drives 3.3 V — it may be dim or dead.** The ring
+almost certainly has an internal series resistor sized for ≥5 V, so at 3.3 V the current will be
+well under spec. How badly depends on the LED color: a red ring (Vf ≈ 2 V) will likely still
+light usably, while white/blue (Vf ≈ 3 V) may barely glow. **This is a Phase 0 test, not a
+design decision to agonize over now** — wire LED+ to GPIO2 and look at it.
+
+- **If it lights acceptably at 3.3 V** → done, three pins, full software control, no parts.
+- **If it's too dim** → LED+ to the **5 V rail** and low-side-switch LED− to GND through a small
+  N-MOSFET (e.g. 2N7002 / AO3400) gated by GPIO2. That costs a fourth connection and one part.
+  **Do not** simply tie LED+ to 5 V and LED− to GND unless you accept an always-on ring with no
+  status feedback at all — which throws away Phase 4.
+
+Current draw is unstated (the datasheet's "MICROVOLTAGE" is a mistranslation, not a spec).
+Expect ~10–20 mA, which is inside an ESP32-S3 GPIO's ~20 mA comfortable source — but **measure
+it during Phase 0** rather than trusting that.
 
 ```cpp
 // src/boards/esp32s3cam/pins.h
-#define PIN_BUTTON        14    // momentary to GND, active-low, internal pull-up
-#define PIN_STATUS_LED     2    // green pilot LED — VERIFY polarity on hardware
+#define PIN_BUTTON        14    // FLM12-FJ-6 "NO" — momentary to GND, active-low, pull-up
+#define PIN_STATUS_LED     2    // FLM12-FJ-6 "LED+" — ring; VERIFY it lights at 3.3 V
 ```
 
 ```cpp
@@ -257,7 +297,7 @@ units don't collide on mDNS/OTA (UDP 3232).
 
 | # | Phase | Deliverable / proof |
 |---|---|---|
-| **0** | **Bring-up** (`sleep-button-bringup`) | Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. |
+| **0** | **Bring-up** (`sleep-button-bringup`) | Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6's LED question (§4): does the 5–24 V ring light usably when GPIO2 drives it at 3.3 V, and what does it draw?** A dim ring here means a MOSFET + the 5 V rail, which is a wiring change worth knowing before the case is designed around three wires. |
 | **1** | **Headless skeleton** | `-DHEADLESS` guards + stub board + no-op unit. Boots, joins WiFi (`secrets.h`), discovers Sonos, OTA answers. **No button yet.** Proves the core is portable. |
 | **2** | **Button → playlist** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Hardcode room/playlist/volume. **The device does its job.** |
 | **3** | **Config server** | :8080 page + `webconfig` fields for playlist/volume. Room picker comes free. |
@@ -306,40 +346,71 @@ hardware/cam-button/
   overmolds. This is power-only and permanent, so size it for the actual cable you'll use, not
   the connector. Keep BOOT/RESET reachable through the same face if you can — it costs nothing
   and saves you a disassembly during bring-up.
-- **Button** — a bore on the **top face** for your panel-mount momentary. **Measured so far:**
+- **Button** — a bore on the **top face** for the **FILN FLM12-FJ-6** (see §4 for the electrical
+  side). Datasheet drawing + your calipers:
 
   | Param | Value | Source / note |
   |---|---|---|
-  | `BUTTON_BODY_D` | **11.71 mm** | measured — the Ø the button body must pass through. Reads as a nominal **12 mm** panel-mount. |
-  | `BUTTON_BORE_D` | **12.0 mm** | = body + ~0.3 mm clearance. FDM prints holes **undersize**; a bore modelled at exactly 11.71 will not accept the button. Tune on a test coupon before committing the shell print. |
-  | `BUTTON_BEHIND_T` | **13.5 mm** | measured — **depth behind the panel** (confirmed, not overall height). This is the hard constraint on the shell's internal Z. |
+  | `BUTTON_BODY_D` | **11.71 mm** | measured — matches the datasheet's **M12 × 0.75** thread (11.71 is the thread's measured major Ø, slightly under the 12 nominal, as expected). |
+  | `BUTTON_BORE_D` | **12.0 mm** | = thread + ~0.3 mm clearance. FDM prints holes **undersize**; a bore modelled at 11.71 will not accept the button. Tune on a test coupon before committing the shell print. |
+  | `BUTTON_HEAD_D` | **14.0 mm** | datasheet ø14 head — the flange that sits *on* the top face and hides the bore. Bore tolerance is forgiving: the head covers ~1 mm of slop all round. |
+  | `BUTTON_NUT_AF` | **16.0 mm** | datasheet — hex **across-flats**. ⚠️ **This is the nut OD you asked about.** Across-*corners* is ≈ 16/cos30 ≈ **18.5 mm**, so the bore needs **≥18.5 mm of flat, obstruction-free interior** around it, and more if you want a wrench rather than fingers. Nothing — no boss, no rib, no wall — may come within ~9.5 mm of the bore axis on the inside. |
+  | `BUTTON_BEHIND_T` | **13.5 mm** *(disputed — see below)* | your measurement, called behind-panel. |
 
-  **What 13.5 mm behind the panel costs us — this drives the shell, not the other way round.**
-  The button body intrudes 13.5 mm straight down from the inside of the top face, *plus* its
-  solder lugs and the wire bend behind them (budget **~6–8 mm** — lugs on a 12 mm momentary
-  stand a few mm proud, and a wire leaving them needs a radius or it fatigues at the joint).
-  So the bore's footprint needs roughly **20 mm of clear interior height**, against a board
-  that is only ~5 mm tall once the camera comes off. Two ways to pay for it:
+  ⚠️ **The datasheet and your 13.5 mm may be measuring the same thing.** The drawing dimensions
+  the body as **13.35 ± 0.1**, which is within 0.15 mm of your 13.5 — suspiciously close for two
+  supposedly different quantities. If 13.35 is the **overall** length (head included) and the head
+  is the drawing's **1.5 mm**, then the true behind-panel depth is ≈ **11.85 mm**, not 13.5.
+  I can't resolve this from a photo of the drawing. **Please caliper it directly: seat the button
+  in a 12 mm hole in something flat and measure from the panel surface to the back of the
+  connector.** Note this errs safe — designing for 13.5 when it's really 11.85 wastes 1.65 mm of
+  height rather than fouling the lid — so it does not block the shell, but it should be settled
+  before the STL is final.
+
+  ⚠️ **Max panel thickness is the constraint to watch.** The drawing shows the threaded section
+  as only ~**4 mm** long (consistent with the product being sold as a *thin* button). Minus a
+  ~2 mm nut, that leaves roughly **2 mm of panel** — *thinner than a typical printed wall.*
+  **Caliper the thread length.** If it really is ~4 mm, the top face must be **locally thinned to
+  ~2 mm at the bore** (a recessed pocket around the hole), which is the "local thin boss" this
+  plan predicted. Set it as `BUTTON_PANEL_T` and derive the pocket from it.
+
+  **What the depth costs us — the button drives the shell, not the other way round.** The body
+  intrudes ~12–13.5 mm straight down from the inside of the top face, and behind *that* sits the
+  **MX1.25 connector plus its mating shell and the pigtail's bend radius**. The pre-crimped
+  harness is good news electrically (no soldering, §4) but it is **worse than solder lugs
+  dimensionally** — a mated 1.25 mm housing plus a survivable wire bend wants **~8–10 mm**, and
+  unlike a solder joint you cannot dress it flat. Budget:
+
+  ```
+    13.5  body behind panel   (or ~11.85 — pending the caliper check above)
+  +  ~9   mated connector + pigtail bend radius
+  ─────
+    ~23   mm of clear interior height under the bore
+  ```
+
+  …against a board that is only ~5 mm tall once the camera comes off. **The button, not the PCB,
+  sets the height of this box.** Two ways to pay for it:
 
   - **Site the bore off the PCB footprint** (over the free area beside the board) so the button
-    hangs down next to it rather than above it. **Preferred** — costs shell floor area, which is
-    cheap, instead of shell height, which is not.
-  - **Raise the top face** to ~20 mm above the PCB. Simple, but it makes the whole box tall for
-    the sake of one component.
+    and its connector hang down *next to* the board rather than above it. **Preferred** — costs
+    shell floor area, which is cheap on a 38 × 30 mm board that doesn't fill its own box, instead
+    of shell height, which is not. It also keeps the pigtail's 150 mm of slack out from over the
+    PCB, and keeps the nut's 18.5 mm across-corners circle clear of the screw bosses.
+  - **Raise the top face** to ~23 mm above the PCB. Simple, but the whole enclosure gets tall to
+    suit one component.
 
-  Either way this reads as a **hard floor on the shell's internal Z**, so `BUTTON_BEHIND_T`
-  belongs in `button_params.py` *upstream* of the shell height, which should be derived from it
-  rather than set independently.
+  Either way this is a **hard floor on the shell's internal Z**, so `BUTTON_BEHIND_T` belongs in
+  `button_params.py` *upstream* of the shell height, which should be derived from it rather than
+  set independently.
 
-  Still needed: **nut OD** (the shell wall must clear a wrench/socket around the bore) and the
-  **max panel thickness** the thread accepts. Most 12 mm panel-mounts thread for ≤3 mm of panel
-  and a printed wall is typically 2–3 mm, so this is *probably* fine — but if the thread is
-  short, the bore area needs a **local thin boss** milled down to spec.
-  Everything downstream is a single `BUTTON_BORE_D` / `BUTTON_BEHIND_T` / `BUTTON_PANEL_T` in
-  `button_params.py`.
-- **Button wiring** — 2 wires from the button to the header: **GPIO14** and **GND**. Use a
-  2-pin JST or just solder; leave a **strain-relief rib** so tugging the button doesn't lift a
-  header pad.
+  Everything downstream is `BUTTON_BORE_D` / `BUTTON_BEHIND_T` / `BUTTON_PANEL_T` /
+  `BUTTON_NUT_AF` in `button_params.py`.
+- **Button wiring** — the FLM12-FJ-6 ships a **4-wire MX1.25 pigtail, 150 mm**, so there is
+  nothing to solder *at the button*; the four wires land on **three** header points (GPIO14, GND,
+  GPIO2 — see §4). 150 mm is far more slack than a ~40 mm box needs: leave a **channel or a pair
+  of posts to coil the excess**, and a **strain-relief rib** at the header end so tugging the
+  button can't lift a pad. The button itself is captive in its nut, so the rib protects the
+  *board*, not the button.
 - **Lid** — screwed or snap-fit; whichever the other parts in `hardware/` favor.
 
 ### Camera: unplug it
@@ -359,8 +430,11 @@ bury it against a screw boss. If range disappoints in the final spot, the IPEX m
 
 ## 7. What I need from you
 
-1. ~~**Button measurements** — bore Ø, body depth~~ ✅ **body Ø 11.71 mm → 12.0 mm bore; 13.5 mm
-   behind the panel** (confirmed). Still open (see §6): **nut OD** and **max panel thickness**.
+1. ~~**Button measurements** — bore Ø, body depth, panel thickness, nut OD~~ ✅ **answered by the
+   FILN FLM12-FJ-6 datasheet** (§4/§6): M12 × 0.75 → 12.0 mm bore, ø14 head, 16 mm hex nut
+   (18.5 across corners). Two **caliper checks** remain, and both change the shell:
+   **(a)** is 13.35/13.5 mm the overall length or the behind-panel depth? **(b)** how long is the
+   threaded section — if it's really ~4 mm, the top face needs a thinned pocket at the bore.
 2. **Caliper the board's mounting-hole Ø** (M2 vs M3) — the drawing omits it.
 3. **A decision on WiFi provisioning** (§1) — or just take the recommendation: `secrets.h` now,
    portal in Phase 5.
