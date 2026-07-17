@@ -523,8 +523,10 @@ hardware/cam-button/
 
 - PCB **38.4 × 30.4 mm**, corner radius ≈ **R2** *(VERIFY)*
 - **4× mounting holes** on a **32 × 24 mm** rectangle — i.e. **3.2 mm in from each edge**
-- Hole diameter **not dimensioned** on the drawing. The pads read as **M2 (Ø2.2)**, *not* M3 like
-  the other two boards — **caliper-check before printing bosses.** ⚠️ **VERIFY**
+- Mounting holes are **Ø3.2 with a Ø6.4 pad — textbook M3**, read off the vendor STEP.
+  ✅ **This corrects an earlier guess in this plan**, which read the pads as "M2 (Ø2.2), *not* M3
+  like the other two boards". They are M3, the same as the ES3C28P — which is why the
+  sleep-machine's screws drop straight in. Don't reintroduce the M2 reading.
 - **USB-C is centered on one short (30.4 mm) edge**
 - BOOT and RESET buttons flank the USB-C on that same edge
 - **`BOARD_STACK_T` = 14.5 mm** — measured, thickest point, driven by the **pre-soldered header
@@ -538,8 +540,9 @@ hardware/cam-button/
 
 **Two parts: shell + lid.**
 
-- **Shell** — box body; board drops in and screws to **4 printed bosses** (Ø1.7 pilot for M2
-  self-tappers, pending the hole-Ø verify) on the 32 × 24 pattern.
+- **Shell** — box body; board drops in and screws to **4 printed bosses** (Ø2.6 pilots for
+  **M3×8 flat**) on the 32 × 24 pattern. Lid takes **M3×10 flat** — flush is mandatory under
+  adhesive tape. Built: `hardware/cam-button/`.
 - **USB-C slot** — a **generous cutout** on the short edge, oversized to clear chunky cable
   overmolds. This is power-only and permanent, so size it for the actual cable you'll use, not
   the connector. Keep BOOT/RESET reachable through the same face if you can — it costs nothing
@@ -634,6 +637,11 @@ hardware/cam-button/
   two brown), so there is nothing to solder *at the button*. The four wires land on **GPIO14,
   GND, IO14 and IO47 — all four on J4** (§3), and thanks to the low-side-GPIO trick (§4) there is
   **no MOSFET and no support board to house**. Nothing but wire goes in the shell.
+  ⚠️ **You must SOLDER to J4 — DuPont crimps do not fit.** An earlier draft of this plan claimed
+  the pre-soldered headers were "actively useful… can land on female DuPont crimps and stay
+  serviceable". With the board pins-down there is only **12.81 mm** under the header body and a
+  2.54 mm DuPont female housing is **~14.7 mm**. It does not go. The headers still set the height
+  (§6); they just don't buy serviceability.
   150 mm is also far more slack than a ~60 mm box needs: leave a **channel or a pair of posts to
   coil the excess**, and a **strain-relief rib** at the header end so tugging the button can't
   lift a pad. The button itself is captive in its nut, so the rib protects the *board*.
