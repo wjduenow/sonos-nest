@@ -110,6 +110,35 @@ Two 8-pin headers, **J4** and **J5**. This is the whole external interface:
 Plus **J2**, a **PH2.0 4-pin** connector: **1=IO48, 2=IO47, 3=+5V, 4=GND**. (The README's "PH2.0
 battery JST" is **J1**, a separate 2-pin — don't confuse them.)
 
+#### ⚠️ Physical order: **J4's pin 1 is at the BOTTOM** — don't wire by counting
+
+The vendor's `picture/esp32s3_cam_pin.png` gives the *physical* layout, which the schematic's pin
+numbers do **not** imply. Reading each header top-to-bottom as the board is drawn (USB-C at the
+bottom):
+
+```
+     LEFT header (J4)              RIGHT header (J5)
+     BOOT / GPIO0   <- pin 8       RST            <- (not a J5 net; see note)
+     GPIO14         <- pin 7       GPIO44 / U0RXD
+     GPIO47         <- pin 6       GPIO43 / U0TXD
+     NC             <- pin 5       GPIO42 / MTMS
+     GPIO48         <- pin 4       GPIO41 / MTDI
+     GPIO1          <- pin 3       GPIO46 / LOG
+     GND            <- pin 2       GND
+     5V             <- pin 1       3V3
+```
+
+**Pin 1 is the bottom pin, nearest the USB-C.** So "J4 pin 6" means sixth counting *up* from the
+5 V end — an easy way to wire it wrong, and it cost a debug round-trip when black stayed on GND.
+**Wire by neighbour, not by number:** `GPIO47` is the pin **immediately adjacent to `GPIO14`**, on
+the side away from BOOT.
+
+Two things this picture confirms independently:
+- The legend marks **5 V as a documented power rail** (`PWD: Power Rails (3V3 and 5V)`) — so the
+  orphaned `+5V` net in the schematic (§4) is definitively an ERC bug, not a dead pin.
+- **Every GPIO on these headers is PWM-capable**, so `GPIO47` can do LEDC dimming for the ring's
+  brightness slider (§5).
+
 **Consequences that matter:**
 
 - **Everything the button needs is on J4**: +5 V (1), GND (2), IO14 (7), and a free IO47 (6) for

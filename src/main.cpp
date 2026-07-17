@@ -5,9 +5,11 @@
 
 #include <Arduino.h>
 
-// The standalone bring-up modes (SD-as-USB, audio, mic) replace the whole app and don't link the
-// core/board/unit — so skip the app headers (and their LVGL/TJpg deps) in those builds.
-#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && !defined(WAKE_BRINGUP)
+// The standalone bring-up modes (SD-as-USB, audio, mic, wake, button) replace the whole app and
+// don't link the core/board/unit — so skip the app headers (and their LVGL/TJpg deps) in those
+// builds.
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && \
+    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP)
 #include "core/player_state.h"
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
@@ -34,6 +36,9 @@
 #endif
 #ifdef WAKE_BRINGUP
 #include "boards/es3c28p/wake_test.h"
+#endif
+#ifdef BUTTON_BRINGUP
+#include "boards/esp32s3cam/bringup.h"
 #endif
 
 // Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Default keeps
@@ -62,6 +67,8 @@ void setup() {
   micTestRun();    // does not return — capture the ES8311 mic and print a live level meter
 #elif defined(WAKE_BRINGUP)
   wakeTestRun();   // does not return — TFLM + microWakeWord bring-up
+#elif defined(BUTTON_BRINGUP)
+  camBringupRun(); // does not return — ESP32-S3-CAM button + LED + memory self-test
 #else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
@@ -79,7 +86,8 @@ void setup() {
 }
 
 void loop() {
-#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && !defined(WAKE_BRINGUP)
+#if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && \
+    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP)
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
 #endif
