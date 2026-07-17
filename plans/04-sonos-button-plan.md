@@ -106,11 +106,25 @@ Just set `board_build.partitions = default_8MB.csv` and `board_upload.flash_size
 | GPIO0 | **BOOT strap** | ❌ Has a button already; strapping |
 | GPIO46 | **LOG strap** | ❌ Strapping pin, must be low at boot |
 
-### Recommendation: **GPIO14**
+### Recommendation: **GPIO14** — ✅ **proven on hardware**
 
 It is a plain GPIO with **no strapping role**, has an **internal pull-up**, is not used by the
 camera or the TF slot, is broken out on the header, and is **RTC-capable** — which leaves the
 door open to deep-sleep-wake-on-button later if you ever run it off the battery JST.
+
+**Verified with `sleep-button-bringup` on the real FLM12-FJ-6** (the two browns to GPIO14 + GND,
+LED ring not connected):
+
+- **4 presses → `presses=4`.** No spurious counts, no missed presses.
+- **Idle reads `raw=up`** on the internal pull-up alone. **No external resistor needed.**
+- **`bounces=8` across 4 presses** — ~2 raw edges per press, absorbed by the 30 ms window into
+  clean events. Ordinary switch chatter, and it **does not climb while untouched**, which is the
+  signature that would indicate noise. **The 100 nF cap this section holds in reserve is not
+  needed** at this wire length.
+
+> Not yet observed: the per-press **Short/Long** held-time classification (the lines scrolled past
+> before the serial reader attached). The 700 ms threshold is still a guess, not a measurement —
+> worth confirming before Phase 2 inherits it as the `knobEvent()` contract.
 
 ### The button: **FILN FLM12-FJ-6** (datasheet in hand)
 
@@ -336,7 +350,7 @@ units don't collide on mDNS/OTA (UDP 3232).
 
 | # | Phase | Deliverable / proof |
 |---|---|---|
-| **0** | **Bring-up** (`sleep-button-bringup`) | Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6 ring (§4):** confirm the board exposes **5 V** on a header, measure the ring's draw, and — 30 seconds, expect failure — poke white straight onto GPIO2 to see whether a **white** (Vf ≈ 3.1 V) ring specced 5–24 V does anything at 3.3 V. Assume it doesn't and that the MOSFET is real; this phase is where that's cheap to find out. |
+| **0** | **Bring-up** (`sleep-button-bringup`) — 🟡 **part done** | ✅ **GPIO14 + the button are proven** (§4: 4/4 presses, clean debounce, no resistor needed). ⏳ Still open here: the **Short/Long timing**, the **PSRAM/flash banner** (8 MB partition sanity — the boot print hasn't been captured yet), and the LED work below. Blink GPIO2, print GPIO14 transitions over USB-CDC. Proves the board, the pin choice, and the LED-on-IO2 guess **before** any app code. **Also settles the FLM12-FJ-6 ring (§4):** confirm the board exposes **5 V** on a header, measure the ring's draw, and — 30 seconds, expect failure — poke white straight onto GPIO2 to see whether a **white** (Vf ≈ 3.1 V) ring specced 5–24 V does anything at 3.3 V. Assume it doesn't and that the MOSFET is real; this phase is where that's cheap to find out. |
 | **1** | **Headless skeleton** | `-DHEADLESS` guards + stub board + no-op unit. Boots, joins WiFi (`secrets.h`), discovers Sonos, OTA answers. **No button yet.** Proves the core is portable. |
 | **2** | **Button → playlist** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Hardcode room/playlist/volume. **The device does its job.** |
 | **3** | **Config server** | :8080 page + `webconfig` fields for playlist/volume. Room picker comes free. |
