@@ -312,13 +312,30 @@ hardware/cam-button/
   |---|---|---|
   | `BUTTON_BODY_D` | **11.71 mm** | measured — the Ø the button body must pass through. Reads as a nominal **12 mm** panel-mount. |
   | `BUTTON_BORE_D` | **12.0 mm** | = body + ~0.3 mm clearance. FDM prints holes **undersize**; a bore modelled at exactly 11.71 will not accept the button. Tune on a test coupon before committing the shell print. |
-  | `BUTTON_H` | **13.5 mm** | measured — ⚠️ **VERIFY: overall height, or depth *behind* the panel?** This sets the shell's internal Z clearance; a wrong reading here means the lid fouls the button. |
+  | `BUTTON_BEHIND_T` | **13.5 mm** | measured — **depth behind the panel** (confirmed, not overall height). This is the hard constraint on the shell's internal Z. |
+
+  **What 13.5 mm behind the panel costs us — this drives the shell, not the other way round.**
+  The button body intrudes 13.5 mm straight down from the inside of the top face, *plus* its
+  solder lugs and the wire bend behind them (budget **~6–8 mm** — lugs on a 12 mm momentary
+  stand a few mm proud, and a wire leaving them needs a radius or it fatigues at the joint).
+  So the bore's footprint needs roughly **20 mm of clear interior height**, against a board
+  that is only ~5 mm tall once the camera comes off. Two ways to pay for it:
+
+  - **Site the bore off the PCB footprint** (over the free area beside the board) so the button
+    hangs down next to it rather than above it. **Preferred** — costs shell floor area, which is
+    cheap, instead of shell height, which is not.
+  - **Raise the top face** to ~20 mm above the PCB. Simple, but it makes the whole box tall for
+    the sake of one component.
+
+  Either way this reads as a **hard floor on the shell's internal Z**, so `BUTTON_BEHIND_T`
+  belongs in `button_params.py` *upstream* of the shell height, which should be derived from it
+  rather than set independently.
 
   Still needed: **nut OD** (the shell wall must clear a wrench/socket around the bore) and the
   **max panel thickness** the thread accepts. Most 12 mm panel-mounts thread for ≤3 mm of panel
   and a printed wall is typically 2–3 mm, so this is *probably* fine — but if the thread is
   short, the bore area needs a **local thin boss** milled down to spec.
-  Everything downstream is a single `BUTTON_BORE_D` / `BUTTON_H` / `BUTTON_PANEL_T` in
+  Everything downstream is a single `BUTTON_BORE_D` / `BUTTON_BEHIND_T` / `BUTTON_PANEL_T` in
   `button_params.py`.
 - **Button wiring** — 2 wires from the button to the header: **GPIO14** and **GND**. Use a
   2-pin JST or just solder; leave a **strain-relief rib** so tugging the button doesn't lift a
@@ -342,9 +359,8 @@ bury it against a screw boss. If range disappoints in the final spot, the IPEX m
 
 ## 7. What I need from you
 
-1. ~~**Button measurements** — bore Ø, body depth~~ ✅ **got these: body Ø 11.71 mm → 12.0 mm bore,
-   height 13.5 mm.** Still open (see §6): **is 13.5 mm overall or behind-panel?**, plus **nut OD**
-   and **max panel thickness**.
+1. ~~**Button measurements** — bore Ø, body depth~~ ✅ **body Ø 11.71 mm → 12.0 mm bore; 13.5 mm
+   behind the panel** (confirmed). Still open (see §6): **nut OD** and **max panel thickness**.
 2. **Caliper the board's mounting-hole Ø** (M2 vs M3) — the drawing omits it.
 3. **A decision on WiFi provisioning** (§1) — or just take the recommendation: `secrets.h` now,
    portal in Phase 5.
