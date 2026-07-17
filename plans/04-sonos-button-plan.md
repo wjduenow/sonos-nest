@@ -230,12 +230,14 @@ Low-side switching keeps the gate referenced to GND, so a 3.3 V GPIO drives it f
 the LED sits on 5 V. **Cost: one part, and the "three pins" becomes four connections** —
 GPIO14, GND, 5 V, GPIO2. Worth it: the ring is the entire UI of a screenless box.
 
-#### ⚠️⚠️ Can this board actually supply the 5 V? **The schematic says maybe not.**
+#### ✅ **J4.1 supplies 5 V — CONFIRMED on hardware. The schematic is wrong.**
 
-There **is** a `+5V` pin — **J4 pin 1**, and again on **J2 pin 3**. But tracing the net in
-`esp32s3_cam_sch.pdf` turns up something alarming: **`+5V` appears exactly twice on the whole
-sheet, and both are those connector pins.** Nothing drives it. The USB input is labelled `VBUS`,
-and the power path is:
+**Tested: white → J4.1, black → J4.2, USB plugged in → the ring lights.** Both the 5 V rail and
+the white ring are proven. No VBUS tap, no boost, no soldering to pads.
+
+**This contradicts the schematic, so record why and don't re-derive it.** In
+`esp32s3_cam_sch.pdf`, `+5V` appears **exactly twice on the whole sheet** — J4 pin 1 and J2
+pin 3 — and *nothing drives it*. The USB input is labelled `VBUS`, and the power path is:
 
 ```
    VBUS ──►|── D7 (K24 Schottky) ──┐
@@ -244,29 +246,27 @@ and the power path is:
               source=VBAT drain=VOUT             USB present => battery disconnected)
 ```
 
-`VOUT` is the merged rail (≈ VBUS − 0.3 V on USB, or VBAT on battery). **Neither `VBUS` nor
-`VOUT` is the `+5V` net**, and no `+5V` symbol sits on either. On this sheet the `+5V` net is a
-two-pin island with no source — which should be a KiCad ERC error, so either the vendor shipped
-that error and joins it in the PCB layout, or **those pins are dead**.
+No `+5V` symbol sits on `VBUS` or `VOUT`, so on the sheet `+5V` is a two-pin island that should
+raise a KiCad ERC error. **The board says otherwise: the vendor joins it in the PCB layout and
+shipped the sheet with the error.** Treat this schematic as authoritative for *pin assignments*
+(J4/J5 in §3 are correct — IO14 was proven) but **not** for power-net connectivity.
 
-**Do not design around J4.1 until it is measured.** One multimeter probe settles it:
-**J4 pin 1 → GND, USB plugged in.** ~5 V means the schematic is merely incomplete; **0 V means
-the pin is dead** and the ring needs another source.
+> ⚠️ **Worth one more probe:** is J4.1 `VBUS` (5.0 V) or `VOUT` (≈4.7 V, post-Schottky)? The ring
+> lights either way and it changes nothing today, but it decides the battery question below.
+> Measure J4.1 → GND and read the actual number.
 
-**If J4.1 is dead**, in preference order:
-1. **Tap VBUS at the USB-C input** — solder to the `C10`/`C1` pad. The unit is permanently
-   USB-powered (§6), so VBUS is always present. One ugly wire, zero parts, real 5 V.
-2. **Use `VOUT`** (≈4.7 V on USB) if a pad is easier to reach — still lights a white LED fine.
-3. **A 3.3 V → 5 V boost module.** Costs a part and volume; only if soldering is off the table.
+⚠️ **Note for a battery future.** If J4.1 is `VBUS`, it exists **only while USB is connected**,
+so on the PH2.0 battery (J1) the ring goes dark — ring and battery operation would be mutually
+exclusive without a boost. If it's `VOUT`, the ring follows VBAT (3.0–4.2 V) on battery and would
+merely go dim. §6 has the unit permanently USB-powered, so this is a future-proofing note, not a
+problem today.
 
-⚠️ **Note for a battery future:** `+5V`/VBUS exists *only while USB is connected*. If this ever
-runs off the PH2.0 battery (J1), the ring goes dark no matter which of the above you pick —
-VOUT would drop to VBAT (3.0–4.2 V), which a white ring resistored for ≥5 V will barely light.
-The ring and battery operation are mutually exclusive unless you add a boost.
-- **Don't** just tie white→5 V and black→GND. That "works" and is tempting, but it's an always-on
-  ring with no status feedback, which throws Phase 4 away entirely.
-- **Still worth 30 seconds in Phase 0:** poke white straight onto GPIO2 and look. If it somehow
-  lights usably, take the win and drop the MOSFET. Expect it not to.
+**Design consequences now that the rail is real:**
+- **Don't** leave it wired as tested (white→5 V, black→GND). That's an always-on ring with no
+  status feedback, which throws Phase 4 away. It was a *test*, not the design.
+- The MOSFET plan stands as written: white→J4.1, black→drain, gate→J4.6 (IO47), source→J4.2.
+- **Measure the ring's current** while it's lit — it sizes nothing critical (any logic-level FET
+  handles it) but it's free to know now, and it confirms the "~10–20 mA" guess above.
 
 Current draw is unstated (the datasheet's "MICROVOLTAGE" is a mistranslation, not a spec).
 Expect ~10–20 mA at 5 V — trivial for the MOSFET, but **measure it in Phase 0**.
