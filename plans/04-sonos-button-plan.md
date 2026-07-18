@@ -17,16 +17,21 @@ This is the **third unit** in the repo (after `nest` and `sleep-machine`) and th
 > - **The ring needs no MOSFET** — a bare GPIO sinks it low-side (§4). One fewer part, one less
 >   thing in the case.
 > - **Case built** — `hardware/cam-button/`, 26.81 mm, both meshes watertight (§6).
+> - **Phase 5 (WiFi provisioning portal) — built (`core/net/portal.{h,cpp}`), not yet exercised
+>   on hardware.** No creds, or the button held through power-on, raises an open AP
+>   `sonos-button-setup` with a captive join page; `wifiApply()` persists on success / reverts on
+>   failure. HEADLESS-only, so nest/sleep-machine are untouched. **Needs a hardware pass:** clear
+>   creds (or hold the button at boot), join the AP from a phone, confirm the captive sheet pops
+>   and the box rejoins your network. See §"Phase 5 in detail" for the entry-logic traps.
 >
 > **Not done:**
 > - **Phase 4 (status-LED blink codes)** — mostly moot: GPIO2's LED is real but *not broken out*
 >   (§3), so it can only blink inside a closed case. The button's own ring is the real indicator,
 >   and it's already driven. This phase shrank to "maybe a boot/fault blink on the ring."
-> - **Phase 5 (WiFi provisioning portal)** — the remaining real work. Full spec below in §1 and
->   the phase table. Today WiFi is compile-time `secrets.h`; changing networks means a USB
->   reflash of a box taped under a nightstand.
-> - The button's **long-press** is reserved and does nothing yet (earmarked for the portal
->   re-open trigger, below).
+> - **Phase 5 hardware validation** — the code is in; the phone-provisioning round-trip hasn't
+>   been run on the real board yet.
+> - The button's **long-press** is reserved and does nothing yet (a runtime portal re-open is a
+>   natural home for it; today only hold-at-power-on triggers the portal).
 > - **Auto-stop timer** — does not exist anywhere in this repo; would be new work, not a port.
 
 ---
@@ -41,15 +46,17 @@ This is the **third unit** in the repo (after `nest` and `sleep-machine`) and th
 | Camera | **Not used.** Unplug the FPC ribbon and remove the module (see §6). |
 | Config surface | Embedded web UI on `:8080` — ring, room, playlist, volume, device name. ✅ built. |
 
-### WiFi provisioning — **A is built; B (the portal) is the next phase**
+### WiFi provisioning — **C is reached in code: A + B both built (B untested on hardware)**
 
 There is **no screen**, so there is no on-device way to type an SSID. Three options:
 
 - **A — `secrets.h` (compile-time).** ✅ **Done.** Works today; changing networks = rebuild +
   USB reflash. Fine for your own house, painful for a taped-down box.
-- **B — SoftAP captive portal.** ⏳ **Next.** No creds → raise an AP, serve a join page, persist
-  to NVS. Spec below and in Phase 5.
-- **C — Both.** A, with B as fallback + recovery. This is the target end state.
+- **B — SoftAP captive portal.** ✅ **Built** (`core/net/portal.{h,cpp}`), ⏳ **not yet exercised
+  on hardware.** No creds (or button-held-at-boot) → raise the AP, serve a captive join page,
+  persist to NVS via `wifiApply()`. Spec below and in Phase 5.
+- **C — Both.** A, with B as fallback + recovery. **This is where the code now sits** — pending
+  the hardware pass on B.
 
 **The credential half of B already exists and is proven** (it's how the config page'd Wi-Fi row
 would work): `wifiApply(ssid, pass)` in `core/net/wifi.cpp` tries new creds, **persists on
@@ -520,7 +527,7 @@ units don't collide on mDNS/OTA (UDP 3232).
 | **2** | **Button → playlist** — ✅ **done** | Debounced GPIO14 → `knobEvent()` → the play/stop state machine. Verified against real Sonos; reads the speaker's actual transport so app-side changes don't desync it. |
 | **3** | **Config server** — ✅ **done** | `:8080` page + `webconfig` fields for ring, room, playlist (live from Sonos), volume, device name. |
 | **4** | **Status LED** — ⚠️ **mostly moot** | GPIO2's LED is **not broken out** (§3), so blink codes only show inside a sealed case. The button ring is the real indicator and is already driven. Shrinks to an optional boot/fault blink on the ring. |
-| **5** | **WiFi portal** — ⏳ **next; full spec below** | SoftAP + captive portal, so the box is configurable and recoverable **without a USB reflash**. This is the one piece that turns a your-house prototype into something you could hand to someone. |
+| **5** | **WiFi portal** — ✅ **built; ⏳ hardware pass pending** | SoftAP + captive portal (`core/net/portal.{h,cpp}`), HEADLESS-only. Entry: no creds *or* button-held-at-boot; a failed connect retries rather than dropping into AP mode. Serves an open `sonos-button-setup` AP with a server-rendered scan+join page on :80, wildcard DNS on :53, and applies creds via `wifiApply()`. Builds clean on all three envs; the phone-provisioning round-trip hasn't been run on the real board yet. |
 
 Test loop per the repo convention: build → flash → you confirm on device → commit + push.
 Phase 0–1 needed USB; **Phase 2+ can go over `/ota`** (env `sleep-button-ota`, host
@@ -751,8 +758,10 @@ Most of the original list is closed. What's genuinely left splits into **bench c
 print the case** and **one build decision**.
 
 **Firmware — settled.** The button, ring, config page (room/playlist/volume/ring/device-name),
-and the Sonos toggle are built and verified on hardware. The only firmware work left is **Phase 5
-(the WiFi portal)** — spec in §1 and the phase table. Say the word and I'll build it.
+and the Sonos toggle are built and verified on hardware. **Phase 5 (the WiFi portal) is now built
+too** (`core/net/portal.{h,cpp}`) — the last piece of code. What remains is a **hardware pass on
+it**: clear creds (or hold the button at boot), join `sonos-button-setup` from a phone, and
+confirm the box rejoins your network. Everything else is bench checks + a print decision.
 
 **Before printing the case — caliper checks that still move geometry (§6):**
 
@@ -769,7 +778,8 @@ mounting holes are **M3, not M2** (vendor CAD, §6); **must solder to J4** — D
 +5 V is live, ring needs no MOSFET, GPIO2 not broken out (§3/§4); camera comes off **for
 footprint, not height** (§6).
 
-**One build decision:** do you want **Phase 5 (the portal)** now, or is compile-time `secrets.h`
-fine for your own use? It's the difference between "fixable from a phone" and "peel it off the
-nightstand and reflash over USB" when the network changes. No wrong answer for a one-house
-device; the portal is what makes it *giftable*.
+**The portal is built** — so the remaining call is just **when to validate it on hardware**. It's
+the difference between "fixable from a phone" and "peel it off the nightstand and reflash over
+USB" when the network changes; the round-trip (clear creds / hold button → join AP → rejoin)
+needs one real-board run to sign off. No rush for a one-house device that already has `secrets.h`
+creds — the portal is what makes it *giftable* and *recoverable*.
