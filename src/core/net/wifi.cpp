@@ -53,6 +53,15 @@ bool wifiConnect() {
 
 bool wifiIsConnected() { return WiFi.status() == WL_CONNECTED; }
 
+bool wifiHaveCreds() {
+  if (settingsWifiSsid().length()) return true;
+#if defined(WIFI_SSID) && defined(WIFI_PASS)
+  return true;
+#else
+  return false;
+#endif
+}
+
 String wifiSsid() { return WiFi.SSID(); }
 
 int  wifiApplyResult()      { return s_result; }

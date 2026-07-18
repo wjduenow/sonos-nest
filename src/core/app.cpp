@@ -16,6 +16,10 @@
 #include "library.h"
 #include "net/wifi.h"
 #include "net/ota.h"
+#ifdef HEADLESS
+#include "board.h"               // knobDown() — the button, as the deliberate re-provision trigger
+#include "net/portal.h"          // portalRun() — SoftAP captive portal for headless provisioning
+#endif
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
 
@@ -273,7 +277,19 @@ static void artTask(void *) {
 #endif  // !HEADLESS
 
 void appBoot() {
-  wifiConnect();          // NVS creds -> connect; else captive portal (TODO)
+#ifdef HEADLESS
+  // Headless provisioning (sonos-button). Open the SoftAP captive portal ONLY when there are no
+  // creds to try at all, or when the button is held through power-on (deliberate re-provision).
+  // A failed connect with creds present must RETRY, never open the portal — else a brief router
+  // outage would drop the box into AP mode and it would never rejoin (plans/04 Phase 5).
+  if (knobDown() || !wifiHaveCreds()) {
+    portalRun("sonos-button-setup");   // blocks until joined; tears the AP down on success
+  } else if (!wifiConnect()) {
+    for (int i = 0; i < 5 && !wifiIsConnected(); ++i) { delay(2000); wifiConnect(); }
+  }
+#else
+  wifiConnect();          // NVS creds -> connect (screened units provision WiFi on-device)
+#endif
   configTzTime(CLOCK_TZ, "pool.ntp.org", "time.nist.gov");  // clock screensaver time
   otaBegin();             // OTA listener — Phase 4
   sonos::ssdpDiscover();  // SSDP seed -> ZoneGroupTopology -> room list (§3)

@@ -5,6 +5,11 @@
 
 bool wifiConnect();       // connect from stored creds (NVS -> secrets.h)
 bool wifiIsConnected();
+
+// True if there are ANY credentials to try — NVS creds set on-device, or compile-time
+// WIFI_SSID/WIFI_PASS from secrets.h. False only on a genuinely-unprovisioned unit, which is
+// the one case the captive portal opens unprompted (a merely-failed connect must not).
+bool wifiHaveCreds();
 String wifiSsid();        // currently-associated SSID ("" if not connected)
 
 // The DHCP hostname actually registered with the router: the user's name from NVS, else the
