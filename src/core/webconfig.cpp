@@ -143,6 +143,7 @@ bool webConfigApply(const String &field, const String &value, String &err) {
       if (!known) { err = "no such playlist"; return false; }
     }
     settingsSetPlaylist(value);
+    s_gen++;   // signal the unit to re-warm its play-by-name cache for the new pick
     return true;
   }
 

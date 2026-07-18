@@ -2,6 +2,7 @@
 #include "player_state.h"
 #include "sonos/didl.h"
 #include "sonos/soap_client.h"
+#include <Arduino.h>
 
 namespace library {
 
@@ -25,6 +26,26 @@ static int    s_reqPlay = -1;
 // clearResults() as soon as it leaves the browse screen — which happens before netTask runs.
 static String   s_playParent;
 static uint32_t s_playChild = 0;
+
+// --- play-by-name (the button's fast path) ------------------------------------------------
+// A pending "play this saved playlist by name" request, and a one-slot resolved-item cache so
+// repeat presses skip the browse entirely. Guarded by stateLock() like everything else here.
+static String        s_reqName;          // "" = none
+static bool          s_reqNameWarm = false;  // resolve+cache only, don't play
+static String        s_cacheName;        // name the cached item resolves
+static sonos::DidlItem s_cacheItem;      // its playable res + metadata
+static bool          s_cacheValid = false;
+static bool          s_nameFailed = false;   // last requestPlayNamed couldn't resolve
+
+void requestPlayNamed(const String &name, bool warmOnly) {
+  if (stateLock()) { s_reqName = name; s_reqNameWarm = warmOnly; stateUnlock(); }
+}
+
+bool playNamedFailed() {
+  bool f = false;
+  if (stateLock()) { f = s_nameFailed; s_nameFailed = false; stateUnlock(); }
+  return f;
+}
 
 void requestBrowse(const String &objectId, int playMode) {
   if (stateLock()) {
@@ -99,7 +120,79 @@ static void collectRows(const String &ip, const String &object, bool onlyPlaylis
   }
 }
 
+// Play a resolved item, choosing the transport the same way the normal play path does — this is
+// that logic factored out, so the play-by-name fast path can't diverge from it. Collections (a
+// Sonos saved playlist = file:saved-queue; a service playlist/album = cpcontainer) can't be set
+// as the transport URI directly: clear the queue, enqueue, play from the queue, loop. Single
+// streams/tracks/radio ARE set directly. Getting this branch wrong is a silent "press does
+// nothing" — an earlier refactor enqueued everything and broke direct-URI playlists.
+static void playItem(const String &coordIp, const String &coordUuid,
+                     const sonos::DidlItem &item) {
+  if (item.resUri.startsWith("x-rincon-cpcontainer:") || item.resUri.startsWith("file:")) {
+    sonos::removeAllTracksFromQueue(coordIp);
+    sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
+    sonos::setAvTransportUri(coordIp, "x-rincon-queue:" + coordUuid + "#0", "");
+    if (s_loop) sonos::setPlayMode(coordIp, "REPEAT_ALL");
+    sonos::play(coordIp);
+  } else {
+    sonos::setAvTransportUri(coordIp, item.resUri, item.metadata);
+    sonos::play(coordIp);
+  }
+}
+
+// Resolve a saved-playlist name to its playable DIDL item: browse the same set the config-page
+// dropdown shows (SQ: saved playlists + FV:2 playlist-favorites), match by exact title, then
+// re-fetch that one row's full DIDL. Returns false if the name isn't found. Costs the browse —
+// this is the SLOW path the cache exists to avoid.
+static bool resolveNamed(const String &browseIp, const String &name, sonos::DidlItem &out) {
+  std::vector<Row> rows;
+  collectRows(browseIp, "SQ:",  false, rows);
+  collectRows(browseIp, "FV:2", true,  rows);
+  for (const Row &r : rows) {
+    if (r.title != name) continue;
+    String didl; std::vector<sonos::DidlItem> one;
+    if (sonos::browse(browseIp, r.parent, didl, r.childIdx, 1)) sonos::parseDidl(didl, one);
+    if (one.empty()) return false;
+    out = one[0];
+    return true;
+  }
+  return false;
+}
+
 void service(const String &browseIp, const String &coordIp, const String &coordUuid) {
+  // 0) Play-by-name (the button's fast path). Handled before the generic browse/play below so a
+  // press never waits behind anything, and so it can short-circuit on a cache hit.
+  {
+    String name; bool warm = false, have = false;
+    if (stateLock()) {
+      if (s_reqName.length()) { name = s_reqName; warm = s_reqNameWarm; s_reqName = ""; have = true; }
+      stateUnlock();
+    }
+    if (have) {
+      bool hit = false;
+      sonos::DidlItem item;
+      if (stateLock()) {
+        if (s_cacheValid && s_cacheName == name) { item = s_cacheItem; hit = true; }
+        stateUnlock();
+      }
+      if (!hit) {
+        // Cold: resolve (the expensive browse) and cache it for next time.
+        if (resolveNamed(browseIp, name, item)) {
+          if (stateLock()) { s_cacheName = name; s_cacheItem = item; s_cacheValid = true; stateUnlock(); }
+          hit = true;
+        } else {
+          if (stateLock()) { s_nameFailed = true; stateUnlock(); }
+        }
+      }
+      if (hit && !warm) {
+        Serial.printf("[lib    ] play \"%s\" %s res=%.40s\n", name.c_str(),
+                      (s_cacheValid && s_cacheName == name) ? "(cached)" : "(cold)",
+                      item.resUri.c_str());
+        playItem(coordIp, coordUuid, item);  // fast on a warm cache
+      }
+    }
+  }
+
   // 1) Browse request. The Playlists screen (PLAY_PLAYLIST) is a merged list: Sonos saved
   // playlists (SQ:) plus playlist-type favorites (service playlists saved as favorites).
   // Other screens browse their single object. Only {id,title} is cached per row; the heavy
@@ -151,16 +244,7 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
   // Collections (Sonos playlist = file:saved queue; service playlist/album = cpcontainer)
   // can't be set as the transport URI directly — enqueue them, then play from the queue.
   // Single streams/tracks/radio are set as the source directly.
-  if (item.resUri.startsWith("x-rincon-cpcontainer:") || item.resUri.startsWith("file:")) {
-    sonos::removeAllTracksFromQueue(coordIp);
-    sonos::addUriToQueue(coordIp, item.resUri, item.metadata);
-    sonos::setAvTransportUri(coordIp, "x-rincon-queue:" + coordUuid + "#0", "");
-    if (s_loop) sonos::setPlayMode(coordIp, "REPEAT_ALL");   // loop the queue (sleep-machine)
-    sonos::play(coordIp);
-  } else {
-    sonos::setAvTransportUri(coordIp, item.resUri, item.metadata);
-    sonos::play(coordIp);
-  }
+  playItem(coordIp, coordUuid, item);   // shared with the play-by-name fast path above
 }
 
 }  // namespace library
