@@ -13,13 +13,16 @@ Multi-unit reorg rationale: [`plans/02-multi-unit-reorg.html`](plans/02-multi-un
 |------|-------|------------------|----------|-----------|
 | **[sonos-nest](docs/sonos-nest.md)** | ELECROW CrowPanel 2.1" (ST7701 480×480 round, EC11 rotary encoder + knob button, CST816 touch, PCF8574 expander) | Round rotary knob — twist = volume, press = play/pause, touch/gesture to browse | Wall-mounted knob controller | `nest` |
 | **[sonos-sleep-machine](docs/sonos-sleep-machine.md)** | Hosyond/LCDWIKI ES3C28P 2.8" (ILI9341 240×320 SPI, FT6336 touch, microSD, ES8311 codec + speaker, mic, RGB-LED) | Rectangular, touch-first | Nightstand sleep-sound player — plays off its SD card or through Sonos, with a wake track and a web UI for managing the card | `sleep-machine` |
+| **[sonos-button](plans/04-sonos-button-plan.md)** | nulllab/emakefun ESP32-S3-CAM (one physical button, illuminated ring LED, no screen; 8 MB flash) | Headless single button — press = start the configured Sonos sleep playlist (looped) at a set volume, press again = stop; ring shows feedback | One-touch bedside "start my playlist" button; all setup via a browser (SoftAP captive portal for WiFi + a `:8080` config page for room/playlist/volume/ring/name) | `sleep-button` |
 
-**→ Full guides: [sonos-nest](docs/sonos-nest.md) · [sonos-sleep-machine](docs/sonos-sleep-machine.md)**
-— hardware, cases, features, setup and day-to-day management for each unit.
+**→ Full guides: [sonos-nest](docs/sonos-nest.md) · [sonos-sleep-machine](docs/sonos-sleep-machine.md)** ·
+[sonos-button](plans/04-sonos-button-plan.md) — hardware, cases, features, setup and day-to-day
+management for each unit.
 
-Both run the same **ESP32-S3R8** (8 MB OPI PSRAM, 16 MB flash) and share all Sonos control,
-discovery, browsing, settings, networking, and OTA. They differ only in their board drivers
-and screen UX.
+All three share one **core** — Sonos control, discovery, browsing, settings, networking, OTA, and
+portal self-registration — and differ only in their board drivers and UX. The nest and
+sleep-machine run an **ESP32-S3R8** (8 MB OPI PSRAM, 16 MB flash) with a screen; the button is
+**headless** on an ESP32-S3-CAM (8 MB flash), configured entirely from a browser.
 
 ## Portal — one dashboard your devices register with
 
@@ -70,9 +73,11 @@ src/
   boards/               one dir per board — implements board.h
     crowpanel_rotary/   ST7701 display · CST816 touch · EC11 encoder · PCF8574 · pins.h
     es3c28p/            ILI9341 display · FT6336 touch · microSD · ES8311 audio · web server
+    esp32s3cam/         single button · illuminated ring LED · config web server (headless)
   units/                one dir per UX — implements unit.h
     sonos_nest/         round/rotary LVGL screens + ui_scale.h (480×480)
     sleep_machine/      touch screens + ui_scale.h (320×240 landscape)
+    sleep_button/       headless — no screen; button press → play/stop, browser config
 hardware/               3D-printed mounts/cases (user-owned; see hardware/README.md)
 plans/                  design plans + reorg doc
 docs/                   per-unit guides + flashing-wsl.md
