@@ -24,12 +24,17 @@ portal self-registration — and differ only in their board drivers and UX. The 
 sleep-machine run an **ESP32-S3R8** (8 MB OPI PSRAM, 16 MB flash) with a screen; the button is
 **headless** on an ESP32-S3-CAM (8 MB flash), configured entirely from a browser.
 
-## Portal — one dashboard your devices register with
+## Portal (optional) — one dashboard your devices register with
+
+> **This is entirely optional.** The devices talk to Sonos directly and are fully standalone (no
+> server, no cloud) — nothing here is needed to build, flash, or use any unit. The portal is just
+> a convenience dashboard; if you don't want one, skip this whole section. And if you *do* run it
+> but it's offline, devices simply skip registration (a best-effort outbound POST) and work
+> exactly the same.
 
 [`sonos-portal/`](sonos-portal/) is a small **local** web dashboard that every unit
 self-registers with, so you have one place that lists all your devices on the LAN with a
 single click into each one's web config — plus online/offline status and firmware version.
-It's optional; the units work fine without it.
 
 ![Sonos Nest Portal dashboard](sonos-portal/docs/dashboard.png)
 
