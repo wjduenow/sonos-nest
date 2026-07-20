@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sonos Portal</title>
+  <style>
+    :root {
+      --bg: #f4f5f7; --card: #ffffff; --ink: #1a1d21; --muted: #6b7280;
+      --line: #e3e6ea; --accent: #3b6cf6; --ok: #22a06b; --off: #b0b6be;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c; --card: #22262c; --ink: #e8eaed; --muted: #9aa1ab;
+        --line: #333941; --accent: #6c8cff; --ok: #3ecf8e; --off: #555c66;
+        --shadow: 0 1px 3px rgba(0,0,0,.4);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+      padding: 22px 20px 14px; max-width: 900px; margin: 0 auto;
+    }
+    header h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    main { max-width: 900px; margin: 0 auto; padding: 0 20px 40px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
+    }
+    .card.stale { opacity: .62; }
+    .row { display: flex; align-items: center; gap: 9px; }
+    .name { font-weight: 620; font-size: 16px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
+    .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+    .badge {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+      color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+    }
+    .meta { color: var(--muted); font-size: 13px; display: grid; gap: 3px; }
+    .meta code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+    .spacer { flex: 1; }
+    .actions { display: flex; gap: 8px; margin-top: 2px; }
+    a.btn, button.btn {
+      appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink);
+      font: inherit; font-size: 13px; font-weight: 550; text-decoration: none; cursor: pointer;
+      padding: 7px 12px; border-radius: 8px; text-align: center;
+    }
+    a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    a.btn.disabled { opacity: .5; pointer-events: none; }
+    .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+    footer { max-width: 900px; margin: 0 auto; padding: 0 20px 30px; color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sonos Portal</h1>
+    <span class="sub" id="summary">loading…</span>
+  </header>
+  <main>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" hidden>
+      No devices yet. Power on a sonos-nest device on this network — it registers automatically.
+    </div>
+  </main>
+  <footer id="portalInfo"></footer>
+
+  <script>
+    // Relative URLs on purpose: works at "/" (standalone) AND under HA ingress's
+    // /api/hassio_ingress/<token>/ prefix without knowing the base path.
+    const API = (p) => new URL(p, document.baseURI).toString();
+
+    const UNIT_LABEL = { nest: "Nest (round)", sleep: "Sleep Machine", button: "Button", unknown: "Unknown" };
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    function tile(d) {
+      const online = d.online;
+      const seen = d.status === "seen";
+      const cfg = d.configUrl;
+      const cfgBtn = cfg
+        ? `<a class="btn primary" href="${esc(cfg)}" target="_blank" rel="noopener">Open config</a>`
+        : `<a class="btn disabled" title="${seen ? "Not registered yet" : "This device has no web config (on-device only)"}">No web config</a>`;
+      const zones = (d.zones || []).map((z) => z.name).filter(Boolean);
+      return `
+        <div class="card ${online ? "" : "stale"}">
+          <div class="row">
+            <span class="dot ${online ? "on" : ""}" title="${online ? "online" : "offline"}"></span>
+            <span class="name">${esc(d.deviceName || d.mdnsName || "device")}</span>
+            <span class="spacer"></span>
+            <span class="badge">${seen ? "seen" : esc(UNIT_LABEL[d.unit] || d.unit)}</span>
+          </div>
+          <div class="meta">
+            <div><code>${esc(d.ip || "—")}</code>${d.fwVersion ? " · " + esc(d.fwVersion) : ""}</div>
+            <div>${esc(d.mdnsName || "")}</div>
+            ${zones.length ? `<div>rooms: ${esc(zones.join(", "))}</div>` : ""}
+          </div>
+          <div class="actions">${cfgBtn}</div>
+        </div>`;
+    }
+
+    async function refresh() {
+      try {
+        const r = await fetch(API("api/devices"), { cache: "no-store" });
+        const { devices } = await r.json();
+        const grid = document.getElementById("grid");
+        const empty = document.getElementById("empty");
+        empty.hidden = devices.length > 0;
+        grid.innerHTML = devices.map(tile).join("");
+        const on = devices.filter((d) => d.online).length;
+        document.getElementById("summary").textContent =
+          `${devices.length} device${devices.length === 1 ? "" : "s"} · ${on} online`;
+      } catch (e) {
+        document.getElementById("summary").textContent = "portal unreachable";
+      }
+    }
+
+    async function portalInfo() {
+      try {
+        const r = await fetch(API("api/portal"), { cache: "no-store" });
+        const i = await r.json();
+        document.getElementById("portalInfo").textContent =
+          `Advertising ${i.service} at ${i.host}:${i.port}`;
+      } catch (e) { /* non-fatal */ }
+    }
+
+    refresh();
+    portalInfo();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

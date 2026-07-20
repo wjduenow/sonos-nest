@@ -16,6 +16,7 @@
 #include "library.h"
 #include "net/wifi.h"
 #include "net/ota.h"
+#include "net/registrar.h"       // self-register with the sonos-portal dashboard (all units)
 #ifdef HEADLESS
 #include "board.h"               // knobDown() — the button, as the deliberate re-provision trigger
 #include "net/portal.h"          // portalRun() — SoftAP captive portal for headless provisioning
@@ -226,6 +227,7 @@ static void netTask(void *) {
     }
 
     processPending();
+    registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
@@ -313,6 +315,10 @@ void appBoot() {
   otaBegin();             // OTA listener — Phase 4
   sonos::ssdpDiscover();  // SSDP seed -> ZoneGroupTopology -> room list (§3)
   selectZone();
+  // Self-register with the LAN portal. After otaBegin() (ArduinoOTA has started mDNS, so the
+  // portal service is resolvable) AND after selectZone() (so the payload's zone list is populated
+  // on the very first registration). Best-effort; registrarTick() retries if the portal is down.
+  registrarBegin();
 }
 
 void appStartTasks() {

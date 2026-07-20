@@ -76,3 +76,9 @@ void settingsSetWakeTrack(const String &path) { s_prefs.putString("waketrack", p
 String settingsDeviceName() { return s_prefs.getString("devname", ""); }
 
 void settingsSetDeviceName(const String &name) { s_prefs.putString("devname", name); }
+
+String settingsPortal() { return s_prefs.getString("portal", ""); }
+
+void settingsSetPortal(const String &hostPort) {
+  if (settingsPortal() != hostPort) s_prefs.putString("portal", hostPort);
+}

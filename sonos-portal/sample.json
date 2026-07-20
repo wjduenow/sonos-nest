@@ -1,0 +1,13 @@
+{
+  "deviceName": "sonos-sleep",
+  "mdnsName": "sonos-sleep.local",
+  "ip": "192.168.1.42",
+  "unit": "sleep",
+  "board": "es3c28p",
+  "fwVersion": "v0.5-12-gdeadbee",
+  "configUrl": "http://192.168.1.42:8080",
+  "zones": [
+    { "name": "Nursery", "ip": "192.168.1.20" },
+    { "name": "Living Room", "ip": "192.168.1.21" }
+  ]
+}

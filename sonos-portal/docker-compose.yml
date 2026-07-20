@@ -1,0 +1,14 @@
+# Standalone run. Host networking is REQUIRED: mDNS multicast (advertise + browse) does not
+# cross Docker's default bridge network, so devices could neither discover the portal nor be
+# seen by it. With network_mode: host the container shares the host's LAN interface directly.
+services:
+  sonos-portal:
+    build: .
+    container_name: sonos-portal
+    network_mode: host          # required for mDNS; also means PORT is the host port
+    environment:
+      - PORT=8000
+      # - PORTAL_HOST=192.168.1.50   # override the advertised IP if auto-detect picks the wrong NIC
+    volumes:
+      - ./data:/data            # persist the device registry across restarts
+    restart: unless-stopped

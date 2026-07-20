@@ -1,0 +1,5 @@
+# Runtime + build cruft — never committed.
+__pycache__/
+*.pyc
+.venv/
+data/          # the JSON device registry (per-deployment state)

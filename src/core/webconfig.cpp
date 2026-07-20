@@ -11,6 +11,13 @@
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include <ArduinoJson.h>
 #include <Arduino.h>       // ESP.getFreeHeap() etc. for the health readout
+#include <WiFi.h>          // WiFi.localIP() — the registration payload's ip field
+
+// Firmware version — injected per build by tools/git_version.py (git describe). Default lets a
+// bare `pio run` compile; the real string arrives via the -DFW_VERSION build flag.
+#ifndef FW_VERSION
+#define FW_VERSION "dev"
+#endif
 
 // Is this a real track on the card right now? Guards against a stale path from a page that was
 // left open while the file was deleted.
@@ -104,6 +111,41 @@ String webConfigJson() {
   }
 
   // Zones are whatever discovery has found so far — possibly none, if it hasn't run yet.
+  JsonArray zones = doc["zones"].to<JsonArray>();
+  for (const sonos::Zone &z : sonos::zones()) {
+    JsonObject o = zones.add<JsonObject>();
+    o["name"] = z.name;
+    o["ip"]   = z.ip;
+  }
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+String registrationJson() {
+  JsonDocument doc;
+  doc["deviceName"] = wifiHostname();                       // effective router hostname
+  doc["mdnsName"]   = String(otaHostname()) + ".local";     // stable id + "<name>.local" address
+  doc["ip"]         = WiFi.localIP().toString();
+  // Unit/board are compile-time — the same macro that selects the board+unit in the env. The
+  // button is HEADLESS with neither UNIT_ macro; keep this branch order in sync with that.
+#if defined(UNIT_NEST)
+  doc["unit"] = "nest";    doc["board"] = "crowpanel_rotary";
+#elif defined(UNIT_SLEEP)
+  doc["unit"] = "sleep";   doc["board"] = "es3c28p";
+#elif defined(HEADLESS)
+  doc["unit"] = "button";  doc["board"] = "esp32s3cam";
+#else
+  doc["unit"] = "unknown"; doc["board"] = "unknown";
+#endif
+  doc["fwVersion"]  = FW_VERSION;
+  // localManagerUrl() is the ":8080" web-config base, or nullptr on boards without one (the nest).
+  // Emit it as JSON null so the portal renders the tile with "Open config" disabled.
+  const char *cfg = localManagerUrl();
+  if (cfg) doc["configUrl"] = cfg;
+  else     doc["configUrl"] = (const char *)nullptr;
+
   JsonArray zones = doc["zones"].to<JsonArray>();
   for (const sonos::Zone &z : sonos::zones()) {
     JsonObject o = zones.add<JsonObject>();

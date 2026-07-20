@@ -32,6 +32,11 @@ void    settingsSetWakeTrack(const String &path);
 String  settingsDeviceName();            // network/DHCP hostname ("" = firmware default)
 void    settingsSetDeviceName(const String &name);
 
+// Last-known sonos-portal address as "ip:port" ("" if never resolved). Cached from the mDNS
+// query so a later boot can self-register before a fresh query resolves — see net/registrar.cpp.
+String  settingsPortal();
+void    settingsSetPortal(const String &hostPort);
+
 // --- sonos-button ---
 String  settingsPlaylist();              // Sonos saved-playlist name to start, default "Sleep"
 void    settingsSetPlaylist(const String &name);

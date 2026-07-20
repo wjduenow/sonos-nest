@@ -1,0 +1,151 @@
+"""Device registry — the portal's single source of truth for what's on the LAN.
+
+Two kinds of entry, merged in :meth:`devices`:
+
+* **registered** — a device POSTed ``/api/register``; we have its full identity (config URL,
+  unit, firmware) and a rolling ``last_seen`` from heartbeats. Online when a heartbeat arrived
+  within :data:`STALE_SECONDS`.
+* **seen** — the mDNS browser saw a ``_arduino._tcp`` advertisement (every unit runs ArduinoOTA)
+  but the device never registered. We know only its name + IP; shown as "awaiting registration".
+
+State is a plain JSON file under ``DATA_DIR`` (``/data`` in a container, mapped to a volume /
+the HA add-on's persistent store) so the list survives a portal restart without the devices
+having to re-register. All access is guarded by a lock — the mDNS browser thread and the FastAPI
+request handlers both touch it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+# A device is "online" if a heartbeat/registration landed within this window. Firmware beats
+# every ~45 s, so ~2.5 misses marks it offline — long enough to ride out one dropped beat.
+STALE_SECONDS = 120
+
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+
+
+def _now() -> float:
+    return time.time()
+
+
+class Registry:
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self._dir = data_dir or DATA_DIR
+        self._path = self._dir / "devices.json"
+        self._lock = threading.Lock()
+        # id -> record. id is the device's stable mdnsName (e.g. "sonos-nest.local").
+        self._registered: dict[str, dict[str, Any]] = {}
+        # id -> {"name","ip","last_seen"} for mDNS-seen-but-unregistered devices.
+        self._seen: dict[str, dict[str, Any]] = {}
+        self._load()
+
+    # --- persistence ---------------------------------------------------------
+    def _load(self) -> None:
+        try:
+            raw = json.loads(self._path.read_text())
+            self._registered = raw.get("registered", {})
+        except (FileNotFoundError, ValueError, OSError):
+            self._registered = {}
+
+    def _save_locked(self) -> None:
+        # Only registered devices persist; mDNS-seen entries are re-discovered on each run.
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"registered": self._registered}, indent=2))
+            tmp.replace(self._path)  # atomic — never leave a half-written file
+        except OSError as exc:
+            print(f"[registry] save failed: {exc}", flush=True)
+
+    # --- mutations -----------------------------------------------------------
+    def register(self, payload: dict[str, Any]) -> str:
+        """Upsert a full registration. Returns the id used as the key."""
+        dev_id = _device_id(payload)
+        with self._lock:
+            rec = self._registered.get(dev_id, {})
+            rec.update(
+                {
+                    "id": dev_id,
+                    "deviceName": payload.get("deviceName") or dev_id,
+                    "mdnsName": payload.get("mdnsName") or dev_id,
+                    "ip": payload.get("ip", rec.get("ip", "")),
+                    "unit": payload.get("unit", rec.get("unit", "unknown")),
+                    "board": payload.get("board", rec.get("board", "unknown")),
+                    "fwVersion": payload.get("fwVersion", rec.get("fwVersion", "")),
+                    "configUrl": payload.get("configUrl"),  # may be null (nest has no web UI)
+                    "zones": payload.get("zones", rec.get("zones", [])),
+                    "last_seen": _now(),
+                    "registered_at": rec.get("registered_at", _now()),
+                }
+            )
+            self._registered[dev_id] = rec
+            self._seen.pop(dev_id, None)  # promotion: a registered device isn't merely "seen"
+            self._save_locked()
+        return dev_id
+
+    def heartbeat(self, payload: dict[str, Any]) -> bool:
+        """Refresh liveness. Returns False if the device isn't registered (caller → 404, which
+        makes the firmware re-register from scratch)."""
+        dev_id = _device_id(payload)
+        with self._lock:
+            rec = self._registered.get(dev_id)
+            if rec is None:
+                return False
+            rec["last_seen"] = _now()
+            if payload.get("ip"):
+                rec["ip"] = payload["ip"]
+            if payload.get("fwVersion"):
+                rec["fwVersion"] = payload["fwVersion"]
+            if payload.get("uptimeSec") is not None:
+                rec["uptimeSec"] = payload["uptimeSec"]
+            self._save_locked()
+        return True
+
+    def note_seen(self, dev_id: str, name: str, ip: str) -> None:
+        """Record an mDNS-discovered device (fallback path). No-op if already registered."""
+        with self._lock:
+            if dev_id in self._registered:
+                return
+            self._seen[dev_id] = {"name": name, "ip": ip, "last_seen": _now()}
+
+    # --- reads ---------------------------------------------------------------
+    def devices(self) -> list[dict[str, Any]]:
+        now = _now()
+        out: list[dict[str, Any]] = []
+        with self._lock:
+            for rec in self._registered.values():
+                d = dict(rec)
+                d["online"] = (now - rec.get("last_seen", 0)) <= STALE_SECONDS
+                d["status"] = "registered"
+                out.append(d)
+            for dev_id, s in self._seen.items():
+                if dev_id in self._registered:
+                    continue
+                out.append(
+                    {
+                        "id": dev_id,
+                        "deviceName": s["name"],
+                        "mdnsName": dev_id,
+                        "ip": s["ip"],
+                        "unit": "unknown",
+                        "board": "unknown",
+                        "fwVersion": "",
+                        "configUrl": None,
+                        "zones": [],
+                        "online": (now - s.get("last_seen", 0)) <= STALE_SECONDS,
+                        "status": "seen",  # discovered via mDNS, awaiting registration
+                    }
+                )
+        out.sort(key=lambda d: (d["status"] != "registered", d.get("deviceName", "").lower()))
+        return out
+
+
+def _device_id(payload: dict[str, Any]) -> str:
+    """Stable key: the mDNS name (unique per device), falling back to IP then a literal."""
+    return payload.get("mdnsName") or payload.get("ip") or "unknown-device"

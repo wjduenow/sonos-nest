@@ -20,6 +20,13 @@
 // wakeTrack is "" when nothing is explicitly picked (the unit then auto-detects a "wake" file).
 String webConfigJson();
 
+// The device-identity payload for portal self-registration (registrar.cpp / plans/05). A focused
+// sibling of webConfigJson() — no health/tracks/playlists, just who-and-where:
+//   {"deviceName","mdnsName","ip","unit","board","fwVersion","configUrl","zones":[{name,ip}...]}
+// unit/board are compile-time (the env's UNIT_*/HEADLESS macro); configUrl is localManagerUrl()
+// (null on the nest, which has no web server — the portal shows it present, config disabled).
+String registrationJson();
+
 // Apply one field: "sleepTrack" | "wakeTrack" | "room" | "ring" | "playlist" | "volume".
 //   sleepTrack/wakeTrack — value is a track path; "" clears the pick (back to the default).
 //   room                 — value is a zone name; persists it and asks netTask to switch.
