@@ -31,6 +31,8 @@ self-registers with, so you have one place that lists all your devices on the LA
 single click into each one's web config — plus online/offline status and firmware version.
 It's optional; the units work fine without it.
 
+![Sonos Nest Portal dashboard](sonos-portal/docs/dashboard.png)
+
 - **Discovery is automatic.** The portal advertises `_sonosportal._tcp` over mDNS; each device
   finds it and registers at boot, then heartbeats. Self-registration is built into the shared
   **core** (`core/net/registrar.*`), so *every* unit ships it — including the round nest, which

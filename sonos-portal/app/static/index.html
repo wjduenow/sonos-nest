@@ -40,7 +40,9 @@
     }
     .card.stale { opacity: .62; }
     .row { display: flex; align-items: center; gap: 9px; }
-    .name { font-weight: 620; font-size: 16px; }
+    /* Name on its own row, form-factor pill on the row below — so long names never crowd it. */
+    .head { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+    .name { font-weight: 620; font-size: 16px; overflow-wrap: anywhere; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
     .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
     /* Form-factor pill — tinted per unit type so it pops. --c drives text/border/background. */
@@ -163,10 +165,11 @@
 
       return `
         <div class="card ${online ? "" : "stale"}">
-          <div class="row">
-            <span class="dot ${online ? "on" : ""}" title="${online ? "online" : "offline"}"></span>
-            <span class="name">${esc(d.deviceName || d.mdnsName || "device")}</span>
-            <span class="spacer"></span>
+          <div class="head">
+            <div class="row">
+              <span class="dot ${online ? "on" : ""}" title="${online ? "online" : "offline"}"></span>
+              <span class="name">${esc(d.deviceName || d.mdnsName || "device")}</span>
+            </div>
             <span class="badge ${badgeClass}">${seen ? "seen" : esc(UNIT_LABEL[d.unit] || d.unit)}</span>
           </div>
           <div class="meta">

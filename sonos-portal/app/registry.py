@@ -144,7 +144,13 @@ class Registry:
         with self._lock:
             return [(rec["id"], rec.get("configUrl")) for rec in self._registered.values()]
 
-    def _ota_ready(self, ip: str, now: float) -> bool:
+    def _ota_ready(self, ip: str, now: float, online: bool, registered: bool) -> bool:
+        # A registered device that's online is heartbeating our firmware, which starts ArduinoOTA
+        # at boot — so it's flashable. That's the reliable signal (mDNS _arduino._tcp events don't
+        # re-fire dependably after a portal restart). Independent mDNS observation also counts,
+        # which is what makes 'seen' (unregistered) devices OTA-ready.
+        if registered and online:
+            return True
         t = self._ota_ips.get(ip)
         return t is not None and (now - t) <= OTA_ADVERTISE_WINDOW
 
@@ -166,7 +172,7 @@ class Registry:
                 d["status"] = "registered"
                 d["lastSeenSec"] = int(now - rec.get("last_seen", 0))
                 d["zoneCount"] = len(rec.get("zones", []))
-                d["otaReady"] = self._ota_ready(ip, now)
+                d["otaReady"] = self._ota_ready(ip, now, d["online"], True)
                 d["configReachable"] = self._config_reachable(rec["id"], now)
                 out.append(d)
             for dev_id, s in self._seen.items():
@@ -186,7 +192,8 @@ class Registry:
                         "zoneCount": 0,
                         "online": (now - s.get("last_seen", 0)) <= STALE_SECONDS,
                         "lastSeenSec": int(now - s.get("last_seen", 0)),
-                        "otaReady": self._ota_ready(s["ip"], now),  # seen == arduino-advertised
+                        # seen == arduino-advertised, so its IP is already in _ota_ips
+                        "otaReady": self._ota_ready(s["ip"], now, True, False),
                         "configReachable": None,
                         "status": "seen",  # discovered via mDNS, awaiting registration
                     }

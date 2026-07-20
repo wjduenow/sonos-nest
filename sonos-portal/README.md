@@ -9,6 +9,12 @@ One FastAPI app, packaged two ways from **one image**: standalone Docker, or a H
 add-on (a container + a thin manifest). ~95% shared code; the only HA-specific accommodation is
 ingress path handling.
 
+![Sonos Nest Portal dashboard](docs/dashboard.png)
+
+Each tile shows the device's IP, firmware version, board, uptime and last heartbeat, an
+**OTA-ready** chip, a live **config-page reachability** check, and a one-click link into its web
+config. The Sonos zone list is shown once at the top (it's the same for every device).
+
 ## How discovery works
 
 - The portal advertises `_sonosportal._tcp` over mDNS.
