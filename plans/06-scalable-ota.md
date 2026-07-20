@@ -1,10 +1,21 @@
 # Scalable OTA — CI builds + device-pull updates
 
-> Status: **Phase 1 + Phase 2 built** (2026-07-20), not yet hardware-verified. Phase 1 = CI
-> (`.github/workflows/firmware.yml` + `tools/build_manifest.py`); Phase 2 = the device pull path
-> (`src/core/net/updater.*` + settings/webconfig/registrar/app wiring), builds clean on all three
-> app envs. **Remaining:** a `v*` tag CI run + flashing a CI binary (Phase 1 hardware pass); the
-> per-page HTML toggle in each board's config UI and Phase 3 (portal as LAN update source). The
+> Status: **Phase 1 built; Phase 2 built + hardware-verified** (2026-07-20). Phase 1 = CI
+> (`.github/workflows/firmware.yml` + `tools/build_manifest.py`). Phase 2 = the device pull path
+> (`src/core/net/updater.*` + settings/webconfig/registrar/app wiring). **Hardware pass done** on
+> the nest: served a version-bumped build off a laptop HTTP server, set `updateUrl` + approved via
+> `/api/config`, and watched fetch → detect → download → flash → reboot converge to
+> `available=null`. Two bugs the test caught and fixed (both are the espota flash hazards this repo
+> documents, which the pull path initially didn't honor):
+> 1. **UI/art cache-contention** during flash writes → reset mid-download. Fix: `updaterActive()`
+>    ORed into the uiTask/artTask backoff gates (commit 38588cb).
+> 2. **Task-WDT reset** — `HTTPUpdate`'s loop never yields, starving IDLE0 → ~5 s WDT fires mid-
+>    download (reset reason 6). Fix: `onProgress` `delay(1)` per chunk; also surfaced
+>    `esp_reset_reason()` in the health JSON, which is what made it diagnosable without serial
+>    (commit 5cc1eb7).
+>
+> **Remaining:** a `v*` tag CI run + flashing a real CI binary (Phase 1 hardware pass); the
+> per-page HTML toggle in each board's config UI; Phase 3 (portal as LAN update source). The
 > existing espota push path (`*-ota` envs, the `/ota` skill) stays as the dev-iteration flow — this
 > is a fleet path on top.
 
