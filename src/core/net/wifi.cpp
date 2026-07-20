@@ -56,9 +56,24 @@ bool wifiConnect() {
   WiFi.mode(WIFI_STA);     // NULL->STA transition: applies the stored hostname to the netif
   if (!beginFromStored()) return false;
   const bool ok = waitConnected(10000);
-  if (ok)
+  if (ok) {
     Serial.printf("[wifi   ] connected as \"%s\"  ip=%s\n", wifiHostname().c_str(),
                   WiFi.localIP().toString().c_str());
+#if defined(WIFI_SSID) && defined(WIFI_PASS)
+    // If we connected using the compiled-in secrets.h creds (NVS was empty — beginFromStored()
+    // prefers NVS, so an empty NVS ssid means the secrets.h branch is what worked), persist them
+    // to NVS now. Otherwise a later OTA to a *credential-less* build — every CI Release binary,
+    // which ships no secrets.h so it can't leak WiFi — would find no creds and drop the device
+    // into the captive portal (exactly what stranded the nest on its first portal update). Writing
+    // them once here means any device that has ever connected survives such an update.
+    // Dev note: this makes NVS win over a later-changed secrets.h; hold the knob/button at boot to
+    // re-provision (that overwrites NVS) if you need to point a device at a different network.
+    if (settingsWifiSsid().length() == 0) {
+      settingsSetWifi(WIFI_SSID, WIFI_PASS);
+      Serial.println("[wifi   ] persisted compiled-in creds to NVS (survives credential-less OTA)");
+    }
+#endif
+  }
   return ok;
 }
 
