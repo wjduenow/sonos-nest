@@ -51,6 +51,10 @@ static void ringPulse() {
   s_pulseEnd = millis() + PULSE_MS;
 }
 
+// Headless — no screen, so nothing to show while the captive portal is up. The SoftAP itself is
+// the whole setup UI (join it from a phone). appBoot() still calls this uniformly.
+void uiProvisioning(const char * /*apSsid*/) {}
+
 void uiInit() {
   // Apply the persisted ring level. Until this runs the ring is dark (boardInit leaves it off),
   // so a reboot never flashes the ring at full brightness in a dark room.

@@ -17,10 +17,8 @@
 #include "net/wifi.h"
 #include "net/ota.h"
 #include "net/registrar.h"       // self-register with the sonos-portal dashboard (all units)
-#ifdef HEADLESS
-#include "board.h"               // knobDown() — the button, as the deliberate re-provision trigger
-#include "net/portal.h"          // portalRun() — SoftAP captive portal for headless provisioning
-#endif
+#include "board.h"               // knobDown() — the deliberate re-provision trigger (held at boot)
+#include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
 
@@ -298,19 +296,19 @@ static void artTask(void *) {
 #endif  // !HEADLESS
 
 void appBoot() {
-#ifdef HEADLESS
-  // Headless provisioning (sonos-button). Open the SoftAP captive portal ONLY when there are no
-  // creds to try at all, or when the button is held through power-on (deliberate re-provision).
-  // A failed connect with creds present must RETRY, never open the portal — else a brief router
-  // outage would drop the box into AP mode and it would never rejoin (plans/04 Phase 5).
-  if (knobDown() || !wifiHaveCreds()) {
-    portalRun("sonos-button-setup");   // blocks until joined; tears the AP down on success
+  // First-boot / re-provision WiFi — uniform across every unit. Open the SoftAP captive portal
+  // when there are NO creds to try at all, or the knob/button is held through power-on (a
+  // deliberate re-provision; knobDown() is false on boards without one). A merely-failed connect
+  // must RETRY, never open the portal — else a brief router outage would drop a configured device
+  // into AP mode and it would never rejoin (plans/04 Phase 5). Screened units draw a "join <AP>"
+  // message via uiProvisioning() (the UI task isn't running yet); headless units no-op it.
+  if (!wifiHaveCreds() || knobDown()) {
+    String ap = wifiHostname() + "-setup";   // e.g. sonos-nest-setup / sonos-sleep-setup
+    uiProvisioning(ap.c_str());
+    portalRun(ap.c_str());                   // blocks until joined; tears the AP down on success
   } else if (!wifiConnect()) {
     for (int i = 0; i < 5 && !wifiIsConnected(); ++i) { delay(2000); wifiConnect(); }
   }
-#else
-  wifiConnect();          // NVS creds -> connect (screened units provision WiFi on-device)
-#endif
   configTzTime(CLOCK_TZ, "pool.ntp.org", "time.nist.gov");  // clock screensaver time
   otaBegin();             // OTA listener — Phase 4
   sonos::ssdpDiscover();  // SSDP seed -> ZoneGroupTopology -> room list (§3)

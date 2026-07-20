@@ -66,6 +66,7 @@ static bool     s_localMode     = false;  // ST_PLAYING via the onboard speaker,
 static String   s_sonosTitle;             // known title for a local-stream-on-Sonos ("" = use live)
 
 static lv_obj_t *s_home, *s_starting, *s_playing, *s_settings, *s_rooms, *s_wifi, *s_wifiPw, *s_tracks, *s_nameEdit, *s_manager;
+static lv_obj_t *s_provOverlay = nullptr;   // "join <AP>" WiFi-setup overlay (top layer); see uiProvisioning
 static lv_obj_t *s_homeBtn, *s_homeBtnLabel, *s_homeIcon, *s_dot[3];
 static lv_obj_t *s_ghostL, *s_ghostR, *s_ghostLIcon, *s_ghostRIcon;
 static lv_obj_t *s_trace[4];   // border comet: [0] = glowing head, [1..3] = fading tail
@@ -1209,7 +1210,35 @@ void uiInit() {
   gotoHome();
 }
 
+// WiFi captive-portal setup message. Drawn on the always-on-top layer so it covers the carousel
+// without disturbing it. appBoot() calls this before the portal blocks; the UI task isn't running
+// yet, so we flush ourselves. Removed on the first uiTick() (WiFi is provisioned by then).
+void uiProvisioning(const char *apSsid) {
+  if (!s_provOverlay) {
+    s_provOverlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_provOverlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_provOverlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_provOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_provOverlay, 0, 0);
+    lv_obj_remove_flag(s_provOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = lv_label_create(s_provOverlay);
+    lv_obj_set_style_text_color(t, lv_color_white(), 0);
+    lv_obj_set_style_text_font(t, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(t, LV_PCT(85));
+    lv_label_set_text_fmt(t, "Wi-Fi Setup\n\nJoin this Wi-Fi network\non your phone:\n\n%s", apSsid);
+    lv_obj_center(t);
+  }
+  backlightSet(100);
+  lv_refr_now(NULL);   // UI task isn't running yet — flush this frame synchronously
+}
+
 void uiTick() {
+  // WiFi provisioning is done by the time the UI task runs — drop the setup overlay if it's up.
+  if (s_provOverlay) { lv_obj_delete(s_provOverlay); s_provOverlay = nullptr; }
+
   lv_timer_handler();
 
   handleWakeWord();   // no-op on boards without a mic (wakeWordPoll() returns -1)

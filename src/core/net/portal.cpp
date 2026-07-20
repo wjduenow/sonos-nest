@@ -1,9 +1,6 @@
-// See portal.h. SoftAP captive portal for headless WiFi provisioning.
-//
-// Only compiled into HEADLESS builds (the sonos-button): a unit with a screen provisions WiFi
-// through its own on-screen UX, and gating here keeps WebServer/DNSServer out of those binaries.
-#ifdef HEADLESS
-
+// See portal.h. SoftAP captive-portal WiFi provisioning — used by EVERY unit on a no-creds /
+// re-provision boot (appBoot). Screened units overlay a "join <AP>" message via uiProvisioning();
+// the headless button has no screen and the AP itself is the whole setup UI.
 #include "portal.h"
 #include "wifi.h"
 #include <WiFi.h>
@@ -163,5 +160,3 @@ void portalRun(const char *apSsid) {
   WiFi.mode(WIFI_STA);
   Serial.println("[portal ] provisioned — continuing boot");
 }
-
-#endif  // HEADLESS

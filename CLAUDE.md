@@ -264,8 +264,12 @@ Consequences worth knowing:
   is best SNR). Full sequence + a live level meter: `mic_test.cpp` / the `sleep-machine-mic` env.
 
 ## secrets.h (gitignored — `include/secrets.h`)
-`WIFI_SSID`, `WIFI_PASS` required. Optional: `SONOS_DEFAULT_ROOM`, `CLOCK_TZ` (POSIX),
-`OTA_PASSWORD`, `SONOS_ZONE_IP` (dev bypass). Template: `include/secrets.example.h`.
+All optional. `WIFI_SSID`/`WIFI_PASS` bake WiFi in at flash time; leave them unset and **every**
+unit provisions on first boot via the SoftAP captive portal (`core/net/portal.cpp`, AP
+`<hostname>-setup`) — screened units overlay a "join <AP>" message (`uiProvisioning()`), the
+button is headless. Hold the knob/button through power-on to re-provision. Also optional:
+`SONOS_DEFAULT_ROOM`, `CLOCK_TZ` (POSIX), `OTA_PASSWORD`, `SONOS_ZONE_IP` (dev bypass). Template:
+`include/secrets.example.h`.
 
 ## Conventions
 - Commit/push only when asked. Branch `main`, remote `origin` (github.com/wjduenow/sonos-nest).

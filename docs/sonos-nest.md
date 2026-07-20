@@ -133,8 +133,10 @@ lyrics, on-device WiFi setup, MQTT/Home Assistant. WiFi credentials come from `s
 cp include/secrets.example.h include/secrets.h
 ```
 
-Fill in `WIFI_SSID` and `WIFI_PASS` — these are **required**; the nest has no on-device WiFi
-setup screen. Optional but recommended:
+Fill in `WIFI_SSID` and `WIFI_PASS` if you want WiFi baked in at flash time. They're **optional**
+now — on a first boot with no stored credentials the nest raises a **SoftAP captive portal**
+(`sonos-nest-setup`); join it from your phone and pick your network. Hold the knob button through
+power-on any time to re-open it. Optional but recommended:
 
 | Define | Why |
 |---|---|

@@ -138,8 +138,10 @@ You can also add files later over WiFi, without removing the card — see *Manag
 cp include/secrets.example.h include/secrets.h
 ```
 
-Set `WIFI_SSID` / `WIFI_PASS` to get on the network the first time (after that, the on-device
-Wi-Fi screen can change networks). Set `OTA_PASSWORD` too — it's required for wireless flashing,
+`WIFI_SSID` / `WIFI_PASS` are optional — set them to bake WiFi in at flash time, or leave them
+blank and provision on first boot: with no stored credentials the unit raises a **SoftAP captive
+portal** (`sonos-sleep-setup`), joinable from your phone. You can also change networks any time
+from the on-device **Wi-Fi** screen. Set `OTA_PASSWORD` too — it's required for wireless flashing,
 and it has to be flashed *once over USB* before OTA will work.
 
 ### 3. Build and flash over USB
