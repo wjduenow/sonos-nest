@@ -85,6 +85,7 @@
     }
     a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     a.btn.disabled { opacity: .5; pointer-events: none; }
+    .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
     .empty { color: var(--muted); text-align: center; padding: 60px 0; }
     footer { max-width: 900px; margin: 0 auto; padding: 0 20px 30px; color: var(--muted); font-size: 12px; }
   </style>
@@ -162,6 +163,11 @@
       const kvHtml = kv.map(([k, v]) => `<span class="k">${k}</span><span class="v"><code>${v}</code></span>`).join("");
       const summaryLine = [bits.join(" · "), zc].filter(Boolean).join(" · ");
       const badgeClass = seen ? "seen" : (d.unit || "unknown");
+      // Offer removal only on offline tiles — a live device shouldn't be removed by accident
+      // (and it would just re-register anyway).
+      const removeBtn = !online
+        ? `<button class="btn danger" data-id="${esc(d.id)}" onclick="removeDevice(this)">Remove</button>`
+        : "";
 
       return `
         <div class="card ${online ? "" : "stale"}">
@@ -177,8 +183,17 @@
             ${summaryLine ? `<div>${summaryLine}</div>` : ""}
           </div>
           ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
-          <div class="actions">${cfgBtn}</div>
+          <div class="actions">${cfgBtn}${removeBtn}</div>
         </div>`;
+    }
+
+    async function removeDevice(el) {
+      const id = el.dataset.id;
+      if (!confirm(`Remove "${id}" from the portal?\n\nIt reappears automatically if the device registers again.`)) return;
+      try {
+        await fetch(API("api/devices/" + encodeURIComponent(id)), { method: "DELETE" });
+      } catch (e) { /* non-fatal */ }
+      refresh();
     }
 
     async function refresh() {

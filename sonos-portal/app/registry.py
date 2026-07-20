@@ -27,6 +27,11 @@ from typing import Any
 # every ~45 s, so ~2.5 misses marks it offline — long enough to ride out one dropped beat.
 STALE_SECONDS = 120
 
+# Auto-expiry: a device that hasn't been heard from in this long is dropped from the registry
+# entirely (a permanently-removed unit shouldn't linger forever). Conservative on purpose — a
+# unit unplugged for a long trip survives; you can still remove one immediately by hand.
+EXPIRE_SECONDS = 7 * 24 * 3600
+
 # A device is "OTA-ready" if it's currently advertising _arduino._tcp (ArduinoOTA) over mDNS.
 # mDNS records refresh on their own TTL, so keep a generous window to ride over refresh gaps.
 OTA_ADVERTISE_WINDOW = 300
@@ -127,6 +132,28 @@ class Registry:
                 return
             self._seen[dev_id] = {"name": name, "ip": ip, "last_seen": _now()}
 
+    def remove(self, dev_id: str) -> bool:
+        """Forget a device now (the manual 'Remove' button). It reappears if it registers again."""
+        with self._lock:
+            existed = dev_id in self._registered or dev_id in self._seen
+            self._registered.pop(dev_id, None)
+            self._seen.pop(dev_id, None)
+            self._probe.pop(dev_id, None)
+            if existed:
+                self._save_locked()
+            return existed
+
+    def _prune_locked(self, now: float) -> None:
+        """Drop anything not heard from in EXPIRE_SECONDS. Caller holds the lock."""
+        dead = [i for i, r in self._registered.items() if (now - r.get("last_seen", 0)) > EXPIRE_SECONDS]
+        for i in dead:
+            self._registered.pop(i, None)
+            self._probe.pop(i, None)
+        for i in [i for i, s in self._seen.items() if (now - s.get("last_seen", 0)) > EXPIRE_SECONDS]:
+            self._seen.pop(i, None)
+        if dead:
+            self._save_locked()
+
     def note_ota(self, ip: str) -> None:
         """Record that this IP is advertising ArduinoOTA (_arduino._tcp) right now."""
         if not ip:
@@ -165,6 +192,7 @@ class Registry:
         now = _now()
         out: list[dict[str, Any]] = []
         with self._lock:
+            self._prune_locked(now)   # drop devices offline past EXPIRE_SECONDS
             for rec in self._registered.values():
                 d = dict(rec)
                 ip = rec.get("ip", "")

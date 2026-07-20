@@ -27,15 +27,26 @@ config. The Sonos zone list is shown once at the top (it's the same for every de
 Because mDNS multicast doesn't cross Docker's default bridge, the container **must use host
 networking** (compose `network_mode: host` / add-on `host_network: true`).
 
+### Device lifecycle
+
+- A device that stops heartbeating flips to **offline** after ~2 min (greyed tile, OTA-ready
+  chip drops, config probe shows ✗).
+- **Removed a device for good?** Its offline tile shows a **Remove** button →
+  `DELETE /api/devices/{id}` forgets it. It reappears automatically if it ever registers again,
+  so removing is safe.
+- **Auto-expiry:** a device offline for **7 days** is dropped from the registry automatically —
+  long enough that a unit unplugged for a trip survives.
+
 ## HTTP surface
 
-| Method | Path             | Purpose                                              |
-|--------|------------------|------------------------------------------------------|
-| POST   | `/api/register`  | device announces its identity (upsert by mDNS name)  |
-| POST   | `/api/heartbeat` | liveness; `404` if unknown → firmware re-registers   |
-| GET    | `/api/devices`   | dashboard data                                       |
-| GET    | `/api/portal`    | the portal's own mDNS info (diagnostics)             |
-| GET    | `/`              | dashboard SPA                                        |
+| Method | Path                 | Purpose                                              |
+|--------|----------------------|------------------------------------------------------|
+| POST   | `/api/register`      | device announces its identity (upsert by mDNS name)  |
+| POST   | `/api/heartbeat`     | liveness; `404` if unknown → firmware re-registers   |
+| GET    | `/api/devices`       | dashboard data                                       |
+| DELETE | `/api/devices/{id}`  | forget a device (the tile's Remove button)           |
+| GET    | `/api/portal`        | the portal's own mDNS info (diagnostics)             |
+| GET    | `/`                  | dashboard SPA                                         |
 
 ## Run standalone
 

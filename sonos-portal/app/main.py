@@ -125,6 +125,13 @@ async def devices():
     return {"devices": devs, "zones": zones}
 
 
+@app.delete("/api/devices/{dev_id}")
+async def remove_device(dev_id: str):
+    # Manual "forget" — the tile's Remove button. The device reappears if it registers again
+    # (or is re-discovered over mDNS), so this is safe to use on anything that's really gone.
+    return {"ok": True, "removed": registry.remove(dev_id)}
+
+
 @app.get("/api/portal")
 async def portal_info():
     return mdns.info()
