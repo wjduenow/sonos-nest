@@ -43,13 +43,29 @@
     .name { font-weight: 620; font-size: 16px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
     .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+    /* Form-factor pill — tinted per unit type so it pops. --c drives text/border/background. */
     .badge {
-      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
-      color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+      --c: var(--muted);
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 45%, var(--line));
+      background: color-mix(in srgb, var(--c) 14%, transparent);
+      border-radius: 999px; padding: 2px 9px;
     }
-    .meta { color: var(--muted); font-size: 13px; display: grid; gap: 3px; }
+    .badge.nest   { --c: #6366f1; }   /* indigo */
+    .badge.sleep  { --c: #0ea5a3; }   /* teal   */
+    .badge.button { --c: #d97706; }   /* amber  */
+    @media (prefers-color-scheme: dark) {
+      .badge.nest   { --c: #a5b4fc; }
+      .badge.sleep  { --c: #5eead4; }
+      .badge.button { --c: #fbbf24; }
+    }
+    .meta { color: var(--muted); font-size: 13px; display: grid; gap: 5px; }
     .meta code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
     .meta .warn { color: var(--warn); }
+    /* Labeled key/value rows for IP / Firmware / Board / mDNS. */
+    .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; align-items: baseline; }
+    .kv .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+    .kv .v { color: var(--ink); overflow-wrap: anywhere; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip {
       font-size: 11px; font-weight: 600; border-radius: 999px; padding: 2px 8px;
@@ -135,8 +151,15 @@
         zc = `<span class="${short ? "warn" : ""}" title="${short ? "sees fewer zones than other devices — possible discovery issue" : "Sonos zones this device sees"}">${d.zoneCount} zone${d.zoneCount === 1 ? "" : "s"}</span>`;
       }
 
-      const line2 = [esc(d.ip || "—"), d.fwVersion ? esc(d.fwVersion) : null, (!seen && d.board && d.board !== "unknown") ? esc(d.board) : null]
-        .filter(Boolean);
+      // Labeled fields — only rows that actually have a value (seen devices lack fw/board).
+      const kv = [];
+      if (d.ip) kv.push(["IP", esc(d.ip)]);
+      if (d.fwVersion) kv.push(["Firmware", esc(d.fwVersion)]);
+      if (!seen && d.board && d.board !== "unknown") kv.push(["Board", esc(d.board)]);
+      if (d.mdnsName) kv.push(["mDNS", esc(d.mdnsName)]);
+      const kvHtml = kv.map(([k, v]) => `<span class="k">${k}</span><span class="v"><code>${v}</code></span>`).join("");
+      const summaryLine = [bits.join(" · "), zc].filter(Boolean).join(" · ");
+      const badgeClass = seen ? "seen" : (d.unit || "unknown");
 
       return `
         <div class="card ${online ? "" : "stale"}">
@@ -144,12 +167,11 @@
             <span class="dot ${online ? "on" : ""}" title="${online ? "online" : "offline"}"></span>
             <span class="name">${esc(d.deviceName || d.mdnsName || "device")}</span>
             <span class="spacer"></span>
-            <span class="badge">${seen ? "seen" : esc(UNIT_LABEL[d.unit] || d.unit)}</span>
+            <span class="badge ${badgeClass}">${seen ? "seen" : esc(UNIT_LABEL[d.unit] || d.unit)}</span>
           </div>
           <div class="meta">
-            <div><code>${line2.join("</code> · <code>")}</code></div>
-            <div>${esc(d.mdnsName || "")}</div>
-            <div>${[bits.join(" · "), zc].filter(Boolean).join(" · ")}</div>
+            <div class="kv">${kvHtml}</div>
+            ${summaryLine ? `<div>${summaryLine}</div>` : ""}
           </div>
           ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
           <div class="actions">${cfgBtn}</div>
