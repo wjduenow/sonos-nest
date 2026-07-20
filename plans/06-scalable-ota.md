@@ -1,8 +1,12 @@
 # Scalable OTA — CI builds + device-pull updates
 
-> Status: **planned** (2026-07-20). Nothing built yet. Supersedes nothing — the existing espota
-> push path (`nest-ota` / `sleep-machine-ota` / `sleep-button-ota` envs, the `/ota` skill) stays
-> as the dev-iteration flow. This adds a fleet path on top.
+> Status: **Phase 1 + Phase 2 built** (2026-07-20), not yet hardware-verified. Phase 1 = CI
+> (`.github/workflows/firmware.yml` + `tools/build_manifest.py`); Phase 2 = the device pull path
+> (`src/core/net/updater.*` + settings/webconfig/registrar/app wiring), builds clean on all three
+> app envs. **Remaining:** a `v*` tag CI run + flashing a CI binary (Phase 1 hardware pass); the
+> per-page HTML toggle in each board's config UI and Phase 3 (portal as LAN update source). The
+> existing espota push path (`*-ota` envs, the `/ota` skill) stays as the dev-iteration flow — this
+> is a fleet path on top.
 
 ## Context
 
