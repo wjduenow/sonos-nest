@@ -21,6 +21,37 @@ Both run the same **ESP32-S3R8** (8 MB OPI PSRAM, 16 MB flash) and share all Son
 discovery, browsing, settings, networking, and OTA. They differ only in their board drivers
 and screen UX.
 
+## Portal — one dashboard your devices register with
+
+[`sonos-portal/`](sonos-portal/) is a small **local** web dashboard that every unit
+self-registers with, so you have one place that lists all your devices on the LAN with a
+single click into each one's web config — plus online/offline status and firmware version.
+It's optional; the units work fine without it.
+
+- **Discovery is automatic.** The portal advertises `_sonosportal._tcp` over mDNS; each device
+  finds it and registers at boot, then heartbeats. Self-registration is built into the shared
+  **core** (`core/net/registrar.*`), so *every* unit ships it — including the round nest, which
+  has no web server of its own but still appears on the dashboard (registration is an outbound
+  POST). No per-device configuration.
+- **Requires the same LAN.** mDNS is multicast, so the portal must run on the same L2 network as
+  your devices — host networking on a real Linux box, not a NAT'd VM or Docker Desktop.
+
+### Two ways to run it
+
+1. **Home Assistant add-on.** Add this repo as a custom add-on repository
+   (`https://github.com/wjduenow/sonos-nest`) and install **Sonos Nest Portal** — the Supervisor
+   builds it on-device, and it shows up in the HA sidebar. Needs a Supervisor-based HA (HAOS or
+   Supervised). Full walkthrough: [`sonos-portal/INSTALL-HOMEASSISTANT.md`](sonos-portal/INSTALL-HOMEASSISTANT.md).
+
+2. **Standalone Docker** on any always-on Linux host on your LAN (Raspberry Pi, NAS, etc.):
+   ```bash
+   git clone https://github.com/wjduenow/sonos-nest
+   cd sonos-nest/sonos-portal
+   docker compose up -d          # host networking; dashboard at http://<host-ip>:8000
+   ```
+   The compose uses `restart: unless-stopped` + a `/health` check (and an `autoheal` label), so
+   it self-recovers. Details: [`sonos-portal/README.md`](sonos-portal/README.md).
+
 ## Architecture — shared core + pluggable board/unit
 
 ```
