@@ -199,9 +199,10 @@ static void processPending() {
 static void uiTask(void *) {
   for (;;) {
     uiTick();                 // lv_timer_handler() + input handling
-    // During an OTA, back off hard so the lower-priority loop task (which runs the OTA
-    // write) isn't starved on this core — otherwise the transfer times out mid-upload.
-    vTaskDelay(pdMS_TO_TICKS(otaActive() ? 120 : 5));
+    // During an OTA, back off hard: for espota so the loop task's write isn't starved, and for a
+    // pull-flash (updaterActive) so this core stops executing flash code while the writer erases
+    // the OTA slot — a cache-disable fault there resets the device mid-download.
+    vTaskDelay(pdMS_TO_TICKS((otaActive() || updaterActive()) ? 120 : 5));
   }
 }
 
@@ -277,7 +278,7 @@ static void artTask(void *) {
   String last;
   int    fails = 0;
   for (;;) {
-    if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
+    if (otaActive() || updaterActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
 
     String cur;
     if (stateLock()) { cur = g_player.artUri; stateUnlock(); }

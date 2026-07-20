@@ -21,7 +21,9 @@ static String   s_available;             // available version, "" if none / up-t
 static bool     s_armed    = false;      // explicit approve → apply on the next check
 static bool     s_force    = false;      // bypass the rate limit once (url changed / approve)
 static uint32_t s_lastCheck = 0;
+static volatile bool s_active = false;   // a pull-flash is running (UI/art must quiesce)
 
+bool   updaterActive()           { return s_active; }
 bool   updaterAvailable()        { return s_available.length() > 0; }
 String updaterAvailableVersion() { return s_available; }
 void   updaterApprove()          { s_armed = true; s_force = true; }
@@ -106,6 +108,15 @@ static bool checkManifest(String &version, String &url, bool &approved) {
 static void applyNow(const String &url) {
   s_armed = false;
   Serial.printf("[updater] applying %s\n           from %s\n", s_available.c_str(), url.c_str());
+
+  // Quiesce the rest of the system BEFORE any flash write. Flash writes disable the instruction
+  // cache, so any other-core task executing from (uncached) flash during a write faults and the
+  // device resets mid-download — exactly the espota hazard uiTask/artTask already dodge via
+  // otaActive(). Set the flag, then give those tasks a beat to reach their backoff delay (their
+  // longest loop period is ~200 ms) before HTTPUpdate starts erasing.
+  s_active = true;
+  vTaskDelay(pdMS_TO_TICKS(400));
+
   httpUpdate.rebootOnUpdate(true);
 
   t_httpUpdate_return r;
@@ -118,12 +129,13 @@ static void applyNow(const String &url) {
     r = httpUpdate.update(cl, url, FW_VERSION);
   }
 
+  // Only reached on failure — HTTP_UPDATE_OK reboots. Clear the flag so the UI/art tasks resume.
+  s_active = false;
   if (r == HTTP_UPDATE_FAILED)
     Serial.printf("[updater] FAILED (%d) %s\n", httpUpdate.getLastError(),
                   httpUpdate.getLastErrorString().c_str());
   else if (r == HTTP_UPDATE_NO_UPDATES)
     Serial.println("[updater] server reports no update");
-  // HTTP_UPDATE_OK is unreachable — the device has already rebooted.
 }
 
 // Core check. applyAuto=true only at boot, so an otaAuto device applies pre-playback rather than

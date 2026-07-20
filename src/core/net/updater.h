@@ -26,6 +26,10 @@ void   updaterBegin();             // one check at boot (call after registrarBeg
                                    // auto-apply + reboot if otaAuto and an update is published.
 void   updaterTick();              // periodic check from netTask; self-rate-limited (~6 h). Applies
                                    // only on an explicit approve / portal-approved manifest.
+bool   updaterActive();            // true while a pull-flash is in progress — the UI/art tasks must
+                                   // back off exactly as they do for otaActive(): flash writes
+                                   // disable the cache, and other-core code running from flash
+                                   // during a write FAULTS (the device resets mid-download).
 bool   updaterAvailable();         // a newer firmware is published for this unit (for UI/payloads).
 String updaterAvailableVersion();  // that version string, or "" when up-to-date / disabled.
 void   updaterApprove();           // arm an immediate apply (config "updateNow" / dashboard Approve).
