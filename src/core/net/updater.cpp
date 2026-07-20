@@ -15,6 +15,13 @@
 #define FW_VERSION "dev"
 #endif
 
+// Compiled-in default update source when a device has no portal and no explicit pick: the repo's
+// latest GitHub Release. The `latest/download/<asset>` form is stable and auto-follows every new
+// release, so no version is baked in. Overridable per fork via -DUPDATE_MANIFEST_URL.
+#ifndef UPDATE_MANIFEST_URL
+#define UPDATE_MANIFEST_URL "https://github.com/wjduenow/sonos-nest/releases/latest/download/manifest.json"
+#endif
+
 static const uint32_t kCheckMs = 6UL * 60 * 60 * 1000;  // 6 h between periodic checks
 
 static String   s_available;             // available version, "" if none / up-to-date / disabled
@@ -72,11 +79,24 @@ static bool httpGetString(const String &url, String &body) {
   return doGet(http, cl, url, body);
 }
 
-// Fetch the manifest and pull out this unit's target. Appends our identity as query params so a
-// portal can answer per-device (a static GitHub manifest just ignores them). Returns true and
-// fills version/url/approved when a target for this unit is present.
-static bool checkManifest(String &version, String &url, bool &approved) {
-  String base = settingsUpdateUrl();
+// Resolve the effective manifest source (see updater.h). kindOut, if given, gets a static label.
+static String resolveUrl(const char **kindOut) {
+  String stored = settingsUpdateUrl();
+  if (stored == "off")     { if (kindOut) *kindOut = "off";    return String(); }        // disabled
+  if (stored.length())     { if (kindOut) *kindOut = "custom"; return stored; }           // explicit
+  String portal = settingsPortal();                                                       // "ip:port" or ""
+  if (portal.length())     { if (kindOut) *kindOut = "portal"; return "http://" + portal + "/api/firmware"; }
+  if (kindOut) *kindOut = "github";                                                        // auto → GitHub default
+  return String(UPDATE_MANIFEST_URL);
+}
+
+String      updaterEffectiveUrl() { return resolveUrl(nullptr); }
+const char *updaterSourceKind()   { const char *k = "off"; resolveUrl(&k); return k; }
+
+// Fetch the manifest at `base` and pull out this unit's target. Appends our identity as query
+// params so a portal can answer per-device (a static GitHub manifest just ignores them, and drops
+// them across its redirect — harmless). Returns true and fills version/url/approved when present.
+static bool checkManifest(const String &base, String &version, String &url, bool &approved) {
   if (base.length() == 0) return false;
 
   String q = base;
@@ -153,11 +173,12 @@ static void applyNow(const String &url) {
 // mid-run (see the policy note in updater.h).
 static void run(bool applyAuto) {
   if (WiFi.status() != WL_CONNECTED) return;
-  if (settingsUpdateUrl().length() == 0) { s_available = ""; return; }  // opt-out: feature dormant
+  String base = updaterEffectiveUrl();
+  if (base.length() == 0) { s_available = ""; return; }  // "off": checking disabled
 
   String version, url;
   bool approved = false;
-  if (!checkManifest(version, url, approved)) return;   // portal down / bad manifest: keep prior state
+  if (!checkManifest(base, version, url, approved)) return;   // source down / bad manifest: keep prior state
 
   if (version == FW_VERSION) { s_available = ""; return; }  // up to date
   s_available = version;

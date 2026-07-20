@@ -104,9 +104,11 @@ String webConfigJson() {
   // (null when up-to-date/disabled). Drives the config page's "Updates" section and its Approve
   // button (shown only when available && !auto).
   JsonObject ota = doc["ota"].to<JsonObject>();
-  ota["auto"]      = settingsOtaAuto();
-  ota["updateUrl"] = settingsUpdateUrl();
-  ota["running"]   = FW_VERSION;
+  ota["auto"]       = settingsOtaAuto();
+  ota["updateUrl"]  = settingsUpdateUrl();          // raw stored: "" (auto) | "off" | a URL
+  ota["source"]     = updaterEffectiveUrl();        // the resolved URL ("" when off)
+  ota["sourceKind"] = updaterSourceKind();          // portal | github | custom | off
+  ota["running"]    = FW_VERSION;
   if (updaterAvailable()) ota["available"] = updaterAvailableVersion();
   else                    ota["available"] = (const char *)nullptr;
 
@@ -260,10 +262,11 @@ bool webConfigApply(const String &field, const String &value, String &err) {
   }
 
   if (field == "updateUrl") {
-    // The firmware manifest source. "" disables the pull path (espota-only). Otherwise it must be
-    // an http(s) URL — the portal (LAN http) or a GitHub-hosted manifest (https).
-    if (value.length() && !value.startsWith("http://") && !value.startsWith("https://")) {
-      err = "updateUrl must be http:// or https://";
+    // The firmware manifest source, tri-state: "" = automatic (LAN portal if known, else the
+    // GitHub-latest default), "off" = disable checking, or an explicit http(s) URL override.
+    if (value.length() && value != "off" &&
+        !value.startsWith("http://") && !value.startsWith("https://")) {
+      err = "must be a http(s) URL, empty (automatic), or 'off'";
       return false;
     }
     settingsSetUpdateUrl(value);

@@ -82,9 +82,16 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     <input type=checkbox id=otaauto>
   </div>
   <div class=row style="margin-top:12px">
-    <label for=updurl>Update source</label>
-    <span><input id=updurl size=13 autocapitalize=off autocorrect=off spellcheck=false placeholder="(off)">
-      <button id=usave>Save</button></span>
+    <label for=updmode>Update source</label>
+    <select id=updmode>
+      <option value=auto>Automatic</option>
+      <option value=off>Off</option>
+      <option value=custom>Custom URL…</option>
+    </select>
+  </div>
+  <div class=row id=updurlrow hidden style="margin-top:8px">
+    <input id=updurl autocapitalize=off autocorrect=off spellcheck=false placeholder="https://…/manifest.json" style="flex:1">
+    <button id=usave>Save</button>
   </div>
   <div class=hint id=otahint></div>
   <div class=row id=updrow hidden style="margin-top:12px">
@@ -129,15 +136,22 @@ function draw(){
   if(document.activeElement !== $('#dname')) $('#dname').value = st.deviceName||'';
   $('#mdns').textContent = st.mdnsName||'';
 
-  // Updates (core/net/updater). ota = {auto, updateUrl, running, available}.
+  // Updates (core/net/updater). ota = {auto, updateUrl, source, sourceKind, running, available}.
   const o=st.ota||{};
   $('#otaauto').checked = !!o.auto;
-  if(document.activeElement !== $('#updurl')) $('#updurl').value = o.updateUrl||'';
+  const raw=o.updateUrl||'';
+  const mode = raw==='off' ? 'off' : (raw==='' ? 'auto' : 'custom');
+  $('#updmode').value = mode;
+  $('#updurlrow').hidden = (mode!=='custom');
+  if(document.activeElement !== $('#updurl')) $('#updurl').value = (mode==='custom'?raw:'');
   const avail=o.available;
   $('#updrow').hidden = !(avail && !o.auto);
   if(avail) $('#updinfo').textContent = 'Ready: '+avail;
-  $('#otahint').innerHTML = 'Running <code>'+(o.running||'?')+'</code>. ' + (
-    !o.updateUrl ? 'Set a manifest URL — your Sonos portal or a firmware release — to check for updates.'
+  const src = o.sourceKind==='portal' ? 'Portal'
+    : o.sourceKind==='github' ? 'GitHub (latest release)'
+    : o.sourceKind==='custom' ? (o.source||'custom') : 'Off';
+  $('#otahint').innerHTML = 'Running <code>'+(o.running||'?')+'</code> · source: <b>'+src+'</b>. ' + (
+    o.sourceKind==='off' ? 'Update checks are disabled.'
     : avail ? (o.auto ? 'Will auto-update to '+avail+' on next reboot.' : 'Version '+avail+' is ready to install.')
     : 'Up to date.');
 }
@@ -155,6 +169,11 @@ $('#bright').onchange=e=>post('brightness',e.target.value);             // save 
 $('#dsave').onclick=()=>post('deviceName',$('#dname').value);
 $('#dname').onkeydown=e=>{ if(e.key==='Enter') post('deviceName',$('#dname').value) };
 $('#otaauto').onchange=e=>post('otaAuto',e.target.checked?'1':'0');
+$('#updmode').onchange=e=>{
+  const m=e.target.value;
+  if(m==='custom'){ $('#updurlrow').hidden=false; $('#updurl').focus(); }
+  else post('updateUrl', m==='off'?'off':'').then(otaRecheck);   // auto -> "" ; off -> "off"
+};
 $('#usave').onclick=()=>post('updateUrl',$('#updurl').value).then(otaRecheck);
 $('#updnow').onclick=async()=>{
   if(!confirm('Download and install '+((st.ota||{}).available||'the update')+'?\n\nThe device reboots to apply.')) return;

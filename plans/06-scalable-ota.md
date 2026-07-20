@@ -360,14 +360,18 @@ GitHub-for-CI + LAN-for-everything-else, zero cloud between the portal and any d
   `otaAuto=false` device; `approve-all` rolls the fleet. mDNS-advertise is untestable in WSL (no
   multicast) — the API path is testable with direct HTTP as in plans/05.
 
-## Open questions
+## Resolved decisions
 
-- **Default `updateUrl` to the portal when known?** When `settingsPortal()` is set but `updateUrl`
-  is empty, should the updater implicitly use `http://<portal>/api/firmware`, or stay strictly
-  opt-in (empty = off, full stop)? Implicit-default is the least-config fleet experience; strict
-  opt-in is the more defensible reading of the no-server promise. Leaning **strict opt-in** (a
-  device never reaches for an update source it wasn't told to), with the portal's dashboard offering
-  a one-click "point my devices here" that sets `updateUrl` explicitly.
+- **`updateUrl` default (was an open question) — RESOLVED: automatic, portal-preferred.** The stored
+  `updateUrl` is now tri-state (`updater.cpp resolveUrl()`): an explicit URL wins; the literal `"off"`
+  disables checking; and the default **empty = automatic** — the LAN **portal** if the device knows
+  one (`settingsPortal()`, populated by registration, so *no per-device config*), else the compiled-in
+  **GitHub latest-release** manifest (`UPDATE_MANIFEST_URL`, `releases/latest/download/manifest.json`).
+  This reverses the earlier "strict opt-in" lean: the feature was invisible with `""`=off (nothing ever
+  showed an update), and portal-preferred keeps a portal LAN-only while still giving portal-less devices
+  automatic update *checks* (install still gated by approval / `otaAuto`). Config pages show the effective
+  source + a Automatic/Off/Custom selector; `webConfigJson().ota` carries `source` + `sourceKind`. This
+  also closes the bootstrapping gap — a registered device auto-uses the portal with no manual `updateUrl`.
 - **Auto-apply timing default:** on-next-reboot vs. next-idle-window. Reboot is the least surprising
   (never interrupts a playing device); idle-window is faster to land. Leaning **reboot** for
   `otaAuto`, immediate only on explicit Approve.

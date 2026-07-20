@@ -35,3 +35,10 @@ String updaterAvailableVersion();  // that version string, or "" when up-to-date
 void   updaterApprove();           // arm an immediate apply (config "updateNow" / dashboard Approve).
 void   updaterForceCheck();        // re-check on the next tick, bypassing the rate limit (e.g. the
                                    // updateUrl just changed and the UI wants a fresh availability).
+
+// The effective manifest URL after resolving the stored setting (settingsUpdateUrl) against the
+// known portal. Precedence: an explicit stored URL wins; the literal "off" disables checking
+// (returns ""); an empty setting means AUTO — the LAN portal if one is known (settingsPortal()),
+// else the compiled-in GitHub-latest-release default. "" return == checking disabled.
+String      updaterEffectiveUrl();
+const char *updaterSourceKind();   // "portal" | "github" | "custom" | "off" — for the config UI.

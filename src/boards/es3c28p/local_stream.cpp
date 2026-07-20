@@ -308,8 +308,9 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
 <div class=card>
   <h2>Software update</h2>
   <div class=cfg><label for=otaauto>Auto-update</label><input type=checkbox id=otaauto></div>
-  <div class=cfg><label for=updurl>Update source</label>
-    <span><input type=text id=updurl placeholder="(off)"> <button id=usave>Save</button></span></div>
+  <div class=cfg><label for=updmode>Update source</label>
+    <select id=updmode><option value=auto>Automatic</option><option value=off>Off</option><option value=custom>Custom URL…</option></select></div>
+  <div class=cfg id=updurlrow hidden><input type=text id=updurl placeholder="https://…/manifest.json" style="flex:1"> <button id=usave>Save</button></div>
   <div class=info id=otaline></div>
   <div class=cfg id=updrow hidden><span id=updinfo></span><button id=updnow>Update now</button></div>
 </div>
@@ -350,15 +351,20 @@ async function loadCfg(){
   fill($('#wakeTrack'),tracks,c.wakeTrack,'No tracks on the card','Auto (a file named "wake")');
   fill($('#room'),c.zones.map(z=>({label:z.name,value:z.name})),c.room,'No Sonos rooms found');
 
-  // Software update (core/net/updater). ota = {auto, updateUrl, running, available}.
+  // Software update (core/net/updater). ota = {auto, updateUrl, source, sourceKind, running, available}.
   const o=c.ota||{};
   $('#otaauto').checked=!!o.auto;
-  if(document.activeElement!==$('#updurl')) $('#updurl').value=o.updateUrl||'';
+  const raw=o.updateUrl||'';
+  const mode=raw==='off'?'off':(raw===''?'auto':'custom');
+  $('#updmode').value=mode;
+  $('#updurlrow').hidden=(mode!=='custom');
+  if(document.activeElement!==$('#updurl')) $('#updurl').value=(mode==='custom'?raw:'');
   const avail=o.available;
   $('#updrow').hidden=!(avail&&!o.auto);
   if(avail)$('#updinfo').textContent='Ready: '+avail;
-  $('#otaline').innerHTML='Running <code>'+(o.running||'?')+'</code>. '+(
-    !o.updateUrl?'Set a manifest URL — your Sonos portal or a firmware release — to check for updates.'
+  const src=o.sourceKind==='portal'?'Portal':o.sourceKind==='github'?'GitHub (latest release)':o.sourceKind==='custom'?(o.source||'custom'):'Off';
+  $('#otaline').innerHTML='Running <code>'+(o.running||'?')+'</code> · source: <b>'+src+'</b>. '+(
+    o.sourceKind==='off'?'Update checks are disabled.'
     :avail?(o.auto?'Will auto-update to '+avail+' on next reboot.':'Version '+avail+' is ready to install.')
     :'Up to date.');
 }
@@ -373,6 +379,7 @@ for(const f of ['sleepTrack','wakeTrack','room'])
 // After changing the source, availability lands a moment later (device re-checks on netTask).
 function otaRecheck(){let n=0;const t=setInterval(()=>{loadCfg();if(++n>=3)clearInterval(t);},2000);}
 $('#otaauto').onchange=e=>saveCfg('otaAuto',e.target.checked?'1':'0');
+$('#updmode').onchange=e=>{const m=e.target.value; if(m==='custom'){$('#updurlrow').hidden=false;$('#updurl').focus();} else {saveCfg('updateUrl',m==='off'?'off':'');otaRecheck();}};
 $('#usave').onclick=()=>{saveCfg('updateUrl',$('#updurl').value);otaRecheck();};
 $('#updnow').onclick=async()=>{
   if(!confirm('Download and install the update? The device reboots to apply.\n\nStop playback first if a sound is playing.'))return;
