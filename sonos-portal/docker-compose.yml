@@ -1,14 +1,29 @@
-# Standalone run. Host networking is REQUIRED: mDNS multicast (advertise + browse) does not
-# cross Docker's default bridge network, so devices could neither discover the portal nor be
-# seen by it. With network_mode: host the container shares the host's LAN interface directly.
+# Standalone / Raspberry Pi deploy. Host networking is REQUIRED: mDNS multicast (advertise +
+# browse) does not cross Docker's default bridge, so devices could neither discover the portal
+# nor be seen by it. With network_mode: host the container shares the host's LAN interface.
+#
+# `image:` + `build:` together: `docker compose up -d --build` builds and tags sonos-portal:latest;
+# a plain `docker compose up -d` reuses the already-built image (matching the sonos-sleep flow).
 services:
   sonos-portal:
-    build: .
     container_name: sonos-portal
+    image: sonos-portal:latest
+    build: .
+    restart: unless-stopped
     network_mode: host          # required for mDNS; also means PORT is the host port
     environment:
       - PORT=8000
-      # - PORTAL_HOST=192.168.1.50   # override the advertised IP if auto-detect picks the wrong NIC
+      # - PORTAL_HOST=192.168.68.99  # override the advertised IP if auto-detect picks the wrong NIC
     volumes:
       - ./data:/data            # persist the device registry across restarts
-    restart: unless-stopped
+    # autoheal (a shared willfarrell/autoheal container already running on the Pi) watches for this
+    # label and restarts the container if it goes unhealthy — native Docker only marks the status.
+    labels:
+      - autoheal=true
+    # Liveness probe: hits /health (no auth, no I/O) using the Python already in the image.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

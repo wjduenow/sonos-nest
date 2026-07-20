@@ -91,6 +91,13 @@ async def portal_info():
     return mdns.info()
 
 
+@app.get("/health")
+async def health():
+    # Liveness probe for the container healthcheck — no auth, no I/O. autoheal (on the Pi)
+    # restarts the container if this stops responding.
+    return {"ok": True}
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
