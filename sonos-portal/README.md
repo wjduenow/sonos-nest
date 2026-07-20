@@ -52,23 +52,11 @@ DATA_DIR=./data PORT=8000 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## Home Assistant add-on
 
-The add-on (`homeassistant-addon/`) is the **same base image** plus a `run.sh` that maps the
-add-on options to env vars. Two ways to make the base image available to the Supervisor:
+This folder **is** the add-on (`config.yaml` + `Dockerfile` + `build.yaml` + `run.sh`); the HA
+Supervisor builds it on-device — no registry or prebuilt image needed. The quickest path is to add
+this repo as a custom add-on repository and install **Sonos Portal** from the store.
 
-1. **Publish it** (recommended): build and push the base image, then the add-on's
-   `build.yaml` / `Dockerfile` `BUILD_FROM` pull it.
-   ```bash
-   docker build -t ghcr.io/wjduenow/sonos-portal:latest .
-   docker push ghcr.io/wjduenow/sonos-portal:latest
-   ```
-2. **Build + tag locally on the HA host** so `BUILD_FROM` resolves without a registry:
-   ```bash
-   docker build -t ghcr.io/wjduenow/sonos-portal:latest /path/to/sonos-portal
-   ```
-
-Then copy `homeassistant-addon/` into the HA host's `/addons/sonos_portal/`, reload the add-on
-store, install, and enable **Ingress**. `host_network: true` is already set so devices keep
-registering. The dashboard appears in the HA sidebar.
+**→ Full step-by-step: [INSTALL-HOMEASSISTANT.md](INSTALL-HOMEASSISTANT.md)**
 
 ## Verify
 

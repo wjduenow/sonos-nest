@@ -1,7 +1,6 @@
-# Home Assistant add-on manifest. The add-on IS the base sonos-portal image plus this thin glue:
-# ingress (so it shows in the HA sidebar), host networking (mDNS), and one option translated to an
-# env var by run.sh. Add-ons get a persistent /data automatically — that's where the registry
-# JSON lives, so no map: entry is needed for it.
+# Home Assistant add-on manifest. Its presence makes sonos-portal/ an installable add-on: add
+# this repo as a custom add-on repository, or drop the folder into the HA /addons share. The
+# Supervisor builds it on-device from the Dockerfile (no prebuilt image / registry needed).
 name: Sonos Portal
 version: "0.1.0"
 slug: sonos_portal
@@ -13,8 +12,8 @@ arch:
   - armv7
 init: false
 
-# mDNS multicast needs the host's LAN interface directly — the same reason the standalone compose
-# uses network_mode: host. Without this, devices can't discover the portal nor be browsed.
+# mDNS multicast needs the host's LAN interface directly — same reason the standalone compose uses
+# network_mode: host. Without it, devices can't discover the portal nor be browsed.
 host_network: true
 
 # Serve the dashboard inside the HA UI. ingress_port must match the port the app listens on;

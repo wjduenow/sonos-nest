@@ -16,6 +16,7 @@ HTTP surface:
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,12 +34,19 @@ registry = Registry()
 mdns = MDNSService(registry, port=PORT, host_override=HOST_OVERRIDE)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def _start_mdns() -> None:
     try:
         mdns.start()
     except Exception as exc:  # mDNS failing (e.g. no host networking) must not kill the API
         print(f"[main] mDNS start failed: {exc} — registration still works via direct POST", flush=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start mDNS off the event loop: binding zeroconf can block for several seconds (and hangs on
+    # a bridge network without multicast), and HA's Supervisor has a startup watchdog. The API must
+    # be serving immediately; discovery comes up whenever it can.
+    threading.Thread(target=_start_mdns, name="mdns-start", daemon=True).start()
     yield
     mdns.stop()
 

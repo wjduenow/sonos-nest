@@ -1,7 +1,0 @@
-# Supervisor build config: which base image to use per arch. sonos-portal's base is built on
-# python:3.12-slim (multi-arch), so the same reference serves every arch. Repoint these (and the
-# Dockerfile's BUILD_FROM default) if you publish the base under a different name/tag.
-build_from:
-  aarch64: ghcr.io/wjduenow/sonos-portal:latest
-  amd64: ghcr.io/wjduenow/sonos-portal:latest
-  armv7: ghcr.io/wjduenow/sonos-portal:latest

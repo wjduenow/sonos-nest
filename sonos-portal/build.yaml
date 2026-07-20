@@ -1,0 +1,7 @@
+# Supervisor build config: the base image the add-on is built FROM, per arch. python:3.12-slim is
+# multi-arch, so the same reference serves every listed arch — the add-on installs deps + copies
+# the app on top (see Dockerfile). No prebuilt sonos-portal image is required.
+build_from:
+  aarch64: python:3.12-slim-bookworm
+  amd64: python:3.12-slim-bookworm
+  armv7: python:3.12-slim-bookworm

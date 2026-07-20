@@ -37,23 +37,27 @@ A single FastAPI app packaged two ways from one image.
 
 ### Layout (as built)
 ```
-sonos-portal/
+repository.yaml        # marks the repo as a HA add-on repository (add by URL → sonos-portal appears)
+sonos-portal/          # the folder IS the add-on (config.yaml) AND the standalone project
   app/
     main.py            # FastAPI: registration API + dashboard, ingress-aware (X-Ingress-Path)
     registry.py        # device store (JSON under DATA_DIR, default /data) + mDNS-seen fallback
     mdns.py            # zeroconf: advertise _sonosportal._tcp + browse _arduino._tcp fallback
     static/index.html  # dashboard SPA (device tiles -> open config URL in new tab)
-  Dockerfile           # standalone image (python:3.12-slim)
+  Dockerfile           # self-contained: builds standalone AND as the HA add-on (ARG BUILD_FROM)
+  run.sh               # entrypoint: HA /data/options.json -> env if present, else plain uvicorn
+  config.yaml          # HA add-on manifest: ingress, host_network, portal_host option
+  build.yaml           # base image per arch (python:3.12-slim)
   docker-compose.yml   # standalone run (network_mode: host for mDNS)
   requirements.txt
   sample.json          # a register payload, for the curl test
-  homeassistant-addon/ # thin HA wrapper over the SAME image
-    config.yaml        #   manifest: ingress, host_network, portal_host option
-    build.yaml         #   BUILD_FROM per arch (the base image)
-    Dockerfile         #   FROM the base image + run.sh
-    run.sh             #   reads /data/options.json -> env, starts uvicorn
   README.md
+  INSTALL-HOMEASSISTANT.md
 ```
+Decision refinement (build): the add-on is **self-contained** (Supervisor builds it on-device from
+this folder), not a thin `FROM prebuilt-image` wrapper — a home HAOS box has no registry/CLI to
+supply a base image. One Dockerfile + run.sh serves both standalone and HA. mDNS starts on a
+background thread so a slow/blocked bind never stalls startup (HA has a startup watchdog).
 
 ### HTTP surface
 - `POST /api/register` — device announces itself (identity from `registrationJson()`): `deviceName`,
