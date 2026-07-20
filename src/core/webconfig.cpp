@@ -140,9 +140,10 @@ String registrationJson() {
   doc["unit"] = "unknown"; doc["board"] = "unknown";
 #endif
   doc["fwVersion"]  = FW_VERSION;
-  // localManagerUrl() is the ":8080" web-config base, or nullptr on boards without one (the nest).
-  // Emit it as JSON null so the portal renders the tile with "Open config" disabled.
-  const char *cfg = localManagerUrl();
+  // boardConfigUrl() is the device's web-config page, or nullptr on boards without one (the nest).
+  // NOT localManagerUrl() — that's specifically a *file* manager, which the button lacks even
+  // though it serves a config page. Emit null so the portal renders "Open config" disabled.
+  const char *cfg = boardConfigUrl();
   if (cfg) doc["configUrl"] = cfg;
   else     doc["configUrl"] = (const char *)nullptr;
 

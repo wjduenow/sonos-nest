@@ -15,6 +15,7 @@
 #include "button.h"
 #include "config_server.h"
 #include <Arduino.h>
+#include <WiFi.h>          // boardConfigUrl() — WiFi.status()/localIP()
 
 // --- Ring PWM ---------------------------------------------------------------------------
 // LEDC channel 0. 5 kHz is well above flicker and far below anything the LED cares about.
@@ -89,6 +90,15 @@ const char *localFileUrl(const char *) { return nullptr; }   // no local storage
 // The config page is this board's whole UI, but localManagerUrl() means "a file manager", which
 // we don't have. Reporting nullptr keeps that honest; the URL is printed to serial at boot.
 const char *localManagerUrl()          { return nullptr; }
+
+// ...but the button DOES serve a web config page (config_server.cpp, port 8080) — that's what the
+// portal's "Open config" should point at. Valid whenever WiFi is up. Port mirrors CONFIG_PORT.
+const char *boardConfigUrl() {
+  if (WiFi.status() != WL_CONNECTED) return nullptr;
+  static String url;
+  url = "http://" + WiFi.localIP().toString() + ":8080";
+  return url.c_str();
+}
 
 void        localTracksRefresh()       {}
 int         localTrackCount()          { return 0; }

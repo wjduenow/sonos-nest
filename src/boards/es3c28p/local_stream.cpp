@@ -452,6 +452,10 @@ const char *localManagerUrl() {
   return url.c_str();
 }
 
+// The sleep-machine's :8080 server IS the config UI (SD file management + Sonos room/track picks),
+// so its config URL is the same as its file-manager URL.
+const char *boardConfigUrl() { return localManagerUrl(); }
+
 const char *localFileUrl(const char *path) {
   if (!sdEnsureMounted()) return nullptr;
   if (WiFi.status() != WL_CONNECTED) return nullptr;

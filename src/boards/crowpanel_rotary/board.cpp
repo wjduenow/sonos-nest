@@ -32,6 +32,7 @@ bool localAudioActive() { return false; }
 void localAudioSetVolume(uint8_t /*pct*/) {}
 const char *localFileUrl(const char * /*path*/) { return nullptr; }
 const char *localManagerUrl() { return nullptr; }   // no local storage, so nothing to manage
+const char *boardConfigUrl()  { return nullptr; }   // the nest has no web UI at all (on-device only)
 void localTracksRefresh() {}
 int  localTrackCount() { return 0; }
 const char *localTrackName(int) { return nullptr; }

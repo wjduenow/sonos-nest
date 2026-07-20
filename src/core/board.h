@@ -65,6 +65,13 @@ const char *localFileUrl(const char *path);
 // by the board — copy it before the next call.
 const char *localManagerUrl();
 
+// Base URL of the board's web CONFIG page — what a user clicks in the sonos-portal dashboard to
+// configure this device from a browser. Distinct from localManagerUrl(): that means a *file*
+// manager (only boards with local storage), whereas some boards (the button) serve a config page
+// but have no files to manage. nullptr on boards with no web UI at all (the nest), or before the
+// network is up. Pointer is owned by the board — copy it before the next call.
+const char *boardConfigUrl();
+
 // Local track library — playable files (e.g. .mp3) on the board's SD card. Empty on boards
 // without local storage. Call localTracksRefresh() to (re)scan before listing.
 void        localTracksRefresh();
