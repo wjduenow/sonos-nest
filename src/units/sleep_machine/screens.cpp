@@ -775,8 +775,10 @@ static void nameKbReadyCb(lv_event_t *) {
   while (h.endsWith("-"))   h.remove(h.length() - 1);
   if (h.length()) {
     settingsSetDeviceName(h);
-    if (stateLock()) { g_pending.reconnectWifi = true; stateUnlock(); }
-    showToast("Name saved");
+    // Reboot so the DHCP hostname, mDNS and OTA name all re-derive from the new name together
+    // (otaHostname()/wifiHostname()); a bare reconnect would leave the mDNS name stale.
+    showToast("Name saved — restarting");
+    if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
   }
   openSettings();
 }

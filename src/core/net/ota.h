@@ -5,9 +5,10 @@
 // The build host must be able to reach the device's IP on the LAN.
 #pragma once
 
-// The mDNS/OTA name this firmware advertises (the compile-time DEVICE_HOSTNAME). Single source
-// of truth — this is NOT the DHCP hostname (see wifiHostname()), which the user can change at
-// runtime. Anything that displays "where do I reach this device" must not conflate the two.
+// The mDNS/OTA name this firmware advertises. Follows the device name (wifiHostname(): the NVS
+// device name, else the DEVICE_HOSTNAME default) — the SAME source as the DHCP hostname — so two
+// of the same unit don't collide on <default>.local. Latched at otaBegin(); a device-name change
+// reboots to re-read it. Returns a pointer into a persistent static buffer (copy it, don't hold).
 const char *otaHostname();
 
 void otaBegin();    // start the OTA listener (call after WiFi connects)

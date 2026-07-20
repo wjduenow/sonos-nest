@@ -179,9 +179,13 @@ static void processPending() {
     if (wifiIsConnected()) { sonos::ssdpDiscover(); selectZone(); }
   }
   // Device-name change: reconnect so the router registers the new hostname.
-  if (p.reconnectWifi) {
-    wifiReconnect();
-    if (wifiIsConnected()) { sonos::ssdpDiscover(); selectZone(); }
+  if (p.reboot) {
+    // A device-name change: reboot so the DHCP hostname, mDNS and OTA name all come up fresh
+    // from the new name. The web handler has already sent its HTTP response by now; the short
+    // delay lets that TCP flush before the reset drops the link.
+    Serial.println("[app] rebooting to apply new device name");
+    delay(800);
+    ESP.restart();
   }
 
   // After a transport change the track/state (and art) update — poll again soon, once the

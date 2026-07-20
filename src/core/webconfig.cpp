@@ -68,8 +68,9 @@ String webConfigJson() {
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
   // NVS value — a page showing "" when the router says "sonos-button" would just be wrong.
   doc["deviceName"] = wifiHostname();
-  // The mDNS/OTA name is compile-time and does NOT follow deviceName. The page says so, because
-  // assuming otherwise sends you looking for a "<your-name>.local" that never resolves.
+  // The mDNS/OTA name now DOES follow deviceName (otaHostname() derives from it). It updates on
+  // the reboot a name change triggers, so between the change and that boot this still reports the
+  // currently-advertised name — which is what "<name>.local" actually resolves to right now.
   doc["mdnsName"]   = String(otaHostname()) + ".local";
 
   JsonArray pls = doc["playlists"].to<JsonArray>();
@@ -153,10 +154,10 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     // RFC 1035 caps a label at 63; keep it well under so mDNS and router UIs stay sane.
     if (h.length() > 32) h = h.substring(0, 32);
     settingsSetDeviceName(h);
-    // Reconnect so DHCP re-registers under the new name. Blocking, on netTask — the page's
-    // response has already been decided by then, but the device drops off the network for a
-    // moment, so the browser's follow-up poll may miss once. That's expected, not a fault.
-    if (stateLock()) { g_pending.reconnectWifi = true; stateUnlock(); }
+    // Reboot so the new name takes effect for the DHCP hostname, mDNS AND the OTA name together
+    // (otaHostname()/wifiHostname() both derive from it at boot). netTask does the reset shortly
+    // after this response is sent; the browser will need to reconnect at the new name.
+    if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
     return true;
   }
 

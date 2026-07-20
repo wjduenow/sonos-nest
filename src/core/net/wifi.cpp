@@ -80,20 +80,6 @@ void wifiApplyResultReset() { s_result = WIFI_APPLY_IDLE; }
 
 // Blocking — call from netTask. Try the new creds; on success persist them; on failure revert
 // to the previously stored creds so the device isn't left offline.
-// Reconnect from stored creds — re-applies the hostname so a name change takes effect with
-// the router. Blocking; call from netTask.
-void wifiReconnect() {
-  // A runtime hostname change only takes if the netif re-latches it, and that happens solely on a
-  // transition INTO STA (see applyHostname). The mode is already STA here, so a plain reconnect
-  // would keep the old name — force STA down, then up, with the new name stored first.
-  applyHostname();
-  WiFi.mode(WIFI_OFF);
-  delay(100);
-  WiFi.mode(WIFI_STA);     // OFF->STA transition: applies the (new) stored hostname
-  beginFromStored();
-  waitConnected(10000);
-}
-
 void wifiApply(const String &ssid, const String &pass) {
   WiFi.disconnect();
   delay(100);

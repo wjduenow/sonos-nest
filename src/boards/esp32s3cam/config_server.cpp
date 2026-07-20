@@ -81,10 +81,10 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     <span><input id=dname size=14 autocapitalize=off autocorrect=off spellcheck=false>
       <button id=dsave>Save</button></span>
   </div>
-  <div class=hint>The name your router lists this device under, so you can find its IP.
-    Letters, digits and hyphens; spaces become hyphens. Saving reconnects Wi-Fi, so this page
-    may hiccup for a few seconds.<br>
-    This does <b>not</b> change the mDNS/OTA name, which stays <code id=mdns></code>.</div>
+  <div class=hint>The name your router lists this device under, and the <code id=mdns></code>
+    address (mDNS/OTA) both follow this. Letters, digits and hyphens; spaces become hyphens.
+    <b>Saving restarts the device</b> to apply the new name — this page will drop; reopen it at
+    the new name (or the same IP).</div>
 </div>
 
 <div class=card>

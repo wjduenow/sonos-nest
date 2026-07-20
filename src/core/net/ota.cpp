@@ -1,4 +1,5 @@
 #include "ota.h"
+#include "wifi.h"       // wifiHostname() — the device name (NVS) else DEVICE_HOSTNAME
 #include <ArduinoOTA.h>
 #include <WiFi.h>
 
@@ -16,7 +17,15 @@
 static volatile bool s_active = false;
 static volatile int  s_progress = -1;
 
-const char *otaHostname() { return DEVICE_HOSTNAME; }
+// The mDNS/OTA name follows the device name (settingsDeviceName, else the DEVICE_HOSTNAME
+// default) — same source as the DHCP hostname — so two of the same unit on one LAN don't both
+// claim <default>.local. Latched at otaBegin(); a runtime rename reboots to re-read it. Returns
+// a pointer into a persistent buffer that ArduinoOTA/callers copy immediately.
+const char *otaHostname() {
+  static String h;
+  h = wifiHostname();
+  return h.c_str();
+}
 
 void otaBegin() {
   if (WiFi.status() != WL_CONNECTED) return;
