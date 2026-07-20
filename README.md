@@ -70,7 +70,7 @@ src/
     board.h             HAL contract every board implements
     unit.h              UX contract every unit implements (uiInit/uiTick)
     sonos/              soap_client · ssdp (discovery) · didl (DIDL-Lite parser)
-    net/                wifi · ota
+    net/                wifi · ota · portal (SoftAP captive-portal WiFi setup) · registrar
   boards/               one dir per board — implements board.h
     crowpanel_rotary/   ST7701 display · CST816 touch · EC11 encoder · PCF8574 · pins.h
     es3c28p/            ILI9341 display · FT6336 touch · microSD · ES8311 audio · web server
@@ -114,8 +114,30 @@ On **WSL2 (Windows)**, USB needs bridging first — see
 ### First-time setup
 
 1. `pio run -e nest` once to fetch libraries.
-2. Copy `include/secrets.example.h` → `include/secrets.h` and fill in WiFi (and optional
-   `SONOS_DEFAULT_ROOM`, `OTA_PASSWORD`, `CLOCK_TZ`).
+2. Copy `include/secrets.example.h` → `include/secrets.h`. WiFi creds (`WIFI_SSID` / `WIFI_PASS`)
+   are **optional** — set them to bake WiFi in at flash time, or leave them blank and provision
+   over the air on first boot (below). Set `OTA_PASSWORD` (required for wireless flashing);
+   `SONOS_DEFAULT_ROOM` and `CLOCK_TZ` are optional.
+
+### Initial WiFi setup — captive portal (all units)
+
+On a first boot with **no stored credentials**, every unit raises an open **SoftAP captive
+portal** named `<hostname>-setup` (`sonos-nest-setup`, `sonos-sleep-setup`,
+`sonos-button-setup`):
+
+1. Join that network from a phone. The "sign in to network" sheet pops automatically (wildcard
+   DNS) and lists nearby WiFi networks.
+2. Pick yours, enter the password, submit. The device applies it through the same path that
+   persists on success and **reverts on a bad password** (a typo can't strand it), tears the AP
+   down, and continues booting — now on your network.
+
+Screened units (nest, sleep-machine) show a **"Wi-Fi Setup — join `<AP>`"** message on-screen
+while the portal is up; the headless button has no screen, so the AP *is* the whole setup UI.
+
+**Re-provisioning** (new network, wrong password): hold the knob/button through power-on to force
+the portal open again. The sleep-machine (no knob) can also change networks any time from its
+on-screen **Wi-Fi** setting. Credentials live in NVS and survive reflashing, so a normal OTA/USB
+update keeps the device on its network.
 
 ## Hardware (enclosures)
 
