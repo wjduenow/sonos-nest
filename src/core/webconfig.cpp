@@ -6,9 +6,11 @@
 #include "player_state.h"   // g_pending + stateLock/stateUnlock — the cross-task command channel
 #include "board.h"          // localTrack* — the HAL's view of local storage (empty on most boards)
 #include "sonos/ssdp.h"
+#include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include <ArduinoJson.h>
+#include <Arduino.h>       // ESP.getFreeHeap() etc. for the health readout
 
 // Is this a real track on the card right now? Guards against a stale path from a page that was
 // left open while the file was deleted.
@@ -72,6 +74,20 @@ String webConfigJson() {
   // the reboot a name change triggers, so between the change and that boot this still reports the
   // currently-advertised name — which is what "<name>.local" actually resolves to right now.
   doc["mdnsName"]   = String(otaHostname()) + ".local";
+
+  // Health readout for diagnosing the "slower the longer it runs" report. A falling heapFree (esp.
+  // heapMin) points at a memory leak; a climbing soapReconnects / soapMaxMs at socket churn. Steady
+  // across a long uptime = fixed. uptimeSec lets you read the trend without a reboot to compare.
+  JsonObject h = doc["health"].to<JsonObject>();
+  h["uptimeSec"] = (uint32_t)(millis() / 1000);
+  h["heapFree"]  = (uint32_t)ESP.getFreeHeap();
+  h["heapMin"]   = (uint32_t)ESP.getMinFreeHeap();
+  uint32_t sCalls, sRe, sLast, sMax;
+  sonos::soapDiag(sCalls, sRe, sLast, sMax);
+  h["soapCalls"]      = sCalls;
+  h["soapReconnects"] = sRe;
+  h["soapLastMs"]     = sLast;
+  h["soapMaxMs"]      = sMax;
 
   JsonArray pls = doc["playlists"].to<JsonArray>();
   for (const String &n : s_playlists) pls.add(n);

@@ -227,6 +227,20 @@ static void netTask(void *) {
 
     processPending();
 
+#ifdef HEADLESS
+    // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
+    // enough for the press toggle to know whether Sonos is already playing — and do it slowly.
+    // The full 1 Hz title/position/art/volume poll below exists for the screen units' Now Playing
+    // display; none of that is shown here, and that constant traffic was pure overhead that also
+    // drove the SOAP socket churn. One call every 3 s instead of ~3 every 1 s.
+    if (millis() - s_lastPoll > 3000) {
+      s_lastPoll = millis();
+      TransportState st = TransportState::Unknown;
+      if (sonos::getTransportInfo(s_coordIp, st)) {
+        if (stateLock()) { g_player.transport = st; stateUnlock(); }
+      }
+    }
+#else
     // Poll ~1 Hz, interleaving command processing so input never waits behind the full poll.
     if (millis() - s_lastPoll > 1000) {
       s_lastPoll = millis();
@@ -251,6 +265,7 @@ static void netTask(void *) {
         stateUnlock();
       }
     }
+#endif
     vTaskDelay(pdMS_TO_TICKS(15));
   }
 }

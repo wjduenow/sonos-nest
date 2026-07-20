@@ -45,4 +45,8 @@ bool addUriToQueue(const String& ip, const String& uri, const String& didlMeta);
 bool soapAction(const String& ip, const String& controlPath, const String& service,
                 const String& action, const String& bodyArgs, String& responseOut);
 
+// Runtime SOAP counters for diagnostics (surfaced on the config page): total calls, stale-socket
+// reconnects (climbs if keep-alives are going bad), and last / worst-ever call time in ms.
+void soapDiag(uint32_t& calls, uint32_t& reconnects, uint32_t& lastMs, uint32_t& maxMs);
+
 }  // namespace sonos

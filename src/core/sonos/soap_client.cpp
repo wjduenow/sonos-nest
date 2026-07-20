@@ -61,6 +61,14 @@ static uint32_t hmsToSec(const String &t) {
   return (uint32_t)(h * 3600 + m * 60 + s);
 }
 
+// Runtime diagnostics for the "button gets slower the longer it runs" investigation, surfaced on
+// the config page (webConfigJson). soapReconnects climbing over uptime = stale sockets being
+// dropped/retried; soapMaxMs = worst single call.
+static uint32_t s_soapCalls = 0, s_soapReconnects = 0, s_soapLastMs = 0, s_soapMaxMs = 0;
+void soapDiag(uint32_t &calls, uint32_t &reconnects, uint32_t &lastMs, uint32_t &maxMs) {
+  calls = s_soapCalls; reconnects = s_soapReconnects; lastMs = s_soapLastMs; maxMs = s_soapMaxMs;
+}
+
 bool soapAction(const String &ip, const String &controlPath, const String &service,
                 const String &action, const String &bodyArgs, String &responseOut) {
   // Persistent client/connection: with setReuse(true), consecutive calls to the same host
@@ -70,11 +78,6 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
   static WiFiClient client;
   static HTTPClient http;
   String url = "http://" + ip + ":1400" + controlPath;
-  http.setReuse(true);
-  if (!http.begin(client, url)) return false;
-  http.addHeader("Content-Type", "text/xml; charset=\"utf-8\"");
-  http.addHeader("SOAPACTION", "\"" + service + "#" + action + "\"");
-
   String body =
       "<?xml version=\"1.0\"?>"
       "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
@@ -86,14 +89,44 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
     Serial.printf("[soap] POST %s  action=%s\n", url.c_str(), action.c_str());
     Serial.println(body);
   }
-  int code = http.POST(body);
-  responseOut = http.getString();
-  if (SONOS_SOAP_TRACE) {
-    Serial.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
-    if (code != 200) Serial.println(responseOut);
+
+  // Try the kept-alive socket; if it's stale the POST returns a negative code. Sonos closes idle
+  // keep-alives server-side, which leaves our socket half-open — and setReuse(true) never stops
+  // it, so without the client.stop() below those dead sockets pile up in CLOSE_WAIT until LWIP
+  // runs out and every call blocks. That is what made the headless button get "log-jammed" and
+  // slower the longer it ran; a reboot cleared the socket table. Closing on failure fixes the
+  // leak; the single retry means a stale socket costs a reconnect, not a dropped command.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    http.setReuse(true);
+    http.setConnectTimeout(3000);       // bound a dead-socket connect instead of hanging ~5 s
+    if (!http.begin(client, url)) { client.stop(); s_soapReconnects++; continue; }
+    http.setTimeout(4000);
+    http.addHeader("Content-Type", "text/xml; charset=\"utf-8\"");
+    http.addHeader("SOAPACTION", "\"" + service + "#" + action + "\"");
+
+    const uint32_t t0 = millis();
+    int code = http.POST(body);
+    responseOut = http.getString();
+    const uint32_t dt = millis() - t0;
+    http.end();
+
+    s_soapCalls++;
+    s_soapLastMs = dt;
+    if (dt > s_soapMaxMs) s_soapMaxMs = dt;
+
+    if (code > 0) {
+      if (SONOS_SOAP_TRACE) {
+        Serial.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
+        if (code != 200) Serial.println(responseOut);
+      }
+      return code == 200;
+    }
+    // Transport-level failure (likely a stale reused socket): drop it so it can't accumulate or
+    // be reused again, and retry once on a fresh connection.
+    s_soapReconnects++;
+    client.stop();
   }
-  http.end();
-  return code == 200;
+  return false;
 }
 
 // --- AVTransport ---
