@@ -1,9 +1,9 @@
 # sonos-portal
 
 A small **local** dashboard that every [sonos-nest](../) device self-registers with. One page
-listing all your ESP32 Sonos controllers on the LAN, each with a single click into its web config
-— including the round **nest**, which has no web server of its own but still appears (config
-disabled) because registration is an outbound POST.
+listing all your ESP32 Sonos controllers on the LAN, each with a single click into its web config.
+Registration is an outbound POST, so a device appears even if it serves no web page of its own
+(the tile just shows config disabled).
 
 One FastAPI app, packaged two ways from **one image**: standalone Docker, or a Home Assistant
 add-on (a container + a thin manifest). ~95% shared code; the only HA-specific accommodation is

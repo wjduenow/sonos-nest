@@ -23,8 +23,8 @@ String webConfigJson();
 // The device-identity payload for portal self-registration (registrar.cpp / plans/05). A focused
 // sibling of webConfigJson() — no health/tracks/playlists, just who-and-where:
 //   {"deviceName","mdnsName","ip","unit","board","fwVersion","configUrl","zones":[{name,ip}...]}
-// unit/board are compile-time (the env's UNIT_*/HEADLESS macro); configUrl is localManagerUrl()
-// (null on the nest, which has no web server — the portal shows it present, config disabled).
+// unit/board are compile-time (the env's UNIT_*/HEADLESS macro); configUrl is boardConfigUrl()
+// (the device's web config page; null only before WiFi is up).
 String registrationJson();
 
 // Apply one field: "sleepTrack" | "wakeTrack" | "room" | "ring" | "playlist" | "volume".

@@ -35,9 +35,8 @@ It's optional; the units work fine without it.
 
 - **Discovery is automatic.** The portal advertises `_sonosportal._tcp` over mDNS; each device
   finds it and registers at boot, then heartbeats. Self-registration is built into the shared
-  **core** (`core/net/registrar.*`), so *every* unit ships it — including the round nest, which
-  has no web server of its own but still appears on the dashboard (registration is an outbound
-  POST). No per-device configuration.
+  **core** (`core/net/registrar.*`), so *every* unit ships it (registration is an outbound POST,
+  independent of whether the unit serves a web page). No per-device configuration.
 - **Requires the same LAN.** mDNS is multicast, so the portal must run on the same L2 network as
   your devices — host networking on a real Linux box, not a NAT'd VM or Docker Desktop.
 

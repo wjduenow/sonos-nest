@@ -194,11 +194,20 @@ If you're working in this repo with Claude Code, the **`/ota` skill** does all o
 
 ### Brightness
 
-Menu → Settings, then twist. Saved automatically.
+Menu → Settings, then twist. Saved automatically. Also settable remotely from the web config
+page (below).
 
 ### Changing rooms
 
-Menu → Rooms. Persisted across reboots.
+Menu → Rooms. Persisted across reboots. Also settable from the web config page (below).
+
+### Web config (browser)
+
+The nest serves a small config page at **`http://<device-ip>:8080`** — Sonos room, screen
+brightness, and device name, from any browser on the LAN. It's the same settings the on-device
+Settings screen changes; changes apply live (brightness) or on the next reboot (device name).
+If you run the [sonos-portal](../sonos-portal/) dashboard, its **Open config** button links
+straight here.
 
 ### Troubleshooting
 
