@@ -24,10 +24,17 @@
 > flash → converge); the approve + heartbeat-recheck lifecycle verified by unit test (mDNS
 > auto-registration isn't testable under WSL, so that leg is logic-verified only).
 >
-> **Remaining:** a `v*` tag CI run + flashing a real CI binary (Phase 1 hardware pass); the
-> per-page HTML toggle in each board's config UI (the fields already work via `/api/config` and the
-> portal). The existing espota push path (`*-ota` envs, the `/ota` skill) stays as the dev-iteration
-> flow — this is a fleet path on top.
+> **Per-page config UI built** (commit b6cfb76): all three boards' `:8080` pages now render an
+> "Updates" card (auto-update toggle, update-source URL, running/available version, "Update now")
+> wired to the existing `ota` block + `otaAuto`/`updateUrl`/`updateNow` fields. Nest verified serving
+> it on hardware.
+>
+> **Remaining:** flash a real CI-published Release binary as the Phase 1 hardware pass (the CI build
+> + Release job are verified — `workflow_dispatch` built all three envs green, and `v0.1.0` exercises
+> the tag/release path); **redeploy the portal** with the Phase 3 code on the Pi/HA host + set
+> `FIRMWARE_REPO` (the LAN mirror is inert until then); flash button + sleep-machine off old firmware
+> (`4cdb301`) so they report OTA status. The espota push path (`*-ota` envs, `/ota` skill) stays the
+> dev-iteration flow — this is a fleet path on top.
 
 ## Context
 
