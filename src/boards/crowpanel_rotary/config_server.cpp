@@ -76,6 +76,23 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     the new name (or the same IP).</div>
 </div>
 
+<div class=card>
+  <div class=row>
+    <label for=otaauto>Auto-update</label>
+    <input type=checkbox id=otaauto>
+  </div>
+  <div class=row style="margin-top:12px">
+    <label for=updurl>Update source</label>
+    <span><input id=updurl size=13 autocapitalize=off autocorrect=off spellcheck=false placeholder="(off)">
+      <button id=usave>Save</button></span>
+  </div>
+  <div class=hint id=otahint></div>
+  <div class=row id=updrow hidden style="margin-top:12px">
+    <span id=updinfo></span>
+    <button id=updnow>Update now</button>
+  </div>
+</div>
+
 <div id=msg></div>
 
 <script>
@@ -111,6 +128,25 @@ function draw(){
   // Don't clobber what someone is mid-way through typing.
   if(document.activeElement !== $('#dname')) $('#dname').value = st.deviceName||'';
   $('#mdns').textContent = st.mdnsName||'';
+
+  // Updates (core/net/updater). ota = {auto, updateUrl, running, available}.
+  const o=st.ota||{};
+  $('#otaauto').checked = !!o.auto;
+  if(document.activeElement !== $('#updurl')) $('#updurl').value = o.updateUrl||'';
+  const avail=o.available;
+  $('#updrow').hidden = !(avail && !o.auto);
+  if(avail) $('#updinfo').textContent = 'Ready: '+avail;
+  $('#otahint').innerHTML = 'Running <code>'+(o.running||'?')+'</code>. ' + (
+    !o.updateUrl ? 'Set a manifest URL — your Sonos portal or a firmware release — to check for updates.'
+    : avail ? (o.auto ? 'Will auto-update to '+avail+' on next reboot.' : 'Version '+avail+' is ready to install.')
+    : 'Up to date.');
+}
+
+// After changing the source, availability lands a moment later (the device re-checks on netTask);
+// re-poll a few times so the "ready"/"up to date" line settles without a manual refresh.
+function otaRecheck(){
+  let n=0;
+  const t=setInterval(async()=>{ st=await (await fetch('/api/config')).json(); draw(); if(++n>=3) clearInterval(t); },2000);
 }
 
 $('#room').onchange=e=>post('room',e.target.value);
@@ -118,6 +154,12 @@ $('#bright').oninput=e=>$('#brightval').textContent=e.target.value+'%';  // live
 $('#bright').onchange=e=>post('brightness',e.target.value);             // save on release only
 $('#dsave').onclick=()=>post('deviceName',$('#dname').value);
 $('#dname').onkeydown=e=>{ if(e.key==='Enter') post('deviceName',$('#dname').value) };
+$('#otaauto').onchange=e=>post('otaAuto',e.target.checked?'1':'0');
+$('#usave').onclick=()=>post('updateUrl',$('#updurl').value).then(otaRecheck);
+$('#updnow').onclick=async()=>{
+  if(!confirm('Download and install '+((st.ota||{}).available||'the update')+'?\n\nThe device reboots to apply.')) return;
+  await post('updateNow','1'); $('#msg').textContent='updating — the device will reboot…';
+};
 
 // Rooms arrive from SSDP a moment after boot; re-poll a few times so a page opened immediately
 // after power-up fills in without a manual refresh.

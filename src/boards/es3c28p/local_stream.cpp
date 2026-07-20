@@ -294,6 +294,8 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
  .cfg label{font-weight:500}
  select{background:#12121a;color:#e8e8f0;border:1px solid #3a3a4e;border-radius:6px;padding:7px 10px;font:inherit;font-size:14px;min-width:55%}
  select:disabled{opacity:.4}
+ input[type=text]{background:#12121a;color:#e8e8f0;border:1px solid #3a3a4e;border-radius:6px;padding:7px 10px;font:inherit;font-size:14px;width:9rem}
+ .info{color:#8a8aa0;font-size:13px;padding:8px 0}
 </style>
 <h1>Sleep Machine</h1>
 <div class=sub id=cap>loading…</div>
@@ -302,6 +304,14 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
   <div class=cfg><label for=sleepTrack>Sleep track</label><select id=sleepTrack></select></div>
   <div class=cfg><label for=wakeTrack>Wake track</label><select id=wakeTrack></select></div>
   <div class=cfg><label for=room>Sonos room</label><select id=room></select></div>
+</div>
+<div class=card>
+  <h2>Software update</h2>
+  <div class=cfg><label for=otaauto>Auto-update</label><input type=checkbox id=otaauto></div>
+  <div class=cfg><label for=updurl>Update source</label>
+    <span><input type=text id=updurl placeholder="(off)"> <button id=usave>Save</button></span></div>
+  <div class=info id=otaline></div>
+  <div class=cfg id=updrow hidden><span id=updinfo></span><button id=updnow>Update now</button></div>
 </div>
 <div class=card id=list></div>
 <div class=card>
@@ -339,6 +349,18 @@ async function loadCfg(){
   // wake has an Auto option: with no pick the device uses any file named "wake".
   fill($('#wakeTrack'),tracks,c.wakeTrack,'No tracks on the card','Auto (a file named "wake")');
   fill($('#room'),c.zones.map(z=>({label:z.name,value:z.name})),c.room,'No Sonos rooms found');
+
+  // Software update (core/net/updater). ota = {auto, updateUrl, running, available}.
+  const o=c.ota||{};
+  $('#otaauto').checked=!!o.auto;
+  if(document.activeElement!==$('#updurl')) $('#updurl').value=o.updateUrl||'';
+  const avail=o.available;
+  $('#updrow').hidden=!(avail&&!o.auto);
+  if(avail)$('#updinfo').textContent='Ready: '+avail;
+  $('#otaline').innerHTML='Running <code>'+(o.running||'?')+'</code>. '+(
+    !o.updateUrl?'Set a manifest URL — your Sonos portal or a firmware release — to check for updates.'
+    :avail?(o.auto?'Will auto-update to '+avail+' on next reboot.':'Version '+avail+' is ready to install.')
+    :'Up to date.');
 }
 async function saveCfg(field,value){
   const q=`/api/config?field=${field}&value=${encodeURIComponent(value)}`;
@@ -348,6 +370,14 @@ async function saveCfg(field,value){
 }
 for(const f of ['sleepTrack','wakeTrack','room'])
   $('#'+f).onchange=e=>saveCfg(f,e.target.value);
+// After changing the source, availability lands a moment later (device re-checks on netTask).
+function otaRecheck(){let n=0;const t=setInterval(()=>{loadCfg();if(++n>=3)clearInterval(t);},2000);}
+$('#otaauto').onchange=e=>saveCfg('otaAuto',e.target.checked?'1':'0');
+$('#usave').onclick=()=>{saveCfg('updateUrl',$('#updurl').value);otaRecheck();};
+$('#updnow').onclick=async()=>{
+  if(!confirm('Download and install the update? The device reboots to apply.\n\nStop playback first if a sound is playing.'))return;
+  await saveCfg('updateNow','1');
+};
 
 async function load(){
   const r=await fetch('/api/tracks');
