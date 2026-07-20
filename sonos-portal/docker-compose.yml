@@ -14,10 +14,9 @@ services:
     environment:
       - PORT=8000
       # - PORTAL_HOST=192.168.68.99  # override the advertised IP if auto-detect picks the wrong NIC
-      # Firmware pull-OTA source (plans/06 Part 3). Set FIRMWARE_REPO to mirror that repo's latest
-      # Release; devices then pull over LAN from this portal (point their updateUrl at
-      # http://<portal>:8000/api/firmware). Omit it and the mirror stays off.
-      # - FIRMWARE_REPO=wjduenow/sonos-nest
+      # Firmware pull-OTA source (plans/06 Part 3): mirror this repo's latest Release so devices
+      # pull firmware over the LAN from this portal (updateUrl -> http://<portal>:8000/api/firmware).
+      - FIRMWARE_REPO=wjduenow/sonos-nest
       # - FIRMWARE_TOKEN=ghp_xxx      # optional: GitHub token (private repo / higher rate limit)
       # - FIRMWARE_POLL=900           # seconds between release checks (default 900)
     volumes:
