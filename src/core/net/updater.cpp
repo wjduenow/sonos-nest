@@ -169,6 +169,42 @@ static void applyNow(const String &url) {
     Serial.println("[updater] server reports no update");
 }
 
+// Parse "vX.Y.Z[-N[-gHASH[-dirty]]]" (git describe form) into [major,minor,patch,commits]. The
+// commit count N (commits past the tag) is the 4th field so a post-tag dev build sorts *newer*
+// than its tag. Returns false if the string doesn't start with a numeric version (e.g. a bare
+// commit hash), so the caller can fall back.
+static bool parseVer(const String &s, long v[4]) {
+  v[0] = v[1] = v[2] = v[3] = 0;
+  int i = 0, n = s.length();
+  if (i < n && (s[i] == 'v' || s[i] == 'V')) i++;
+  if (i >= n || !isdigit((int)s[i])) return false;
+  for (int field = 0; field < 3 && i < n;) {
+    long num = 0; bool got = false;
+    while (i < n && isdigit((int)s[i])) { num = num * 10 + (s[i] - '0'); i++; got = true; }
+    if (!got) break;
+    v[field++] = num;
+    if (i < n && s[i] == '.') i++; else break;
+  }
+  if (i < n && s[i] == '-') {          // "-N" commit count after the tag
+    i++;
+    long num = 0; bool got = false;
+    while (i < n && isdigit((int)s[i])) { num = num * 10 + (s[i] - '0'); i++; got = true; }
+    if (got) v[3] = num;
+  }
+  return true;
+}
+
+// True iff `cand` is STRICTLY newer than `cur`. This is what stops the updater from ever offering
+// or applying an equal-or-older build — the downgrade-loop that reverted the nest when a lagging
+// mirror served an older release with otaAuto on. Falls back to `cand != cur` only if a version
+// isn't a parseable vX.Y.Z (a bare-hash dev build), so such a device can still take a real release.
+static bool isNewer(const String &cand, const String &cur) {
+  long a[4], b[4];
+  if (!parseVer(cand, a) || !parseVer(cur, b)) return cand != cur;
+  for (int k = 0; k < 4; k++) if (a[k] != b[k]) return a[k] > b[k];
+  return false;   // equal
+}
+
 // Core check. applyAuto=true only at boot, so an otaAuto device applies pre-playback rather than
 // mid-run (see the policy note in updater.h).
 static void run(bool applyAuto) {
@@ -180,7 +216,7 @@ static void run(bool applyAuto) {
   bool approved = false;
   if (!checkManifest(base, version, url, approved)) return;   // source down / bad manifest: keep prior state
 
-  if (version == FW_VERSION) { s_available = ""; return; }  // up to date
+  if (!isNewer(version, FW_VERSION)) { s_available = ""; return; }  // equal/older → nothing to offer
   s_available = version;
 
   if (s_armed || approved || (applyAuto && settingsOtaAuto()))

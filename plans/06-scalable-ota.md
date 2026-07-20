@@ -1,5 +1,17 @@
 # Scalable OTA — CI builds + device-pull updates
 
+> **Shipped & fleet-deployed (2026-07-20).** All three phases built, hardware-verified, and the
+> whole fleet (nest/button/sleep) runs the OTA firmware, auto-defaulting its update source to the
+> LAN portal, approve-only. Releases through **v0.1.3**: v0.1.0 (CI+pull+portal), v0.1.1 (WiFi
+> creds→NVS so a credential-less OTA can't strand a device), v0.1.2 (automatic source: portal-
+> preferred → GitHub → off), v0.1.3 (`isNewer()` strictly-newer guard — the updater never offers/
+> applies an equal-or-older build, killing the downgrade loop that `otaAuto` + a lagging mirror
+> caused). Two known operational notes: **the nest can't reliably field-OTA** (internal SRAM too
+> tight under fragmentation — USB flash recovers it; see the heap note below / the nest-ota-heap
+> memory), and the fleet is intentionally **approve-only** (`otaAuto` off everywhere).
+>
+> Historical detail follows.
+>
 > Status: **Phase 1 built; Phase 2 built + hardware-verified** (2026-07-20). Phase 1 = CI
 > (`.github/workflows/firmware.yml` + `tools/build_manifest.py`). Phase 2 = the device pull path
 > (`src/core/net/updater.*` + settings/webconfig/registrar/app wiring). **Hardware pass done** on
