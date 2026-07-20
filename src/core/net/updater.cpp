@@ -117,6 +117,17 @@ static void applyNow(const String &url) {
   s_active = true;
   vTaskDelay(pdMS_TO_TICKS(400));
 
+  // HTTPUpdate's read/write loop never yields, so this task (netTask, core 0) starves IDLE0 for
+  // the whole download and the Task WDT (~5 s) resets the device mid-transfer — the crash the
+  // hardware test hit (reset reason 6 = TASK_WDT). espota dodges it because ArduinoOTA yields in
+  // its loop. delay(1) per progress chunk lets IDLE0 run (feeding the WDT); ~400 chunks over a
+  // 1.6 MB image adds well under a second.
+  httpUpdate.onProgress([](int cur, int total) {
+    static int lastPct = -1;
+    delay(1);
+    int pct = total ? (int)((int64_t)cur * 100 / total) : 0;
+    if (pct != lastPct && pct % 10 == 0) { lastPct = pct; Serial.printf("[updater] %d%%\n", pct); }
+  });
   httpUpdate.rebootOnUpdate(true);
 
   t_httpUpdate_return r;

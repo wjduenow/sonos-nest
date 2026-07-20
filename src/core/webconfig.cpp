@@ -12,6 +12,7 @@
 #include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
 #include <ArduinoJson.h>
 #include <Arduino.h>       // ESP.getFreeHeap() etc. for the health readout
+#include <esp_system.h>    // esp_reset_reason() — diagnose why the LAST reset happened
 #include <WiFi.h>          // WiFi.localIP() — the registration payload's ip field
 
 // Firmware version — injected per build by tools/git_version.py (git describe). Default lets a
@@ -91,6 +92,7 @@ String webConfigJson() {
   h["uptimeSec"] = (uint32_t)(millis() / 1000);
   h["heapFree"]  = (uint32_t)ESP.getFreeHeap();
   h["heapMin"]   = (uint32_t)ESP.getMinFreeHeap();
+  h["resetReason"] = (int)esp_reset_reason();   // 4=PANIC 6=TASK_WDT 9=BROWNOUT (esp_reset_reason_t)
   uint32_t sCalls, sRe, sLast, sMax;
   sonos::soapDiag(sCalls, sRe, sLast, sMax);
   h["soapCalls"]      = sCalls;
