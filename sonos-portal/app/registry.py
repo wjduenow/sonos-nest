@@ -27,6 +27,14 @@ from typing import Any
 # every ~45 s, so ~2.5 misses marks it offline — long enough to ride out one dropped beat.
 STALE_SECONDS = 120
 
+# A device is "OTA-ready" if it's currently advertising _arduino._tcp (ArduinoOTA) over mDNS.
+# mDNS records refresh on their own TTL, so keep a generous window to ride over refresh gaps.
+OTA_ADVERTISE_WINDOW = 300
+
+# A config-reachability probe result is trusted for this long before it's considered stale
+# (unknown) rather than shown as a possibly-outdated tick/cross.
+CONFIG_PROBE_FRESH = 90
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 
 
@@ -43,6 +51,11 @@ class Registry:
         self._registered: dict[str, dict[str, Any]] = {}
         # id -> {"name","ip","last_seen"} for mDNS-seen-but-unregistered devices.
         self._seen: dict[str, dict[str, Any]] = {}
+        # ip -> last time it advertised _arduino._tcp (ArduinoOTA). Drives the OTA-ready flag.
+        self._ota_ips: dict[str, float] = {}
+        # id -> {"reachable": bool, "at": float}. Background config-page probe results (not
+        # persisted — transient, re-probed on startup).
+        self._probe: dict[str, dict[str, Any]] = {}
         self._load()
 
     # --- persistence ---------------------------------------------------------
@@ -114,6 +127,33 @@ class Registry:
                 return
             self._seen[dev_id] = {"name": name, "ip": ip, "last_seen": _now()}
 
+    def note_ota(self, ip: str) -> None:
+        """Record that this IP is advertising ArduinoOTA (_arduino._tcp) right now."""
+        if not ip:
+            return
+        with self._lock:
+            self._ota_ips[ip] = _now()
+
+    def set_config_reachable(self, dev_id: str, reachable: bool) -> None:
+        """Store the result of a background probe of a device's config page."""
+        with self._lock:
+            self._probe[dev_id] = {"reachable": reachable, "at": _now()}
+
+    def registered_targets(self) -> list[tuple[str, str | None]]:
+        """(id, configUrl) for every registered device — snapshot for the probe loop."""
+        with self._lock:
+            return [(rec["id"], rec.get("configUrl")) for rec in self._registered.values()]
+
+    def _ota_ready(self, ip: str, now: float) -> bool:
+        t = self._ota_ips.get(ip)
+        return t is not None and (now - t) <= OTA_ADVERTISE_WINDOW
+
+    def _config_reachable(self, dev_id: str, now: float) -> bool | None:
+        p = self._probe.get(dev_id)
+        if not p or (now - p["at"]) > CONFIG_PROBE_FRESH:
+            return None  # not probed yet / stale → unknown
+        return bool(p["reachable"])
+
     # --- reads ---------------------------------------------------------------
     def devices(self) -> list[dict[str, Any]]:
         now = _now()
@@ -121,8 +161,13 @@ class Registry:
         with self._lock:
             for rec in self._registered.values():
                 d = dict(rec)
+                ip = rec.get("ip", "")
                 d["online"] = (now - rec.get("last_seen", 0)) <= STALE_SECONDS
                 d["status"] = "registered"
+                d["lastSeenSec"] = int(now - rec.get("last_seen", 0))
+                d["zoneCount"] = len(rec.get("zones", []))
+                d["otaReady"] = self._ota_ready(ip, now)
+                d["configReachable"] = self._config_reachable(rec["id"], now)
                 out.append(d)
             for dev_id, s in self._seen.items():
                 if dev_id in self._registered:
@@ -138,7 +183,11 @@ class Registry:
                         "fwVersion": "",
                         "configUrl": None,
                         "zones": [],
+                        "zoneCount": 0,
                         "online": (now - s.get("last_seen", 0)) <= STALE_SECONDS,
+                        "lastSeenSec": int(now - s.get("last_seen", 0)),
+                        "otaReady": self._ota_ready(s["ip"], now),  # seen == arduino-advertised
+                        "configReachable": None,
                         "status": "seen",  # discovered via mDNS, awaiting registration
                     }
                 )

@@ -67,6 +67,8 @@ class _ArduinoListener(ServiceListener):
         # firmware registers under, so a later real registration promotes the same row.
         dev_id = (info.server or name).rstrip(".")
         short = dev_id.split(".")[0]
+        # This device is advertising ArduinoOTA right now → OTA-ready (registered or not).
+        self._registry.note_ota(ip)
         self._registry.note_seen(dev_id, short, ip)
 
 

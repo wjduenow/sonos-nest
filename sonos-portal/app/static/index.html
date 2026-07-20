@@ -8,12 +8,14 @@
     :root {
       --bg: #f4f5f7; --card: #ffffff; --ink: #1a1d21; --muted: #6b7280;
       --line: #e3e6ea; --accent: #3b6cf6; --ok: #22a06b; --off: #b0b6be;
+      --bad: #e5484d; --warn: #c77700;
       --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #16181c; --card: #22262c; --ink: #e8eaed; --muted: #9aa1ab;
         --line: #333941; --accent: #6c8cff; --ok: #3ecf8e; --off: #555c66;
+        --bad: #ff6369; --warn: #e2a53a;
         --shadow: 0 1px 3px rgba(0,0,0,.4);
       }
     }
@@ -24,12 +26,14 @@
     }
     header {
       display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-      padding: 22px 20px 14px; max-width: 900px; margin: 0 auto;
+      padding: 22px 20px 6px; max-width: 900px; margin: 0 auto;
     }
     header h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
     header .sub { color: var(--muted); font-size: 13px; }
+    .zones { max-width: 900px; margin: 0 auto; padding: 0 20px 14px; color: var(--muted); font-size: 13px; }
+    .zones b { color: var(--ink); font-weight: 600; }
     main { max-width: 900px; margin: 0 auto; padding: 0 20px 40px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
     .card {
       background: var(--card); border: 1px solid var(--line); border-radius: 12px;
       padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
@@ -45,9 +49,18 @@
     }
     .meta { color: var(--muted); font-size: 13px; display: grid; gap: 3px; }
     .meta code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+    .meta .warn { color: var(--warn); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      font-size: 11px; font-weight: 600; border-radius: 999px; padding: 2px 8px;
+      border: 1px solid var(--line); color: var(--muted);
+    }
+    .chip.ok  { color: var(--ok);  border-color: color-mix(in srgb, var(--ok)  40%, var(--line)); }
+    .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+    .chip.ota { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
     .spacer { flex: 1; }
     .actions { display: flex; gap: 8px; margin-top: 2px; }
-    a.btn, button.btn {
+    a.btn {
       appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink);
       font: inherit; font-size: 13px; font-weight: 550; text-decoration: none; cursor: pointer;
       padding: 7px 12px; border-radius: 8px; text-align: center;
@@ -63,6 +76,7 @@
     <h1>Sonos Nest Portal</h1>
     <span class="sub" id="summary">loading…</span>
   </header>
+  <div class="zones" id="zones"></div>
   <main>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden>
@@ -82,14 +96,48 @@
       return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     }
 
-    function tile(d) {
-      const online = d.online;
-      const seen = d.status === "seen";
-      const cfg = d.configUrl;
+    function fmtUptime(s) {
+      if (s == null) return "";
+      const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+      if (d) return `up ${d}d ${h}h`;
+      if (h) return `up ${h}h ${m}m`;
+      return `up ${m}m`;
+    }
+    function fmtAgo(s) {
+      if (s == null) return "";
+      if (s < 60) return `${s}s ago`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ago`;
+      return `${Math.floor(m / 60)}h ago`;
+    }
+
+    function tile(d, maxZones) {
+      const online = d.online, seen = d.status === "seen", cfg = d.configUrl;
       const cfgBtn = cfg
         ? `<a class="btn primary" href="${esc(cfg)}" target="_blank" rel="noopener">Open config</a>`
         : `<a class="btn disabled" title="${seen ? "Not registered yet" : "This device has no web config (on-device only)"}">No web config</a>`;
-      const zones = (d.zones || []).map((z) => z.name).filter(Boolean);
+
+      // Status chips: OTA-ready (mDNS _arduino._tcp), and a live config-page reachability probe.
+      const chips = [];
+      if (d.otaReady) chips.push(`<span class="chip ota" title="Advertising ArduinoOTA — ready to flash over WiFi">OTA ready</span>`);
+      if (cfg && d.configReachable === true) chips.push(`<span class="chip ok" title="Config page responded just now">config ✓</span>`);
+      if (cfg && d.configReachable === false) chips.push(`<span class="chip bad" title="Config page not responding">config ✗</span>`);
+
+      // Uptime · last beat · zone count (with a warn if this device sees fewer zones than others).
+      const bits = [];
+      const up = fmtUptime(d.uptimeSec);
+      if (up) bits.push(up);
+      if (online && d.lastSeenSec != null) bits.push(`beat ${fmtAgo(d.lastSeenSec)}`);
+      else if (!online && d.lastSeenSec != null) bits.push(`last seen ${fmtAgo(d.lastSeenSec)}`);
+      let zc = "";
+      if (!seen && d.zoneCount != null) {
+        const short = maxZones > 0 && d.zoneCount < maxZones;
+        zc = `<span class="${short ? "warn" : ""}" title="${short ? "sees fewer zones than other devices — possible discovery issue" : "Sonos zones this device sees"}">${d.zoneCount} zone${d.zoneCount === 1 ? "" : "s"}</span>`;
+      }
+
+      const line2 = [esc(d.ip || "—"), d.fwVersion ? esc(d.fwVersion) : null, (!seen && d.board && d.board !== "unknown") ? esc(d.board) : null]
+        .filter(Boolean);
+
       return `
         <div class="card ${online ? "" : "stale"}">
           <div class="row">
@@ -99,10 +147,11 @@
             <span class="badge">${seen ? "seen" : esc(UNIT_LABEL[d.unit] || d.unit)}</span>
           </div>
           <div class="meta">
-            <div><code>${esc(d.ip || "—")}</code>${d.fwVersion ? " · " + esc(d.fwVersion) : ""}</div>
+            <div><code>${line2.join("</code> · <code>")}</code></div>
             <div>${esc(d.mdnsName || "")}</div>
-            ${zones.length ? `<div>rooms: ${esc(zones.join(", "))}</div>` : ""}
+            <div>${[bits.join(" · "), zc].filter(Boolean).join(" · ")}</div>
           </div>
+          ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
           <div class="actions">${cfgBtn}</div>
         </div>`;
     }
@@ -110,14 +159,23 @@
     async function refresh() {
       try {
         const r = await fetch(API("api/devices"), { cache: "no-store" });
-        const { devices } = await r.json();
+        const { devices, zones } = await r.json();
         const grid = document.getElementById("grid");
-        const empty = document.getElementById("empty");
-        empty.hidden = devices.length > 0;
-        grid.innerHTML = devices.map(tile).join("");
+        document.getElementById("empty").hidden = devices.length > 0;
+
+        const maxZones = devices.reduce((m, d) => Math.max(m, d.zoneCount || 0), 0);
+        grid.innerHTML = devices.map((d) => tile(d, maxZones)).join("");
+
         const on = devices.filter((d) => d.online).length;
         document.getElementById("summary").textContent =
           `${devices.length} device${devices.length === 1 ? "" : "s"} · ${on} online`;
+
+        const z = document.getElementById("zones");
+        if (zones && zones.length) {
+          z.innerHTML = `<b>Sonos zones (${zones.length}):</b> ${zones.map((x) => esc(x.name)).join(" · ")}`;
+        } else {
+          z.textContent = "";
+        }
       } catch (e) {
         document.getElementById("summary").textContent = "portal unreachable";
       }
@@ -127,8 +185,7 @@
       try {
         const r = await fetch(API("api/portal"), { cache: "no-store" });
         const i = await r.json();
-        document.getElementById("portalInfo").textContent =
-          `Advertising ${i.service} at ${i.host}:${i.port}`;
+        document.getElementById("portalInfo").textContent = `Advertising ${i.service} at ${i.host}:${i.port}`;
       } catch (e) { /* non-fatal */ }
     }
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import threading
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,8 +32,33 @@ PORT = int(os.environ.get("PORT", "8000"))
 HOST_OVERRIDE = os.environ.get("PORTAL_HOST") or None
 STATIC_DIR = Path(__file__).parent / "static"
 
+PROBE_INTERVAL = 25   # seconds between config-page reachability sweeps
+PROBE_TIMEOUT = 2     # per-device probe timeout
+
 registry = Registry()
 mdns = MDNSService(registry, port=PORT, host_override=HOST_OVERRIDE)
+_stop = threading.Event()
+
+
+def _probe_config(url: str) -> bool:
+    """Is the device's config page answering right now? Any HTTP response (even 4xx) counts as
+    reachable; only a connection/timeout failure is 'unreachable'."""
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as r:
+            return r.status < 500
+    except urllib.error.HTTPError as e:
+        return e.code < 500
+    except Exception:
+        return False
+
+
+def _probe_loop() -> None:
+    while not _stop.is_set():
+        for dev_id, cfg in registry.registered_targets():
+            if cfg:
+                registry.set_config_reachable(dev_id, _probe_config(cfg))
+        _stop.wait(PROBE_INTERVAL)
 
 
 def _start_mdns() -> None:
@@ -47,7 +74,9 @@ async def lifespan(app: FastAPI):
     # a bridge network without multicast), and HA's Supervisor has a startup watchdog. The API must
     # be serving immediately; discovery comes up whenever it can.
     threading.Thread(target=_start_mdns, name="mdns-start", daemon=True).start()
+    threading.Thread(target=_probe_loop, name="config-probe", daemon=True).start()
     yield
+    _stop.set()
     mdns.stop()
 
 
@@ -83,7 +112,17 @@ async def heartbeat(request: Request):
 
 @app.get("/api/devices")
 async def devices():
-    return {"devices": registry.devices()}
+    devs = registry.devices()
+    # The Sonos zone list is the same on every device, so surface it ONCE (union across devices)
+    # instead of repeating it under each tile — the frontend shows a per-device count for a
+    # cross-check and this global list at the top.
+    union: dict[str, str] = {}
+    for d in devs:
+        for z in d.get("zones", []):
+            if z.get("name"):
+                union[z["name"]] = z.get("ip", "")
+    zones = [{"name": n, "ip": ip} for n, ip in sorted(union.items())]
+    return {"devices": devs, "zones": zones}
 
 
 @app.get("/api/portal")
