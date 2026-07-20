@@ -1,6 +1,6 @@
-# Installing Sonos Portal as a Home Assistant add-on
+# Installing Sonos Nest Portal as a Home Assistant add-on
 
-Sonos Portal ships as a Home Assistant **add-on** — the Supervisor builds it on your device from
+Sonos Nest Portal ships as a Home Assistant **add-on** — the Supervisor builds it on your device from
 this folder (no Docker registry, no prebuilt image, no command line needed). Once installed it
 shows up in the HA sidebar, and your sonos-nest devices register with it automatically.
 
@@ -25,12 +25,12 @@ The Supervisor pulls the add-on straight from GitHub and builds it. Nothing to d
    ```
    https://github.com/wjduenow/sonos-nest
    ```
-4. Back in the store, scroll to the **Sonos Nest add-ons** section and click **Sonos Portal**.
+4. Back in the store, scroll to the **Sonos Nest add-ons** section and click **Sonos Nest Portal**.
 5. Click **Install**. The first build takes a few minutes (it fetches the base image + Python
    deps). When it finishes:
    - Turn on **Start on boot** and **Watchdog**.
    - Leave **Show in sidebar** on (that's Ingress — how you open the dashboard).
-6. Click **Start**, then **Open Web UI** (or the **Sonos Portal** sidebar entry).
+6. Click **Start**, then **Open Web UI** (or the **Sonos Nest Portal** sidebar entry).
 
 That's it. Power on a sonos-nest device on the same network and it appears within a few seconds.
 
@@ -49,7 +49,7 @@ Use this if the HA host can't reach GitHub, or you want to run a modified copy.
    /addons/sonos-portal/app/…
    ```
 3. In **Settings → Add-ons → Add-on Store**, click **⋮ → Reload**.
-4. A **Local add-ons** section now lists **Sonos Portal**. Open it, **Install**, then **Start**
+4. A **Local add-ons** section now lists **Sonos Nest Portal**. Open it, **Install**, then **Start**
    (same options as Method A step 5–6).
 
 ---

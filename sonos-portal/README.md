@@ -54,7 +54,7 @@ DATA_DIR=./data PORT=8000 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 This folder **is** the add-on (`config.yaml` + `Dockerfile` + `build.yaml` + `run.sh`); the HA
 Supervisor builds it on-device — no registry or prebuilt image needed. The quickest path is to add
-this repo as a custom add-on repository and install **Sonos Portal** from the store.
+this repo as a custom add-on repository and install **Sonos Nest Portal** from the store.
 
 **→ Full step-by-step: [INSTALL-HOMEASSISTANT.md](INSTALL-HOMEASSISTANT.md)**
 

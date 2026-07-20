@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     mdns.stop()
 
 
-app = FastAPI(title="sonos-portal", lifespan=lifespan)
+app = FastAPI(title="Sonos Nest Portal", lifespan=lifespan)
 
 
 @app.middleware("http")

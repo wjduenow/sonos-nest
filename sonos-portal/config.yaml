@@ -1,7 +1,7 @@
 # Home Assistant add-on manifest. Its presence makes sonos-portal/ an installable add-on: add
 # this repo as a custom add-on repository, or drop the folder into the HA /addons share. The
 # Supervisor builds it on-device from the Dockerfile (no prebuilt image / registry needed).
-name: Sonos Portal
+name: Sonos Nest Portal
 version: "0.1.0"
 slug: sonos_portal
 description: LAN dashboard your sonos-nest devices self-register with — one click into each web config.
@@ -22,7 +22,7 @@ host_network: true
 ingress: true
 ingress_port: 8000
 panel_icon: mdi:speaker-multiple
-panel_title: Sonos Portal
+panel_title: Sonos Nest Portal
 
 # Optional direct access alongside ingress (handy for the firmware/curl tests); ingress is the
 # normal way in.
