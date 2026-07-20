@@ -8,8 +8,10 @@
 #include "touch.h"
 #include "encoder.h"
 #include "pcf8574.h"
+#include "config_server.h"   // the nest's :8080 web config (room/brightness/name)
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 
 bool boardInit() {
   bool ok = true;
@@ -22,6 +24,7 @@ bool boardInit() {
   if (!displayInit()) { Serial.println("[board] display init FAILED"); ok = false; }  // ST7701 RGB + LVGL
   touchInit();     // registers the CST816 as an LVGL pointer indev (needs LVGL up)
   encoderInit();   // EC11 quadrature via PCNT
+  configServerStart();   // web config on :8080; its task waits for WiFi (appBoot connects later)
   return ok;
 }
 
@@ -32,7 +35,14 @@ bool localAudioActive() { return false; }
 void localAudioSetVolume(uint8_t /*pct*/) {}
 const char *localFileUrl(const char * /*path*/) { return nullptr; }
 const char *localManagerUrl() { return nullptr; }   // no local storage, so nothing to manage
-const char *boardConfigUrl()  { return nullptr; }   // the nest has no web UI at all (on-device only)
+// The nest now serves a web config page on :8080 (config_server.cpp) — this is what the portal's
+// "Open config" points at. Valid only once WiFi is up; nullptr before then.
+const char *boardConfigUrl() {
+  if (WiFi.status() != WL_CONNECTED) return nullptr;
+  static String url;
+  url = "http://" + WiFi.localIP().toString() + ":8080";
+  return url.c_str();
+}
 void localTracksRefresh() {}
 int  localTrackCount() { return 0; }
 const char *localTrackName(int) { return nullptr; }

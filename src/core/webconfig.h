@@ -32,6 +32,8 @@ String registrationJson();
 //   room                 — value is a zone name; persists it and asks netTask to switch.
 //   ring                 — value is 0..100, the button-ring level (0 = off). Persisted only;
 //                          the unit applies it (see webConfigGen below).
+//   brightness           — value is 0..100, screen backlight % (nest); floored at 10. Persisted;
+//                          the unit applies it via webConfigGen, same as ring.
 //   playlist             — value is a Sonos saved-playlist name (sonos-button).
 //   volume               — value is 0..100, the fixed volume the button plays at.
 //   deviceName           — value is the DHCP hostname shown by the router. Sanitized to

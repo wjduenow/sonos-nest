@@ -72,6 +72,7 @@ String webConfigJson() {
   doc["wakeTrack"]  = settingsWakeTrack();
   doc["room"]       = settingsRoom();
   doc["ring"]       = settingsRing();
+  doc["brightness"] = settingsBrightness();   // screen units (nest); the unit applies changes
   doc["playlist"]   = settingsPlaylist();
   doc["volume"]     = settingsVolume();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
@@ -188,6 +189,16 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     if (!parsePct(value, v)) { err = field + " must be a number 0..100"; return false; }
     if (field == "ring") settingsSetRing((uint8_t)v);   // the unit applies it via webConfigGen
     else                 settingsSetVolume((uint8_t)v); // read at press time; nothing to apply
+    s_gen++;
+    return true;
+  }
+
+  if (field == "brightness") {
+    // Screen backlight % (nest). settingsSetBrightness() floors at 10 so a slip can't blank the
+    // display; the unit re-reads and applies it via webConfigGen (same path as ring).
+    long v;
+    if (!parsePct(value, v)) { err = "brightness must be a number 0..100"; return false; }
+    settingsSetBrightness((uint8_t)v);
     s_gen++;
     return true;
   }

@@ -7,6 +7,7 @@
 #include "core/board.h"
 #include "core/net/ota.h"
 #include "core/settings.h"
+#include "core/webconfig.h"   // webConfigGen() — apply remote brightness changes from the web config
 #include <WiFi.h>
 #include <lvgl.h>
 #include <vector>
@@ -469,6 +470,7 @@ static void updateClock() {
 
 static lv_obj_t *s_scrSettings, *s_setBright, *s_setArc, *s_setOta;
 static uint8_t   s_brightness = 100;
+static uint32_t  s_cfgGen = 0;    // last-seen webConfigGen() — moves when the web config changes brightness
 
 static void buildSettings() {
   s_scrSettings = lv_obj_create(nullptr);
@@ -565,6 +567,7 @@ void uiInit() {
   buildOta();
 
   s_brightness = settingsBrightness();
+  s_cfgGen     = webConfigGen();
 
   std::vector<String> menu(kMenuItems, kMenuItems + kMenuCount);
   listSet(s_menu, menu, LV_SYMBOL_LIST, menuClickCb);
@@ -601,6 +604,16 @@ void uiTick() {
       lv_timer_handler();
     }
     return;
+  }
+
+  // A brightness change from the web config (webConfigApply bumps webConfigGen). Re-read and apply,
+  // except while the clock/screensaver is dimmed — those restore s_brightness on exit anyway.
+  uint32_t cfgGen = webConfigGen();
+  if (cfgGen != s_cfgGen) {
+    s_cfgGen = cfgGen;
+    s_brightness = settingsBrightness();
+    if (s_cur != Screen::Clock) backlightSet(s_brightness);
+    if (s_cur == Screen::Settings) showSettings();   // keep the on-device arc/label in sync
   }
 
   KnobEvent ev = knobEvent();
