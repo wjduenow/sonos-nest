@@ -14,10 +14,20 @@
 >    `esp_reset_reason()` in the health JSON, which is what made it diagnosable without serial
 >    (commit 5cc1eb7).
 >
+> **Phase 3 built + verified** (portal as LAN update source, `sonos-portal/`): `app/firmware.py`
+> mirrors a configured repo's latest Release; `/api/firmware` serves a device-facing manifest with
+> URLs rewritten to the portal and a per-device `approved` flag; `/firmware/<bin>` streams the
+> cached image; dashboard gains per-tile version-diff + Update / Update-all; and the heartbeat
+> returns `{"recheck":true}` while an approval is pending so a dashboard click lands within ~45 s
+> (firmware `registrar.cpp` reads it → `updaterForceCheck()`). Hardware-verified: a device pulled an
+> update **routed through the portal** (fetch → approve-gate holds → download from `/firmware` →
+> flash → converge); the approve + heartbeat-recheck lifecycle verified by unit test (mDNS
+> auto-registration isn't testable under WSL, so that leg is logic-verified only).
+>
 > **Remaining:** a `v*` tag CI run + flashing a real CI binary (Phase 1 hardware pass); the
-> per-page HTML toggle in each board's config UI; Phase 3 (portal as LAN update source). The
-> existing espota push path (`*-ota` envs, the `/ota` skill) stays as the dev-iteration flow — this
-> is a fleet path on top.
+> per-page HTML toggle in each board's config UI (the fields already work via `/api/config` and the
+> portal). The existing espota push path (`*-ota` envs, the `/ota` skill) stays as the dev-iteration
+> flow — this is a fleet path on top.
 
 ## Context
 
