@@ -9,6 +9,7 @@
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
+#include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
 #include <ArduinoJson.h>
 #include <Arduino.h>       // ESP.getFreeHeap() etc. for the health readout
 #include <WiFi.h>          // WiFi.localIP() — the registration payload's ip field
@@ -97,6 +98,16 @@ String webConfigJson() {
   h["soapLastMs"]     = sLast;
   h["soapMaxMs"]      = sMax;
 
+  // OTA pull state (net/updater.cpp): the toggle, the source, what's running, and what's available
+  // (null when up-to-date/disabled). Drives the config page's "Updates" section and its Approve
+  // button (shown only when available && !auto).
+  JsonObject ota = doc["ota"].to<JsonObject>();
+  ota["auto"]      = settingsOtaAuto();
+  ota["updateUrl"] = settingsUpdateUrl();
+  ota["running"]   = FW_VERSION;
+  if (updaterAvailable()) ota["available"] = updaterAvailableVersion();
+  else                    ota["available"] = (const char *)nullptr;
+
   JsonArray pls = doc["playlists"].to<JsonArray>();
   for (const String &n : s_playlists) pls.add(n);
 
@@ -141,6 +152,11 @@ String registrationJson() {
   doc["unit"] = "unknown"; doc["board"] = "unknown";
 #endif
   doc["fwVersion"]  = FW_VERSION;
+  // OTA pull status for the dashboard: the per-device policy + whether an update is waiting, so the
+  // portal can show a version diff and offer an Approve button (plans/06 Phase 3).
+  doc["otaAuto"] = settingsOtaAuto();
+  if (updaterAvailable()) doc["updateAvailable"] = updaterAvailableVersion();
+  else                    doc["updateAvailable"] = (const char *)nullptr;
   // boardConfigUrl() is the device's web-config page, or nullptr on boards without one (the nest).
   // NOT localManagerUrl() — that's specifically a *file* manager, which the button lacks even
   // though it serves a config page. Emit null so the portal renders "Open config" disabled.
@@ -228,6 +244,37 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     // (otaHostname()/wifiHostname() both derive from it at boot). netTask does the reset shortly
     // after this response is sent; the browser will need to reconnect at the new name.
     if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
+    return true;
+  }
+
+  if (field == "otaAuto") {
+    // Auto-apply toggle. Accept 0/1 or false/true; anything else is a bad request, not "off".
+    bool on;
+    if (value == "1" || value == "true")       on = true;
+    else if (value == "0" || value == "false") on = false;
+    else { err = "otaAuto must be 0 or 1"; return false; }
+    settingsSetOtaAuto(on);
+    return true;
+  }
+
+  if (field == "updateUrl") {
+    // The firmware manifest source. "" disables the pull path (espota-only). Otherwise it must be
+    // an http(s) URL — the portal (LAN http) or a GitHub-hosted manifest (https).
+    if (value.length() && !value.startsWith("http://") && !value.startsWith("https://")) {
+      err = "updateUrl must be http:// or https://";
+      return false;
+    }
+    settingsSetUpdateUrl(value);
+    updaterForceCheck();   // re-check against the new source on netTask's next tick
+    return true;
+  }
+
+  if (field == "updateNow") {
+    // Explicit approve — the config page's "Update now" / the portal's Approve. Only meaningful
+    // when an update is actually waiting; the apply happens on netTask (not this HTTP task) so the
+    // response returns before the blocking flash begins.
+    if (!updaterAvailable()) { err = "no update available"; return false; }
+    updaterApprove();
     return true;
   }
 

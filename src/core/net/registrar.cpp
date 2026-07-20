@@ -3,6 +3,7 @@
 #include "../settings.h"     // settingsPortal() — cached "ip:port", so we can register pre-query
 #include "../webconfig.h"    // registrationJson() — the identity payload (reused, not duplicated)
 #include "ota.h"             // otaHostname() — the stable id (matches the register payload)
+#include "updater.h"         // updaterAvailable* — OTA pull status carried in the heartbeat
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -87,6 +88,10 @@ static String heartbeatJson() {
   doc["ip"]        = WiFi.localIP().toString();
   doc["uptimeSec"] = (uint32_t)(millis() / 1000);
   doc["fwVersion"] = FW_VERSION;
+  // OTA pull status, so the dashboard reflects policy + a waiting update between registrations.
+  doc["otaAuto"]   = settingsOtaAuto();
+  if (updaterAvailable()) doc["updateAvailable"] = updaterAvailableVersion();
+  else                    doc["updateAvailable"] = (const char *)nullptr;
   String out;
   serializeJson(doc, out);
   return out;

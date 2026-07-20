@@ -17,6 +17,7 @@
 #include "net/wifi.h"
 #include "net/ota.h"
 #include "net/registrar.h"       // self-register with the sonos-portal dashboard (all units)
+#include "net/updater.h"         // OTA pull path — check for/apply a published firmware update
 #include "board.h"               // knobDown() — the deliberate re-provision trigger (held at boot)
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
@@ -226,6 +227,7 @@ static void netTask(void *) {
 
     processPending();
     registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
+    updaterTick();     // OTA pull check (self-rate-limited ~6 h; applies only on explicit approve)
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
@@ -317,6 +319,11 @@ void appBoot() {
   // portal service is resolvable) AND after selectZone() (so the payload's zone list is populated
   // on the very first registration). Best-effort; registrarTick() retries if the portal is down.
   registrarBegin();
+
+  // OTA pull check. Dormant unless settingsUpdateUrl() is set; if otaAuto is on and a newer build
+  // is published for this unit, this flashes + reboots HERE — before playback starts — rather than
+  // mid-run. Runtime checks (explicit approve / portal-approved) happen in netTask via updaterTick.
+  updaterBegin();
 }
 
 void appStartTasks() {

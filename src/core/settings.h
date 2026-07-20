@@ -37,6 +37,13 @@ void    settingsSetDeviceName(const String &name);
 String  settingsPortal();
 void    settingsSetPortal(const String &hostPort);
 
+// --- OTA pull-update (net/updater.cpp; plans/06). Both opt-in, default off/empty. ---
+bool    settingsOtaAuto();               // auto-apply published updates (at boot)? default false
+void    settingsSetOtaAuto(bool on);
+
+String  settingsUpdateUrl();             // firmware manifest URL; "" (default) = pull disabled,
+void    settingsSetUpdateUrl(const String &url);   // espota-only. Portal (LAN http) or GitHub (https).
+
 // --- sonos-button ---
 String  settingsPlaylist();              // Sonos saved-playlist name to start, default "Sleep"
 void    settingsSetPlaylist(const String &name);

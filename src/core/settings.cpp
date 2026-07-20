@@ -82,3 +82,11 @@ String settingsPortal() { return s_prefs.getString("portal", ""); }
 void settingsSetPortal(const String &hostPort) {
   if (settingsPortal() != hostPort) s_prefs.putString("portal", hostPort);
 }
+
+bool settingsOtaAuto() { return s_prefs.getBool("otaauto", false); }
+void settingsSetOtaAuto(bool on) { s_prefs.putBool("otaauto", on); }
+
+String settingsUpdateUrl() { return s_prefs.getString("updurl", ""); }
+void   settingsSetUpdateUrl(const String &url) {
+  if (settingsUpdateUrl() != url) s_prefs.putString("updurl", url);
+}
