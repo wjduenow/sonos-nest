@@ -61,6 +61,11 @@ class Registry:
         # id -> {"reachable": bool, "at": float}. Background config-page probe results (not
         # persisted — transient, re-probed on startup).
         self._probe: dict[str, dict[str, Any]] = {}
+        # id -> approved firmware version. A pending dashboard approval for an otaAuto=false device
+        # (plans/06 Part 3): the device's /api/firmware response carries approved=true until it
+        # reports running that version, at which point the approval is spent. Persisted so a portal
+        # restart doesn't drop a pending rollout.
+        self._approvals: dict[str, str] = {}
         self._load()
 
     # --- persistence ---------------------------------------------------------
@@ -68,15 +73,17 @@ class Registry:
         try:
             raw = json.loads(self._path.read_text())
             self._registered = raw.get("registered", {})
+            self._approvals = raw.get("approvals", {})
         except (FileNotFoundError, ValueError, OSError):
             self._registered = {}
+            self._approvals = {}
 
     def _save_locked(self) -> None:
         # Only registered devices persist; mDNS-seen entries are re-discovered on each run.
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"registered": self._registered}, indent=2))
+            tmp.write_text(json.dumps({"registered": self._registered, "approvals": self._approvals}, indent=2))
             tmp.replace(self._path)  # atomic — never leave a half-written file
         except OSError as exc:
             print(f"[registry] save failed: {exc}", flush=True)
@@ -98,12 +105,17 @@ class Registry:
                     "fwVersion": payload.get("fwVersion", rec.get("fwVersion", "")),
                     "configUrl": payload.get("configUrl"),  # may be null (nest has no web UI)
                     "zones": payload.get("zones", rec.get("zones", [])),
+                    # OTA pull status (plans/06): the device's per-unit policy + whether it's seeing
+                    # a newer build. Absent on pre-OTA firmware → default off/none.
+                    "otaAuto": payload.get("otaAuto", rec.get("otaAuto", False)),
+                    "updateAvailable": payload.get("updateAvailable", rec.get("updateAvailable")),
                     "last_seen": _now(),
                     "registered_at": rec.get("registered_at", _now()),
                 }
             )
             self._registered[dev_id] = rec
             self._seen.pop(dev_id, None)  # promotion: a registered device isn't merely "seen"
+            self._clear_approval_if_converged(dev_id, rec)
             self._save_locked()
         return dev_id
 
@@ -122,8 +134,44 @@ class Registry:
                 rec["fwVersion"] = payload["fwVersion"]
             if payload.get("uptimeSec") is not None:
                 rec["uptimeSec"] = payload["uptimeSec"]
+            if "otaAuto" in payload:
+                rec["otaAuto"] = payload["otaAuto"]
+            if "updateAvailable" in payload:  # may be null (== up to date) — a present key is truth
+                rec["updateAvailable"] = payload["updateAvailable"]
+            self._clear_approval_if_converged(dev_id, rec)
             self._save_locked()
         return True
+
+    # --- OTA approvals (plans/06 Part 3) -------------------------------------
+    def approve(self, dev_id: str, version: str) -> None:
+        """Approve `dev_id` to update to `version` — the dashboard's per-device Update button. The
+        device's /api/firmware response then carries approved=true until it reports running it."""
+        with self._lock:
+            self._approvals[dev_id] = version
+            self._save_locked()
+
+    def approve_all(self, version: str, ids: list[str]) -> None:
+        with self._lock:
+            for i in ids:
+                self._approvals[i] = version
+            self._save_locked()
+
+    def is_approved(self, dev_id: str, version: str) -> bool:
+        with self._lock:
+            return self._approvals.get(dev_id) == version
+
+    def pending_approval(self, dev_id: str) -> str | None:
+        """The version this device is approved to move to, or None. Drives the heartbeat 'recheck'
+        nudge so a dashboard approval reaches the device within a beat, not on its ~6 h poll."""
+        with self._lock:
+            return self._approvals.get(dev_id)
+
+    def _clear_approval_if_converged(self, dev_id: str, rec: dict[str, Any]) -> None:
+        """Caller holds the lock. Once the device runs the approved version the approval is spent —
+        drop it so a later same-version manifest doesn't re-trigger a flash loop."""
+        v = self._approvals.get(dev_id)
+        if v and rec.get("fwVersion") == v:
+            self._approvals.pop(dev_id, None)
 
     def note_seen(self, dev_id: str, name: str, ip: str) -> None:
         """Record an mDNS-discovered device (fallback path). No-op if already registered."""
@@ -202,6 +250,9 @@ class Registry:
                 d["zoneCount"] = len(rec.get("zones", []))
                 d["otaReady"] = self._ota_ready(ip, now, d["online"], True)
                 d["configReachable"] = self._config_reachable(rec["id"], now)
+                d["otaAuto"] = rec.get("otaAuto", False)
+                d["updateAvailable"] = rec.get("updateAvailable")
+                d["approved"] = self._approvals.get(rec["id"])  # the version a pending approve targets
                 out.append(d)
             for dev_id, s in self._seen.items():
                 if dev_id in self._registered:

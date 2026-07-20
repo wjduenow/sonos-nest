@@ -25,6 +25,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from .firmware import FirmwareMirror
 from .mdns import MDNSService
 from .registry import Registry
 
@@ -35,8 +36,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 PROBE_INTERVAL = 25   # seconds between config-page reachability sweeps
 PROBE_TIMEOUT = 2     # per-device probe timeout
 
+# Firmware mirror (plans/06 Part 3) — off unless FIRMWARE_REPO (owner/name) is set.
+FIRMWARE_REPO = os.environ.get("FIRMWARE_REPO") or None
+FIRMWARE_TOKEN = os.environ.get("FIRMWARE_TOKEN") or None
+FIRMWARE_POLL = int(os.environ.get("FIRMWARE_POLL", "900"))
+
 registry = Registry()
 mdns = MDNSService(registry, port=PORT, host_override=HOST_OVERRIDE)
+mirror = FirmwareMirror(repo=FIRMWARE_REPO, token=FIRMWARE_TOKEN, interval=FIRMWARE_POLL)
 _stop = threading.Event()
 
 
@@ -75,9 +82,11 @@ async def lifespan(app: FastAPI):
     # be serving immediately; discovery comes up whenever it can.
     threading.Thread(target=_start_mdns, name="mdns-start", daemon=True).start()
     threading.Thread(target=_probe_loop, name="config-probe", daemon=True).start()
+    mirror.start()  # spawns its own daemon poll thread (no-op if FIRMWARE_REPO is unset)
     yield
     _stop.set()
     mdns.stop()
+    mirror.stop()
 
 
 app = FastAPI(title="Sonos Nest Portal", lifespan=lifespan)
@@ -107,7 +116,15 @@ async def heartbeat(request: Request):
     if not registry.heartbeat(payload):
         # Unknown device (portal forgot it / cleared state) → tell it to re-register.
         return JSONResponse({"ok": False, "error": "unknown device"}, status_code=404)
-    return {"ok": True}
+    resp = {"ok": True}
+    # If an update is approved for this device, nudge it to re-check the manifest now — it otherwise
+    # only polls every ~6 h, so this is what makes a dashboard "Update" land within a heartbeat.
+    # registry.heartbeat() already cleared the approval if the device now runs that version, so a
+    # converged device won't be nudged.
+    dev_id = payload.get("mdnsName") or payload.get("ip")
+    if dev_id and registry.pending_approval(dev_id):
+        resp["recheck"] = True
+    return resp
 
 
 @app.get("/api/devices")
@@ -130,6 +147,67 @@ async def remove_device(dev_id: str):
     # Manual "forget" — the tile's Remove button. The device reappears if it registers again
     # (or is re-discovered over mDNS), so this is safe to use on anything that's really gone.
     return {"ok": True, "removed": registry.remove(dev_id)}
+
+
+# --- firmware pull-OTA (plans/06 Part 3) -------------------------------------
+@app.get("/api/firmware")
+async def firmware_manifest(request: Request):
+    """Device-facing manifest (net/updater.cpp GETs this as its updateUrl). Same schema CI emits,
+    but every `url` is rewritten to a portal-served LAN address so the device never touches GitHub,
+    and each unit carries a per-device `approved` derived from the query `id` — that's how an
+    otaAuto=false device flashes only after the dashboard approves it."""
+    m = mirror.manifest()
+    if not m:
+        return JSONResponse({"error": "no firmware mirrored"}, status_code=404)
+    version = m.get("version")
+    dev_id = request.query_params.get("id")
+    approved = registry.is_approved(dev_id, version) if dev_id else False
+    base = str(request.base_url)  # e.g. http://<portal-ip>:8000/ — how the device reached us
+    units = {}
+    for unit, u in m.get("units", {}).items():
+        units[unit] = {
+            "bin": u.get("bin"),
+            "url": f"{base}firmware/{u.get('bin')}",
+            "sha256": u.get("sha256"),
+            "size": u.get("size"),
+            "approved": approved,
+        }
+    return {"version": version, "units": units}
+
+
+@app.get("/firmware/{name}")
+async def firmware_bin(name: str):
+    """Stream a mirrored binary over plain LAN HTTP. bin_path() refuses any path traversal."""
+    p = mirror.bin_path(name)
+    if not p:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(p, media_type="application/octet-stream", filename=name)
+
+
+@app.get("/api/firmware/status")
+async def firmware_status():
+    """Mirror state for the dashboard header (enabled, mirrored version, last check, last error)."""
+    return mirror.status()
+
+
+@app.post("/api/devices/{dev_id}/approve")
+async def approve_device(dev_id: str):
+    v = mirror.version()
+    if not v:
+        return JSONResponse({"ok": False, "error": "no firmware mirrored"}, status_code=409)
+    registry.approve(dev_id, v)
+    return {"ok": True, "approved": v}
+
+
+@app.post("/api/devices/approve-all")
+async def approve_all():
+    """Approve every registered device that's currently reporting an available update."""
+    v = mirror.version()
+    if not v:
+        return JSONResponse({"ok": False, "error": "no firmware mirrored"}, status_code=409)
+    ids = [d["id"] for d in registry.devices() if d.get("updateAvailable")]
+    registry.approve_all(v, ids)
+    return {"ok": True, "approved": v, "count": len(ids)}
 
 
 @app.get("/api/portal")

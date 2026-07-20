@@ -58,8 +58,9 @@ static bool resolvePortal() {
 }
 
 // POST a JSON body to the resolved portal. Short timeouts: this runs on netTask between Sonos
-// polls, so a slow/absent portal must not stall input. Returns true on a 2xx/3xx.
-static bool httpPostJson(const char *path, const String &body) {
+// polls, so a slow/absent portal must not stall input. Returns true on a 2xx/3xx; when respOut is
+// given, fills it with the response body (used to read the heartbeat's "recheck" nudge).
+static bool httpPostJson(const char *path, const String &body, String *respOut = nullptr) {
   if (s_host.length() == 0 || s_port == 0) return false;
   WiFiClient client;
   HTTPClient http;
@@ -69,6 +70,7 @@ static bool httpPostJson(const char *path, const String &body) {
   http.setTimeout(3000);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
+  if (respOut && code > 0) *respOut = http.getString();
   http.end();
   return code >= 200 && code < 400;
 }
@@ -119,8 +121,18 @@ void registrarTick() {
   }
   // A failed heartbeat means the portal restarted, moved, or forgot us — drop the cached host so
   // the next tick re-resolves via mDNS and re-registers from scratch.
-  if (!httpPostJson("/api/heartbeat", heartbeatJson())) {
+  String resp;
+  if (!httpPostJson("/api/heartbeat", heartbeatJson(), &resp)) {
     Serial.println("[registrar] heartbeat failed — will re-resolve portal");
     s_host = ""; s_port = 0;
+    return;
+  }
+  // The portal sets "recheck" when a firmware update has been approved for us from the dashboard.
+  // The updater otherwise polls the manifest only every ~6 h; this makes an approval land within a
+  // heartbeat (~45 s). Cheap to parse — the body is a few bytes.
+  JsonDocument rd;
+  if (!deserializeJson(rd, resp) && rd["recheck"].as<bool>()) {
+    Serial.println("[registrar] portal requests firmware re-check");
+    updaterForceCheck();
   }
 }

@@ -76,8 +76,9 @@
     .chip.ok  { color: var(--ok);  border-color: color-mix(in srgb, var(--ok)  40%, var(--line)); }
     .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
     .chip.ota { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+    .chip.upd { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); align-self: center; }
     .spacer { flex: 1; }
-    .actions { display: flex; gap: 8px; margin-top: 2px; }
+    .actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; align-items: center; }
     a.btn {
       appearance: none; border: 1px solid var(--line); background: transparent; color: var(--ink);
       font: inherit; font-size: 13px; font-weight: 550; text-decoration: none; cursor: pointer;
@@ -96,6 +97,7 @@
     <span class="sub" id="summary">loading…</span>
   </header>
   <div class="zones" id="zones"></div>
+  <div class="zones" id="fwbar"></div>
   <main>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden>
@@ -169,6 +171,21 @@
         ? `<button class="btn danger" data-id="${esc(d.id)}" onclick="removeDevice(this)">Remove</button>`
         : "";
 
+      // OTA pull (plans/06): a device reports updateAvailable when the mirrored build differs from
+      // what it runs. Show an Update button unless it auto-updates or an approval is already in
+      // flight (approved == the available version, cleared once it reports running that build).
+      let updateHtml = "";
+      if (!seen && d.updateAvailable) {
+        const pending = d.approved && d.approved === d.updateAvailable;
+        if (pending) {
+          updateHtml = `<span class="chip upd" title="Approved — flashes on the device's next check">updating to ${esc(d.updateAvailable)}…</span>`;
+        } else if (d.otaAuto) {
+          updateHtml = `<span class="chip upd" title="Device is set to auto-update — applies on its next reboot">auto ${esc(d.updateAvailable)}</span>`;
+        } else {
+          updateHtml = `<button class="btn primary" data-id="${esc(d.id)}" data-ver="${esc(d.updateAvailable)}" onclick="approveDevice(this)">Update to ${esc(d.updateAvailable)}</button>`;
+        }
+      }
+
       return `
         <div class="card ${online ? "" : "stale"}">
           <div class="head">
@@ -183,7 +200,7 @@
             ${summaryLine ? `<div>${summaryLine}</div>` : ""}
           </div>
           ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
-          <div class="actions">${cfgBtn}${removeBtn}</div>
+          <div class="actions">${cfgBtn}${updateHtml}${removeBtn}</div>
         </div>`;
     }
 
@@ -194,6 +211,36 @@
         await fetch(API("api/devices/" + encodeURIComponent(id)), { method: "DELETE" });
       } catch (e) { /* non-fatal */ }
       refresh();
+    }
+
+    async function approveDevice(el) {
+      const id = el.dataset.id;
+      el.disabled = true; el.textContent = "Approving…";
+      try {
+        await fetch(API("api/devices/" + encodeURIComponent(id) + "/approve"), { method: "POST" });
+      } catch (e) { /* non-fatal */ }
+      refresh();
+    }
+
+    async function approveAll() {
+      if (!confirm("Approve every device that's showing an available update?\n\nEach flashes on its next check.")) return;
+      try {
+        await fetch(API("api/devices/approve-all"), { method: "POST" });
+      } catch (e) { /* non-fatal */ }
+      refresh();
+    }
+
+    async function firmwareStatus() {
+      try {
+        const r = await fetch(API("api/firmware/status"), { cache: "no-store" });
+        const s = await r.json();
+        const bar = document.getElementById("fwbar");
+        if (!s.enabled) { bar.textContent = ""; return; }   // mirror off (no FIRMWARE_REPO)
+        const ver = s.version ? esc(s.version) : "(fetching…)";
+        const err = s.lastError ? ` <span class="warn">— last error: ${esc(s.lastError)}</span>` : "";
+        bar.innerHTML = `<b>Firmware mirror:</b> <code>${ver}</code>${err} ` +
+          `<button class="btn" style="margin-left:8px" onclick="approveAll()">Update all</button>`;
+      } catch (e) { /* non-fatal */ }
     }
 
     async function refresh() {
@@ -231,7 +278,9 @@
 
     refresh();
     portalInfo();
+    firmwareStatus();
     setInterval(refresh, 5000);
+    setInterval(firmwareStatus, 15000);
   </script>
 </body>
 </html>

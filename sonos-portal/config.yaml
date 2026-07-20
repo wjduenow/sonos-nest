@@ -33,5 +33,11 @@ ports_description:
 
 options:
   portal_host: ""
+  firmware_repo: ""     # "owner/name" to mirror that repo's latest Release as the pull-OTA source
+  firmware_token: ""    # optional GitHub token (raises the API rate limit; public repo works without)
+  firmware_poll: 900    # seconds between release checks
 schema:
   portal_host: "str?"
+  firmware_repo: "str?"
+  firmware_token: "password?"
+  firmware_poll: "int?"
