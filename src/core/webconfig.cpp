@@ -36,6 +36,15 @@ static bool knownTrack(const String &path) {
 static uint32_t s_gen = 0;
 uint32_t webConfigGen() { return s_gen; }
 
+// Last LVGL pool sample reported by the unit (see webconfig.h). Plain uint32/uint8 stores written
+// by the UI task and read by the HTTP task — a torn read just skews one diagnostic number, so no
+// lock needed.
+static uint32_t s_lvUsed = 0, s_lvMaxUsed = 0;
+static uint8_t  s_lvFragPct = 0;
+void webConfigReportLvMem(uint32_t usedBytes, uint32_t maxUsedBytes, uint8_t fragPct) {
+  s_lvUsed = usedBytes; s_lvMaxUsed = maxUsedBytes; s_lvFragPct = fragPct;
+}
+
 // Playlist-name cache, published by the unit after its "SQ:" browse — see webconfig.h.
 static std::vector<String> s_playlists;
 void webConfigPlaylistsSet(const std::vector<String> &names) { s_playlists = names; }
@@ -99,6 +108,11 @@ String webConfigJson() {
   h["soapReconnects"] = sRe;
   h["soapLastMs"]     = sLast;
   h["soapMaxMs"]      = sMax;
+  // LVGL pool usage (see webConfigReportLvMem). lvMemMax is the peak since boot — the number to
+  // size LV_MEM_SIZE against. 0 until the UI task reports its first sample.
+  h["lvMemUsed"]    = s_lvUsed;
+  h["lvMemMax"]     = s_lvMaxUsed;
+  h["lvMemFragPct"] = s_lvFragPct;
 
   // OTA pull state (net/updater.cpp): the toggle, the source, what's running, and what's available
   // (null when up-to-date/disabled). Drives the config page's "Updates" section and its Approve

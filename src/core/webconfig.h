@@ -62,3 +62,9 @@ uint32_t webConfigGen();
 // Call when a track is removed from local storage: clears any pick that referenced it, so a
 // deleted file can't leave the sleep/wake track pointing at something that no longer exists.
 void webConfigTrackDeleted(const String &path);
+
+// LVGL heap-pool usage, surfaced in the health readout so LV_MEM_SIZE can be right-sized against
+// real peak usage instead of a guess. LVGL isn't thread-safe, so the unit samples lv_mem_monitor()
+// on its OWN (UI) task and reports the numbers here; webConfigJson() serves the last sample. maxUsed
+// is LVGL's own high-water since boot. All zero until the unit reports (headless boards never do).
+void webConfigReportLvMem(uint32_t usedBytes, uint32_t maxUsedBytes, uint8_t fragPct);

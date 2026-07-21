@@ -245,6 +245,11 @@ static void buildNowPlaying() {
 }
 
 static void renderNow() {
+  // Called every UI frame (~15 ms). Setting an LVGL label reallocs+strcpy's its buffer and
+  // invalidates the object, forcing a partial render + full RGB-panel flush; the title/artist
+  // labels also scroll (LV_LABEL_LONG_SCROLL_CIRCULAR), and re-setting identical text restarts
+  // the marquee. So compare against the last-rendered value and only touch an object when it
+  // actually changed — static "now playing" content then costs nothing until it moves.
   TransportState st;
   uint32_t pos, dur;
   char title[128], artist[128], zone[40];
@@ -255,21 +260,30 @@ static void renderNow() {
   snprintf(title,  sizeof(title),  "%s", g_player.title.length() ? g_player.title.c_str() : "—");
   snprintf(artist, sizeof(artist), "%s", g_player.artist.c_str());
   snprintf(zone,   sizeof(zone),   "%s", g_player.zoneName.c_str());
+  g_player.dirty = false;   // honor the PlayerState contract: ui_task clears after redraw
   stateUnlock();
 
-  lv_label_set_text(s_title, title);
-  lv_label_set_text(s_artist, artist);
-  lv_label_set_text(s_zone, zone);
+  static char s_lastTitle[128] = {0}, s_lastArtist[128] = {0}, s_lastZone[40] = {0};
+  if (strcmp(title,  s_lastTitle))  { strcpy(s_lastTitle,  title);  lv_label_set_text(s_title,  title); }
+  if (strcmp(artist, s_lastArtist)) { strcpy(s_lastArtist, artist); lv_label_set_text(s_artist, artist); }
+  if (strcmp(zone,   s_lastZone))   { strcpy(s_lastZone,   zone);   lv_label_set_text(s_zone,   zone); }
 
-  const char *sym = st == TransportState::Playing ? LV_SYMBOL_PLAY :
-                    st == TransportState::Paused  ? LV_SYMBOL_PAUSE : LV_SYMBOL_STOP;
-  char tbuf[40], a[8], b[8];
-  fmtTime(a, sizeof(a), pos);
-  fmtTime(b, sizeof(b), dur);
-  snprintf(tbuf, sizeof(tbuf), "%s %s / %s", sym, a, b);
-  lv_label_set_text(s_time, tbuf);
-  lv_arc_set_value(s_arc, dur ? (int32_t)((uint64_t)pos * 1000 / dur) : 0);
+  // Transport line + progress arc advance with playback — update only when pos/dur/state moves.
+  static uint32_t s_lastPos = UINT32_MAX, s_lastDur = UINT32_MAX;
+  static TransportState s_lastSt = TransportState::Transitioning;
+  if (pos != s_lastPos || dur != s_lastDur || st != s_lastSt) {
+    s_lastPos = pos; s_lastDur = dur; s_lastSt = st;
+    const char *sym = st == TransportState::Playing ? LV_SYMBOL_PLAY :
+                      st == TransportState::Paused  ? LV_SYMBOL_PAUSE : LV_SYMBOL_STOP;
+    char tbuf[40], a[8], b[8];
+    fmtTime(a, sizeof(a), pos);
+    fmtTime(b, sizeof(b), dur);
+    snprintf(tbuf, sizeof(tbuf), "%s %s / %s", sym, a, b);
+    lv_label_set_text(s_time, tbuf);
+    lv_arc_set_value(s_arc, dur ? (int32_t)((uint64_t)pos * 1000 / dur) : 0);
+  }
 
+  // Volume overlay auto-hide is time-based — must be evaluated every frame.
   if (!lv_obj_has_flag(s_vol, LV_OBJ_FLAG_HIDDEN) && lv_tick_elaps(s_volShownAt) > 1500)
     lv_obj_add_flag(s_vol, LV_OBJ_FLAG_HIDDEN);
 }
@@ -608,6 +622,16 @@ void uiInit() {
 void uiTick() {
   // WiFi provisioning is done by the time the UI task runs — drop the setup overlay if it's up.
   if (s_provOverlay) { lv_obj_delete(s_provOverlay); s_provOverlay = nullptr; }
+
+  // Sample the LVGL pool high-water on our own task (LVGL isn't thread-safe) and publish it for
+  // the health readout, so LV_MEM_SIZE can be trimmed against real peak usage. ~2 s cadence.
+  static uint32_t s_lvSampledAt = 0;
+  if (lv_tick_elaps(s_lvSampledAt) > 2000) {
+    s_lvSampledAt = lv_tick_get();
+    lv_mem_monitor_t m;
+    lv_mem_monitor(&m);
+    webConfigReportLvMem((uint32_t)m.total_size - m.free_size, (uint32_t)m.max_used, m.frag_pct);
+  }
 
   // OTA overlay preempts everything during a firmware update.
   if (otaActive()) {

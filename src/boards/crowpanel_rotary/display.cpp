@@ -25,10 +25,15 @@ static const uint8_t  kBacklightBits = 8;       // 0-255 duty
 static Arduino_ESP32RGBPanel *s_bus = nullptr;
 static Arduino_ST7701_RGBPanel *s_gfx = nullptr;
 
-// --- LVGL draw buffers (partial; ~1/10 screen each, double-buffered) ---
+// --- LVGL draw buffers (partial; ~1/20 screen each, double-buffered) ---
 // RGB565 => 2 bytes/px. NOTE: in LVGL 9 sizeof(lv_color_t)!=2, so size the buffer in
 // raw bytes (LV_COLOR_DEPTH/8), not by sizeof(lv_color_t).
-static const uint32_t kBufLines = LCD_HEIGHT / 10;
+// Internal SRAM is THE tight resource on this unit (see plans + CLAUDE.md): these two
+// buffers are heap_caps_malloc'd from internal RAM at boot and never freed, so they both
+// consume free heap and permanently fragment it (the reason OTA is unreliable). 1/20 screen
+// (24 lines) keeps rendering in fast SRAM at ~half the footprint — LVGL partial mode works
+// with any buffer >= a few lines; the only cost is marginally more flush callbacks.
+static const uint32_t kBufLines = LCD_HEIGHT / 20;
 static const uint32_t kBufBytes = LCD_WIDTH * kBufLines * (LV_COLOR_DEPTH / 8);
 static uint8_t *s_buf1 = nullptr;
 static uint8_t *s_buf2 = nullptr;
