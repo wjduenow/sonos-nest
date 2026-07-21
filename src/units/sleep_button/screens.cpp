@@ -147,11 +147,14 @@ void uiTick() {
   const KnobEvent ev = knobEvent();
   if (ev == KnobEvent::Short) {
     ringPulse();   // acknowledge the press instantly, before any network work
-    // Toggle on what Sonos is ACTUALLY doing, not just our own state — the room may have been
-    // started or stopped from the Sonos app since we last looked. Starting counts as busy so a
-    // double-tap can't fire two starts.
-    if (s_st == St::Starting || s_st == St::Playing || tr == TransportState::Playing) stopPlayback();
-    else                                                                              startPlaylist();
+    // Stop only when the BUTTON is what's playing (Starting counts as busy so a double-tap can't
+    // fire two starts); otherwise always start the configured playlist. This deliberately does NOT
+    // stop on tr==Playing: a soundbar room reports Playing for TV/line-in audio (and for anything
+    // started from the Sonos app), and a press then went down the stop branch and never started the
+    // playlist. Starting the playlist naturally takes the room off TV, which is what this button is
+    // for — so a press overrides whatever else the room is doing rather than toggling it off.
+    if (s_st == St::Starting || s_st == St::Playing) stopPlayback();
+    else                                             startPlaylist();
   } else if (ev == KnobEvent::Long) {
     Serial.println("[unit   ] button Long — reserved");
   }
