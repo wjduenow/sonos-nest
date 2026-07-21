@@ -127,9 +127,79 @@ async def heartbeat(request: Request):
     return resp
 
 
+def _parse_ver(s: str) -> list[int] | None:
+    """Parse ``vX.Y.Z[-N...]`` (git-describe form) → ``[major, minor, patch, commits]``. The commit
+    count N (commits past the tag) is the 4th field so a post-tag dev build sorts newer than its tag.
+    Returns None if the string doesn't start with a numeric version (a bare hash / "dev" build), so
+    the caller falls back to string inequality. Mirrors ``net/updater.cpp`` ``parseVer()`` exactly."""
+    if not s:
+        return None
+    i, n = 0, len(s)
+    if i < n and s[i] in "vV":
+        i += 1
+    if i >= n or not s[i].isdigit():
+        return None
+    v = [0, 0, 0, 0]
+    field = 0
+    while field < 3 and i < n:
+        num, got = 0, False
+        while i < n and s[i].isdigit():
+            num = num * 10 + (ord(s[i]) - 48)
+            i += 1
+            got = True
+        if not got:
+            break
+        v[field] = num
+        field += 1
+        if i < n and s[i] == ".":
+            i += 1
+        else:
+            break
+    if i < n and s[i] == "-":  # "-N" commit count after the tag
+        i += 1
+        num, got = 0, False
+        while i < n and s[i].isdigit():
+            num = num * 10 + (ord(s[i]) - 48)
+            i += 1
+            got = True
+        if got:
+            v[3] = num
+    return v
+
+
+def _is_newer(cand: str, cur: str) -> bool:
+    """True iff `cand` is STRICTLY newer than `cur` — the same rule ``net/updater.cpp`` ``isNewer()``
+    applies before it will flash, so the dashboard only ever offers an update the device will accept
+    (and never a downgrade to a device on a newer dev build). Falls back to `cand != cur` when either
+    side isn't a parseable vX.Y.Z."""
+    a, b = _parse_ver(cand), _parse_ver(cur)
+    if a is None or b is None:
+        return cand != cur
+    for k in range(4):
+        if a[k] != b[k]:
+            return a[k] > b[k]
+    return False
+
+
+def _annotate_updates(devs: list[dict]) -> list[dict]:
+    """Fill each registered device's ``updateAvailable`` from the mirror: the mirrored version when
+    it's strictly newer than what the device runs, else None. This is what lets the dashboard offer
+    an update the instant CI publishes one — the device otherwise only notices on its ~6 h poll (or a
+    reboot) and self-reports, which is why buttons were missing right after a release. When the mirror
+    is disabled we leave the device's own self-reported value untouched (the only signal we have)."""
+    mv = mirror.version()
+    if not mv:
+        return devs
+    for d in devs:
+        if d.get("status") != "registered":
+            continue
+        d["updateAvailable"] = mv if _is_newer(mv, d.get("fwVersion") or "") else None
+    return devs
+
+
 @app.get("/api/devices")
 async def devices():
-    devs = registry.devices()
+    devs = _annotate_updates(registry.devices())
     # The Sonos zone list is the same on every device, so surface it ONCE (union across devices)
     # instead of repeating it under each tile — the frontend shows a per-device count for a
     # cross-check and this global list at the top.
@@ -205,7 +275,7 @@ async def approve_all():
     v = mirror.version()
     if not v:
         return JSONResponse({"ok": False, "error": "no firmware mirrored"}, status_code=409)
-    ids = [d["id"] for d in registry.devices() if d.get("updateAvailable")]
+    ids = [d["id"] for d in _annotate_updates(registry.devices()) if d.get("updateAvailable")]
     registry.approve_all(v, ids)
     return {"ok": True, "approved": v, "count": len(ids)}
 

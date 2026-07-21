@@ -171,18 +171,29 @@
         ? `<button class="btn danger" data-id="${esc(d.id)}" onclick="removeDevice(this)">Remove</button>`
         : "";
 
-      // OTA pull (plans/06): a device reports updateAvailable when the mirrored build differs from
-      // what it runs. Show an Update button unless it auto-updates or an approval is already in
-      // flight (approved == the available version, cleared once it reports running that build).
+      // OTA pull (plans/06): updateAvailable is the mirror version when it's newer than what this
+      // device runs (computed portal-side in _annotate_updates, so it appears the instant a release
+      // is mirrored — not only after the device notices on its own poll). Show an actionable Update
+      // button for every such device, auto or not: approving nudges it to re-check via the heartbeat
+      // 'recheck', so it flashes within ~45 s instead of waiting on its ~6 h poll / a reboot. Once
+      // approved, show a progress chip (approved == available, cleared when it reports running it).
+      // otaAuto still gets a small 'auto' tag — those also self-apply on reboot — but the button lets
+      // you push it now regardless.
       let updateHtml = "";
       if (!seen && d.updateAvailable) {
+        const ver = esc(d.updateAvailable);
         const pending = d.approved && d.approved === d.updateAvailable;
         if (pending) {
-          updateHtml = `<span class="chip upd" title="Approved — flashes on the device's next check">updating to ${esc(d.updateAvailable)}…</span>`;
-        } else if (d.otaAuto) {
-          updateHtml = `<span class="chip upd" title="Device is set to auto-update — applies on its next reboot">auto ${esc(d.updateAvailable)}</span>`;
+          updateHtml = `<span class="chip upd" title="Approved — flashes on the device's next heartbeat (~45s)">updating to ${ver}…</span>`;
         } else {
-          updateHtml = `<button class="btn primary" data-id="${esc(d.id)}" data-ver="${esc(d.updateAvailable)}" onclick="approveDevice(this)">Update to ${esc(d.updateAvailable)}</button>`;
+          const autoTag = d.otaAuto
+            ? `<span class="chip upd" title="Auto-update on reboot is enabled for this device">auto</span>`
+            : "";
+          const tip = d.otaAuto
+            ? "Push it now — approves + nudges the device to flash within ~45s (it would otherwise apply on its next reboot)"
+            : "Approves + nudges the device to flash within ~45s";
+          updateHtml = autoTag +
+            `<button class="btn primary" data-id="${esc(d.id)}" data-ver="${ver}" title="${tip}" onclick="approveDevice(this)">Update to ${ver}</button>`;
         }
       }
 
@@ -223,7 +234,7 @@
     }
 
     async function approveAll() {
-      if (!confirm("Approve every device that's showing an available update?\n\nEach flashes on its next check.")) return;
+      if (!confirm("Approve every device that's showing an available update?\n\nEach flashes within ~45s (on its next heartbeat).")) return;
       try {
         await fetch(API("api/devices/approve-all"), { method: "POST" });
       } catch (e) { /* non-fatal */ }
