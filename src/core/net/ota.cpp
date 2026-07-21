@@ -1,6 +1,7 @@
 #include "ota.h"
 #include "wifi.h"       // wifiHostname() — the device name (NVS) else DEVICE_HOSTNAME
 #include <ArduinoOTA.h>
+#include <ESPmDNS.h>    // addServiceTxt() — tags our _arduino._tcp record so the portal can ID us
 #include <WiFi.h>
 
 // Optional OTA password via include/secrets.h: #define OTA_PASSWORD "..."
@@ -41,6 +42,11 @@ void otaBegin() {
   });
   ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; Serial.printf("[ota] error %u\n", e); });
   ArduinoOTA.begin();
+  // ArduinoOTA advertises a generic _arduino._tcp; every ESP32 running ArduinoOTA does. Tag ours
+  // with a compiled-in marker (NOT the user-settable hostname) so the portal's mDNS discovery
+  // fallback can tell a sonos-nest-project device from any other board on the LAN. See
+  // sonos-portal/app/mdns.py — devices without this TXT key are ignored.
+  MDNS.addServiceTxt("arduino", "tcp", "app", "sonos-nest");
   Serial.printf("[ota] ready as %s @ %s\n", otaHostname(), WiFi.localIP().toString().c_str());
 }
 

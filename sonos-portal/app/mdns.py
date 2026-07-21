@@ -24,6 +24,13 @@ from .registry import Registry
 SERVICE_TYPE = "_sonosportal._tcp.local."
 ARDUINO_TYPE = "_arduino._tcp.local."
 
+# Every ESP32 running ArduinoOTA advertises _arduino._tcp, so the browse alone can't tell a
+# sonos-nest-project device from any other board on the LAN (and hostnames are user-settable, so
+# they're no signal either). Our firmware tags its record with this compiled-in TXT key/value
+# (see src/core/net/ota.cpp otaBegin()); devices without it are ignored by the discovery fallback.
+SONOS_TXT_KEY = b"app"
+SONOS_TXT_VAL = b"sonos-nest"
+
 
 def _lan_ip(override: str | None) -> str:
     """The address to advertise. An explicit PORTAL_HOST wins; otherwise ask the kernel which
@@ -60,6 +67,11 @@ class _ArduinoListener(ServiceListener):
     def _resolve(self, zc: Zeroconf, type_: str, name: str) -> None:
         info = zc.get_service_info(type_, name, timeout=2000)
         if not info:
+            return
+        # Only our firmware carries the sonos-nest TXT marker. Anything else advertising
+        # _arduino._tcp (another project's ESP32, a stray dev board) is not ours — skip it so it
+        # never creates a "seen" row on the dashboard.
+        if info.properties.get(SONOS_TXT_KEY) != SONOS_TXT_VAL:
             return
         addrs = info.parsed_addresses()
         ip = addrs[0] if addrs else ""
