@@ -97,6 +97,16 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
 
 <div class=card>
   <div class=row>
+    <label>Diagnostics</label>
+    <span id=health style="opacity:.7;font-size:.8rem">…</span>
+  </div>
+  <div class=hint>Uptime, free memory and Sonos socket churn. If the button ever goes
+    unresponsive, open this <b>before</b> power-cycling: free heap steadily falling points at a
+    memory leak; reconnects climbing fast at socket/network churn.</div>
+</div>
+
+<div class=card>
+  <div class=row>
     <label for=otaauto>Auto-update</label>
     <input type=checkbox id=otaauto>
   </div>
@@ -164,6 +174,15 @@ function draw(){
   // Don't clobber what someone is mid-way through typing.
   if(document.activeElement !== $('#dname')) $('#dname').value = st.deviceName||'';
   $('#mdns').textContent = st.mdnsName||'';
+
+  // Health readout (st.health from webConfigJson) — the numbers to capture when it misbehaves.
+  const h=st.health||{};
+  if(h.uptimeSec!=null){
+    const up=h.uptimeSec, d=up/86400|0, hr=up%86400/3600|0, mn=up%3600/60|0;
+    $('#health').innerHTML =
+      `up ${d}d ${hr}h ${mn}m · heap ${(h.heapFree/1024|0)}K (min ${(h.heapMin/1024|0)}K) · `+
+      `soap ${h.soapCalls||0} calls, <b>${h.soapReconnects||0}</b> reconnects, max ${h.soapMaxMs||0}ms`;
+  }
 
   // Updates (core/net/updater). ota = {auto, updateUrl, source, sourceKind, running, available}.
   const o=st.ota||{};

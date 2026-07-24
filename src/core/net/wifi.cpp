@@ -54,6 +54,8 @@ static bool waitConnected(uint32_t timeoutMs) {
 bool wifiConnect() {
   applyHostname();         // MUST precede the STA transition below — that's what latches it
   WiFi.mode(WIFI_STA);     // NULL->STA transition: applies the stored hostname to the netif
+  WiFi.setAutoReconnect(true);   // re-associate on transient drops without waiting for a poll
+  WiFi.setSleep(false);          // mains-powered always-on box: modem sleep invites AP-driven drops
   if (!beginFromStored()) return false;
   const bool ok = waitConnected(10000);
   if (ok) {
@@ -78,6 +80,14 @@ bool wifiConnect() {
 }
 
 bool wifiIsConnected() { return WiFi.status() == WL_CONNECTED; }
+
+// See wifi.h. Re-issue the STA connect from stored creds. A plain WiFi.reconnect() can stay stuck
+// after certain disconnect reasons, so drop the (already-dead) association and begin() afresh.
+// disconnect(false,false) keeps the stored AP config, so beginFromStored() has creds to use.
+void wifiReconnect() {
+  WiFi.disconnect();
+  beginFromStored();
+}
 
 bool wifiHaveCreds() {
   if (settingsWifiSsid().length()) return true;

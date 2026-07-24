@@ -196,6 +196,21 @@ static void processPending() {
   library::service(s_coordIp, s_coordIp, s_coordUuid);
 }
 
+// Consecutive coordinator-poll failures. A DHCP renewal (router reboot, lease expiry) over a
+// multi-day uptime moves the Sonos speaker to a new IP; nothing re-runs SSDP once a zone is picked,
+// so coordinatorIpFor() just keeps handing back the stale cached IP and every command fails
+// silently. When the transport poll fails a few times running, re-discover — ssdpDiscover()
+// re-multicasts when the cached IP is dead — and re-select the zone at its fresh IP. Cheap
+// insurance against a unit that looks online (Wi-Fi fine) but can't reach its speaker.
+static int s_pollFails = 0;
+static void notePollResult(bool ok) {
+  if (ok) { s_pollFails = 0; return; }
+  if (++s_pollFails < 3) return;
+  s_pollFails = 0;
+  Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
+  if (sonos::ssdpDiscover()) selectZone();
+}
+
 static void uiTask(void *) {
   for (;;) {
     uiTick();                 // lv_timer_handler() + input handling
@@ -210,14 +225,34 @@ static void netTask(void *) {
   for (;;) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
 
+    // Wi-Fi supervisor: a transient outage (router reboot, DHCP renewal, AP roam) is near-certain
+    // over a multi-day uptime and must self-heal, or the unit sits alive-but-wedged until a power
+    // cycle — the "unresponsive after 2-3 days" report. The framework's implicit auto-reconnect is
+    // unreliable after some disconnect reasons, so re-kick the connect ourselves, backed off so we
+    // don't spin. Everything below (discovery, SOAP, registrar) is pointless without a link.
+    if (!wifiIsConnected()) {
+      static uint32_t s_lastWifiKick = 0;
+      const uint32_t now = millis();
+      if (now - s_lastWifiKick > 10000) {
+        s_lastWifiKick = now;
+        Serial.println("[net] wifi down — reconnecting");
+        wifiReconnect();
+      }
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
     // If discovery failed at boot, keep retrying until we have a zone.
     if (s_zoneIp.length() == 0) {
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
     }
 
-    // Re-resolve the coordinator occasionally (grouping changes at runtime).
-    if (millis() - s_lastCoordRefresh > 15000) {
+    // Re-resolve the coordinator occasionally (grouping changes at runtime). 60 s, not 15: this is
+    // a full GetZoneGroupState fetch + parse of the whole topology XML (tens of KB in a big house),
+    // String-heavy every time — and a stale IP is now caught within seconds by notePollResult()
+    // anyway, so the frequent refresh bought little but heap churn.
+    if (millis() - s_lastCoordRefresh > 60000) {
       s_lastCoordRefresh = millis();
       String c = sonos::coordinatorIpFor(s_zoneName);
       if (c.length() && c != s_coordIp) {
@@ -239,9 +274,9 @@ static void netTask(void *) {
     if (millis() - s_lastPoll > 3000) {
       s_lastPoll = millis();
       TransportState st = TransportState::Unknown;
-      if (sonos::getTransportInfo(s_coordIp, st)) {
-        if (stateLock()) { g_player.transport = st; stateUnlock(); }
-      }
+      const bool ok = sonos::getTransportInfo(s_coordIp, st);
+      if (ok && stateLock()) { g_player.transport = st; stateUnlock(); }
+      notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #else
     // Poll ~1 Hz, interleaving command processing so input never waits behind the full poll.
@@ -251,7 +286,7 @@ static void netTask(void *) {
       PlayerState np;
       uint8_t vol = 0;
       bool gotVol = false;
-      sonos::getTransportInfo(s_coordIp, st);  processPending();
+      const bool ok = sonos::getTransportInfo(s_coordIp, st);  processPending();
       sonos::getPositionInfo(s_coordIp, np);   processPending();
       if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
@@ -267,6 +302,7 @@ static void netTask(void *) {
         g_player.dirty = true;
         stateUnlock();
       }
+      notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #endif
     vTaskDelay(pdMS_TO_TICKS(15));

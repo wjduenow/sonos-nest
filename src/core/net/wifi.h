@@ -6,6 +6,12 @@
 bool wifiConnect();       // connect from stored creds (NVS -> secrets.h)
 bool wifiIsConnected();
 
+// Non-blocking reconnect kick for the netTask Wi-Fi supervisor: re-issue the STA connect from
+// stored creds. Cheaper and more reliable than leaning on the framework's implicit auto-reconnect,
+// which can stay wedged after a router reboot / AUTH_EXPIRE. Does NOT wait — the caller re-checks
+// wifiIsConnected() on its next pass.
+void wifiReconnect();
+
 // True if there are ANY credentials to try — NVS creds set on-device, or compile-time
 // WIFI_SSID/WIFI_PASS from secrets.h. False only on a genuinely-unprovisioned unit, which is
 // the one case the captive portal opens unprompted (a merely-failed connect must not).
