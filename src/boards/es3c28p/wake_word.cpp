@@ -130,11 +130,14 @@ static float             s_peak[sizeof(s_models) / sizeof(s_models[0])] = {0};
 static volatile uint32_t s_pcmRms = 0;
 #endif
 
+// Returns true only on FULL success, and leaves m.interp==nullptr on any failure with the arena
+// freed — so wakeBringUp() can safely retry a model that didn't come up without leaking or
+// double-initialising one that did.
 static bool modelInit(WakeModel &m) {
   uint8_t *arena = (uint8_t *)heap_caps_malloc(kArenaSize, MALLOC_CAP_SPIRAM);
   if (!arena) return false;
   const tflite::Model *model = tflite::GetModel(m.flatbuffer);
-  if (model->version() != TFLITE_SCHEMA_VERSION) return false;
+  if (model->version() != TFLITE_SCHEMA_VERSION) { heap_caps_free(arena); return false; }
 
   // The 20 ops a microWakeWord streaming graph uses (ESPHome register_streaming_ops_()).
   static tflite::MicroMutableOpResolver<kNumOps> resolver;
@@ -152,8 +155,9 @@ static bool modelInit(WakeModel &m) {
   // Each model needs its OWN allocator + resource variables — the streaming state must not be shared.
   tflite::MicroAllocator *alloc = tflite::MicroAllocator::Create(arena, kArenaSize);
   tflite::MicroResourceVariables *res = tflite::MicroResourceVariables::Create(alloc, 20);
-  m.interp = new tflite::MicroInterpreter(model, resolver, alloc, res);
-  if (m.interp->AllocateTensors() != kTfLiteOk) return false;
+  tflite::MicroInterpreter *interp = new tflite::MicroInterpreter(model, resolver, alloc, res);
+  if (interp->AllocateTensors() != kTfLiteOk) { delete interp; heap_caps_free(arena); return false; }
+  m.interp = interp;
   m.in = m.interp->input(0); m.out = m.interp->output(0);
   m.in_scale  = m.in->params.scale;   m.in_zp  = m.in->params.zero_point;
   m.out_scale = m.out->params.scale;  m.out_zp = m.out->params.zero_point;
@@ -250,41 +254,91 @@ static void inferTask(void *) {
   }
 }
 
-bool wakeWordInit() {
-  if (s_running) return true;
-  s_pins.addI2C(PinFunction::CODEC, PIN_I2C_SCL, PIN_I2C_SDA, I2S_ADDR_ES8311, 100000, Wire);
-  s_pins.addI2S(PinFunction::CODEC, PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DOUT, PIN_I2S_DIN);
-  s_pins.begin();
-  s_board.begin();
-  auto cfg = s_in.defaultConfig(RX_MODE);
-  // Stereo: REG44=0x50 routes the mono ADC to the LEFT slot; mono RX would read the dead RIGHT one.
-  cfg.copyFrom(AudioInfo(kSampleRate, 2, 16));
-  cfg.buffer_count = 4;      // absorb inference jitter; small buffers -> stale audio
-  cfg.buffer_size  = 512;
-  if (!s_in.begin(cfg)) { Serial.println("[wake] mic init failed"); return false; }
-  s_board.setInputVolume(90);
-  es8311EnableAdc();
+// Idempotent bring-up: each step guards on what it already did, so this can be re-run after a
+// partial failure (see wakeRetryTask) without re-opening the mic, rebuilding a model, or spawning a
+// duplicate task. Returns true only once the whole pipeline — mic + every model + both tasks — is up.
+// The realistic failure point is internal SRAM: s_in.begin() (I2S DMA) and the two task stacks all
+// draw from it, and a boot-time fragmentation dip can starve them. modelInit() draws from PSRAM.
+static bool s_micReady = false;
+static bool wakeBringUp() {
+  if (!s_micReady) {
+    s_pins.addI2C(PinFunction::CODEC, PIN_I2C_SCL, PIN_I2C_SDA, I2S_ADDR_ES8311, 100000, Wire);
+    s_pins.addI2S(PinFunction::CODEC, PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DOUT, PIN_I2S_DIN);
+    s_pins.begin();
+    s_board.begin();
+    auto cfg = s_in.defaultConfig(RX_MODE);
+    // Stereo: REG44=0x50 routes the mono ADC to the LEFT slot; mono RX would read the dead RIGHT one.
+    cfg.copyFrom(AudioInfo(kSampleRate, 2, 16));
+    cfg.buffer_count = 4;      // absorb inference jitter; small buffers -> stale audio
+    cfg.buffer_size  = 512;
+    if (!s_in.begin(cfg)) { Serial.println("[wake] mic init failed"); return false; }
+    s_board.setInputVolume(90);
+    es8311EnableAdc();
+    s_micReady = true;
+  }
 
   for (int i = 0; i < kModelCount; i++) {
+    if (s_models[i].interp) continue;                  // already built on an earlier attempt
     if (!modelInit(s_models[i])) {
       Serial.printf("[wake] model init failed: %s\n", s_models[i].name);
       return false;
     }
   }
-  s_featQ = xQueueCreate(64, kFeatureSize * sizeof(uint16_t));
-  if (!s_featQ) return false;
+
+  if (!s_featQ) {
+    s_featQ = xQueueCreate(64, kFeatureSize * sizeof(uint16_t));
+    if (!s_featQ) return false;
+  }
   // BOTH pinned to core 1, on purpose: core 0 belongs to the network (netTask prio 2, media-httpd
   // prio 1). These must outrank whatever shares their core — capture especially, or I2S overflows
   // and the models see stale audio — so putting them on core 0 starves Sonos instead. Ordering
   // here is capture > inference > uiTask (prio 3): dropping audio breaks detection, a jittery
   // repaint doesn't. Stacks are sized off measured high-water marks (~3.5 KB / ~2.5 KB peak) plus
   // headroom; internal SRAM is the scarce resource and overshooting starves LWIP of socket buffers.
-  xTaskCreatePinnedToCore(captureTask, "wake-cap", 5120, nullptr, 5, nullptr, 1);
-  xTaskCreatePinnedToCore(inferTask,   "wake-inf", 4096, nullptr, 4, nullptr, 1);
-  s_running = true;
-  Serial.printf("[wake] listening for %d phrases (internal free=%u)\n",
-                kModelCount, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+  static TaskHandle_t hCap = nullptr, hInf = nullptr;
+  if (!hCap && xTaskCreatePinnedToCore(captureTask, "wake-cap", 5120, nullptr, 5, &hCap, 1) != pdPASS) {
+    hCap = nullptr; return false;                      // out of internal SRAM for the stack — retry later
+  }
+  if (!hInf && xTaskCreatePinnedToCore(inferTask, "wake-inf", 4096, nullptr, 4, &hInf, 1) != pdPASS) {
+    hInf = nullptr; return false;
+  }
   return true;
+}
+
+// A failed init used to disable voice for the whole session, silently. Boot-time heap fragmentation
+// (Sonos discovery + the media httpd starting up) can transiently starve the ~31 KB of internal SRAM
+// the engine needs; a few seconds later it recovers. Retry a handful of times, spaced out, and log
+// the internal-free each attempt so a *persistent* shortfall shows up in the serial log instead of
+// looking like a mystery. Low prio, core 1 — it mostly sleeps.
+static void wakeRetryTask(void *) {
+  for (int attempt = 1; attempt <= 6 && !s_running; attempt++) {
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    Serial.printf("[wake] retry %d (internal free=%u)\n", attempt,
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    if (wakeBringUp()) {
+      s_running = true;
+      Serial.printf("[wake] listening after retry %d for %d phrases (internal free=%u)\n",
+                    attempt, kModelCount, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    }
+  }
+  if (!s_running) Serial.println("[wake] giving up after retries — voice disabled this session");
+  vTaskDelete(nullptr);
+}
+
+bool wakeWordInit() {
+  if (s_running) return true;
+  if (wakeBringUp()) {
+    s_running = true;
+    Serial.printf("[wake] listening for %d phrases (internal free=%u)\n",
+                  kModelCount, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    return true;
+  }
+  // Don't give up — schedule background retries so a transient boot-time SRAM dip can't kill voice
+  // for the session. Log the free figure now so the shortfall is on the record from the first try.
+  Serial.printf("[wake] init incomplete (internal free=%u) — retrying in background\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+  xTaskCreatePinnedToCore(wakeRetryTask, "wake-retry", 3072, nullptr, 1, nullptr, 1);
+  return false;
 }
 
 int wakeWordPoll() {
