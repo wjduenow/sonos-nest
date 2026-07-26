@@ -28,6 +28,7 @@ static void handleConfigSet() {
 }
 
 static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
+<meta charset="utf-8">
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Sonos Button</title>
 <style>
@@ -247,7 +248,7 @@ const poll=setInterval(async()=>{
 (async()=>{ st=await (await fetch('/api/config')).json(); draw(); })();
 </script>)HTML";
 
-static void handleIndex() { s_server->send_P(200, "text/html", kIndexHtml); }
+static void handleIndex() { s_server->send_P(200, "text/html; charset=utf-8", kIndexHtml); }
 
 static void serverTask(void *) {
   // boardInit() runs before appBoot() brings WiFi up, so wait for the link before binding.

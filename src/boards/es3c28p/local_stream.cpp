@@ -440,7 +440,7 @@ load();
 </script>)HTML";
 
 static void handleIndex() {
-  s_server->send_P(200, "text/html", kIndexHtml);
+  s_server->send_P(200, "text/html; charset=utf-8", kIndexHtml);
 }
 
 // ---------------------------------------------------------------- server task

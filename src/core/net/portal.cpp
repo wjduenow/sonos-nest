@@ -33,7 +33,8 @@ String esc(const String &in) {
 }
 
 const char kHead[] PROGMEM =
-  "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+  "<!doctype html><meta charset=\"utf-8\">"
+  "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
   "<title>Sonos Button setup</title><style>"
   ":root{color-scheme:light dark}"
   "body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px;max-width:26rem;margin-inline:auto}"
