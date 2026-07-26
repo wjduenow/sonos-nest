@@ -288,7 +288,13 @@ static void netTask(void *) {
       s_lastPoll = millis();
       TransportState st = TransportState::Unknown;
       const bool ok = sonos::getTransportInfo(s_coordIp, st);
-      if (ok && stateLock()) { g_player.transport = st; stateUnlock(); }
+      // When playing, also learn the SOURCE (GetMediaInfo/CurrentURI) so a press can tell "already
+      // playing our queue" (stop it, even if we didn't start it or just rebooted) from TV/line-in
+      // (override -> start the playlist). Only while playing: keeps the button at ~one extra call
+      // and only when it matters. Cleared otherwise so a stale URI can't be read as "still playing".
+      String uri;
+      if (ok && st == TransportState::Playing) sonos::getMediaInfo(s_coordIp, uri);
+      if (ok && stateLock()) { g_player.transport = st; g_player.currentUri = uri; stateUnlock(); }
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #else

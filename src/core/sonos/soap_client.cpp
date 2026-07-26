@@ -177,6 +177,14 @@ bool getTransportInfo(const String &ip, TransportState &out) {
   else if (s == "TRANSITIONING")   out = TransportState::Transitioning;
   return true;
 }
+bool getMediaInfo(const String &ip, String &currentUriOut) {
+  String r;
+  currentUriOut = "";
+  if (!soapAction(ip, PATH_AVT, SVC_AVT, "GetMediaInfo",
+                  "<InstanceID>0</InstanceID>", r)) return false;
+  currentUriOut = extractTag(r, "CurrentURI");
+  return true;
+}
 bool becomeStandalone(const String &ip) {
   String r;
   return soapAction(ip, PATH_AVT, SVC_AVT, "BecomeCoordinatorOfStandaloneGroup",

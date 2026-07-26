@@ -126,8 +126,10 @@ void uiTick() {
   // --- snapshot the shared state once -----------------------------------------------------
   TransportState tr       = TransportState::Unknown;
   bool           haveZone = false;
+  String         srcUri;
   if (stateLock()) {
     tr       = g_player.transport;
+    srcUri   = g_player.currentUri;
     haveZone = g_player.coordinatorIp.length() > 0;
     stateUnlock();
   }
@@ -147,14 +149,16 @@ void uiTick() {
   const KnobEvent ev = knobEvent();
   if (ev == KnobEvent::Short) {
     ringPulse();   // acknowledge the press instantly, before any network work
-    // Stop only when the BUTTON is what's playing (Starting counts as busy so a double-tap can't
-    // fire two starts); otherwise always start the configured playlist. This deliberately does NOT
-    // stop on tr==Playing: a soundbar room reports Playing for TV/line-in audio (and for anything
-    // started from the Sonos app), and a press then went down the stop branch and never started the
-    // playlist. Starting the playlist naturally takes the room off TV, which is what this button is
-    // for — so a press overrides whatever else the room is doing rather than toggling it off.
-    if (s_st == St::Starting || s_st == St::Playing) stopPlayback();
-    else                                             startPlaylist();
+    // Stop when the room is actively playing FROM ITS QUEUE — that's what this button starts, so a
+    // press should stop it whether WE started it, the Sonos app did, or we rebooted mid-play (s_st
+    // is then Idle but the queue keeps going — the reported bug where a press re-enqueued instead of
+    // stopping). St::Starting also counts as busy so a double-tap can't fire two starts. Otherwise
+    // start/override: a soundbar plays TV/line-in as a DIFFERENT source (x-sonos-htastream /
+    // x-rincon-stream), so a press there takes the room onto the sleep playlist rather than toggling
+    // nothing — which is why this can't simply stop on tr==Playing (see df5141a).
+    const bool playingOurQueue = (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
+    if (s_st == St::Starting || playingOurQueue) stopPlayback();
+    else                                         startPlaylist();
   } else if (ev == KnobEvent::Long) {
     Serial.println("[unit   ] button Long — reserved");
   }

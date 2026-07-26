@@ -19,6 +19,10 @@ bool setAvTransportUri(const String& ip, const String& uri, const String& didlMe
 bool setPlayMode(const String& ip, const String& mode);   // NORMAL / REPEAT_ALL / REPEAT_ONE ...
 bool getTransportInfo(const String& ip, TransportState& out);
 bool getPositionInfo(const String& ip, PlayerState& out);   // track + pos + dur + DIDL
+// The AVTransport source URI (GetMediaInfo/CurrentURI). Tells apart WHERE audio comes from:
+// "x-rincon-queue:..." = the coordinator's own queue (what a saved-playlist play sets up),
+// vs "x-sonos-htastream:" (TV), "x-rincon-stream:" (line-in), "x-rincon:" (grouped member), etc.
+bool getMediaInfo(const String& ip, String& currentUriOut);
 
 // Grouping: join a speaker to a coordinator's group via
 //   setAvTransportUri(memberIp, "x-rincon:" + coordinatorUuid, "")

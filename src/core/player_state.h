@@ -17,6 +17,8 @@ struct PlayerState {
   uint32_t      positionSec = 0;
   uint32_t      durationSec = 0;
   TransportState transport  = TransportState::Unknown;
+  String        currentUri;      // AVTransport source (GetMediaInfo/CurrentURI); "x-rincon-queue:.."
+                                 // = the coordinator's own queue. Only the headless button polls it.
   uint8_t       volume      = 0; // 0-100
   bool          muted       = false;
 
