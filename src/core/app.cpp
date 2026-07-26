@@ -199,16 +199,20 @@ static void processPending() {
 // Consecutive coordinator-poll failures. A DHCP renewal (router reboot, lease expiry) over a
 // multi-day uptime moves the Sonos speaker to a new IP; nothing re-runs SSDP once a zone is picked,
 // so coordinatorIpFor() just keeps handing back the stale cached IP and every command fails
-// silently. When the transport poll fails a few times running, re-discover — ssdpDiscover()
-// re-multicasts when the cached IP is dead — and re-select the zone at its fresh IP. Cheap
-// insurance against a unit that looks online (Wi-Fi fine) but can't reach its speaker.
-static int s_pollFails = 0;
+// silently. When the transport poll fails a few times running, flag the coordinator stale — the
+// netTask loop's single discovery site re-discovers BEFORE it drains any queued command, so a
+// voice/button command that lands during the outage dispatches to the fresh IP instead of being
+// consumed (processPending() clears g_pending whether or not the command reaches the speaker)
+// against the dead one. We only raise the flag here: the blocking ssdpDiscover() must NOT run
+// inline in the poll path, where it would stall processPending() for its whole multicast wait
+// (up to ~3.6 s), delaying every queued command behind it.
+static int  s_pollFails  = 0;
+static bool s_coordStale = false;
 static void notePollResult(bool ok) {
   if (ok) { s_pollFails = 0; return; }
   if (++s_pollFails < 3) return;
   s_pollFails = 0;
-  Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
-  if (sonos::ssdpDiscover()) selectZone();
+  s_coordStale = true;
 }
 
 static void uiTask(void *) {
@@ -242,10 +246,19 @@ static void netTask(void *) {
       continue;
     }
 
-    // If discovery failed at boot, keep retrying until we have a zone.
-    if (s_zoneIp.length() == 0) {
+    // Single discovery site. Runs at boot (no zone picked yet) and on recovery (notePollResult
+    // flagged the coordinator unreachable — a moved IP). ssdpDiscover() is a blocking multicast +
+    // SOAP wait, so it lives here at a defined loop point, never buried inline in the poll. On
+    // recovery, re-resolve the coordinator and THEN drain g_pending, so a command queued during the
+    // outage hits the fresh IP rather than being consumed against the dead one; re-poll immediately
+    // to confirm reachability.
+    if (s_zoneIp.length() == 0 || s_coordStale) {
+      const bool recovering = s_coordStale;
+      s_coordStale = false;
+      if (recovering) Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
+      if (recovering) { processPending(); s_lastPoll = 0; continue; }
     }
 
     // Re-resolve the coordinator occasionally (grouping changes at runtime). 60 s, not 15: this is
