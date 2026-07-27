@@ -4,7 +4,7 @@
 1024×600 IPS, MIPI-DSI, GT911 touch, dual speakers, camera header.
 **Status:** design system imported. **P4 toolchain proven end-to-end — `pio run -e jukebox-bringup`
 builds and links a flashable image.** Screen bring-up is at stage 1 (not yet flashed to hardware).
-**Current focus: get the screen up.** Buttons/knob are deliberately deferred (see *Physical
+**Current focus: the screen — panel is up, LVGL + touch is next.** Buttons/knob are deliberately deferred (see *Physical
 controls* — they are not on this board at all).
 
 A wall-mounted Sonos controller: a large landscape touchscreen with a physical control column to
@@ -189,9 +189,28 @@ Notes for whoever implements it:
 
 ## Sequence
 
-1. **Screen** ← *current step*. `[env:jukebox-bringup]` +
-   `src/boards/crowpanel_p4_7in/display_test.cpp`, staged so a failure names its layer:
-   serial/LED/I2C-scan → MIPI-DSI panel + backlight → LVGL 9 + GT911 indev + FPS.
+1. **Screen** — stages 1 and 2 **done and confirmed on hardware**; stage 3 (LVGL + touch) next.
+   `[env:jukebox-bringup]` + `src/boards/crowpanel_p4_7in/display_test.cpp`.
+   The EK79007 comes up at 1024x600, DSI 2 lanes @900 Mbps, DPI 52 MHz, and a hand-drawn
+   design-system frame renders with correct colours (`rgb_ele_order = RGB`) and no artefacts.
+   Headroom is excellent: **428 KB internal heap free**, and the 1200 KB frame buffer lands in
+   PSRAM, leaving internal RAM alone.
+
+   Three things cost real time here — see also `lib/esp_lcd_ek79007/VENDORING.md`:
+
+   - **The frame buffer needs an explicit cache write-back.** It lives in PSRAM and the DSI DMA
+     reads it directly, bypassing the CPU data cache, so after any CPU drawing you must
+     `esp_cache_msync(fb, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M)`. Without it the panel shows only
+     the cache lines that happened to be evicted: the image comes out shredded into vertical
+     stripes of otherwise-correct colour over an unwritten background. It looks exactly like a
+     DSI timing or lane fault. **Diagnostic shortcut:** `esp_lcd_dpi_panel_set_pattern()` draws
+     its bars inside the DSI peripheral with no frame buffer involved, so "hardware bars perfect,
+     our drawing shredded" identifies a missing cache sync rather than a broken panel.
+   - **The MIPI D-PHY needs internal LDO channel 3 at 2500 mV** (`esp_ldo_acquire_channel`).
+     Miss it and the DSI bus initialises without complaint and the panel just stays dark.
+   - **The driver is vendored into `lib/`, not pulled as a managed component**, because
+     pioarduino builds Arduino against prebuilt IDF libs and never compiles a newly added
+     component into the link.
 2. **Prove multicast over ESP-Hosted** (item 3 above) — **written and building**:
    `[env:jukebox-mcast]` + `src/boards/crowpanel_p4_7in/multicast_test.cpp`. It replays the exact
    request `core/sonos/ssdp.cpp` sends and reports PASS/FAIL per layer (association → DNS/TCP →

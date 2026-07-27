@@ -12,10 +12,17 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
-- **sonos-jukebox** — **planned, no firmware yet.** A wall-mounted landscape controller (5" 800×480
-  or 7" 1024×600 IPS, rotary dial + 4 transport caps, printed case). The design system for both the
-  screen UI and the case is in-tree as the **`/sonos-jukebox-design`** skill; the board choice and
-  the SRAM/bandwidth analysis are in **`plans/07-sonos-jukebox.md`** — read that before writing code.
+- **sonos-jukebox** — **in bring-up.** A wall-mounted landscape controller on an ELECROW CrowPanel
+  Advance 7" **ESP32-P4** (1024×600 MIPI-DSI, EK79007, GT911 touch, dual speakers, ESP32-C6 for
+  Wi-Fi). **Working**: the DSI panel renders, and SSDP discovery works over the C6. **Not yet**:
+  LVGL + touch, the core port, any UI. The screen UI + case design system is in-tree as the
+  **`/sonos-jukebox-design`** skill. **Read `plans/07-sonos-jukebox.md` before touching this** —
+  it is different silicon (RISC-V) on a different toolchain, and several failure modes here are
+  silent.
+  > ⚠️ The jukebox envs use the **pioarduino** fork of platform-espressif32, which publishes
+  > itself under the name `espressif32` too. `[env]` pins `platform = espressif32@6.9.0` to keep
+  > the S3 units on Arduino 2.0.17; installing the fork without that pin silently retargets
+  > `nest` and `sleep-machine` to Arduino 3.x. **Don't loosen either pin.**
 
 Units share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.

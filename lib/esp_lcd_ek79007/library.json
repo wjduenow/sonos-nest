@@ -1,0 +1,18 @@
+{
+  "name": "esp_lcd_ek79007",
+  "version": "2.0.2",
+  "description": "EK79007 MIPI-DSI LCD panel driver (vendored from espressif/esp_lcd_ek79007). ESP32-P4 only.",
+  "license": "Apache-2.0",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "include",
+    "flags": [
+      "-I$PROJECT_PACKAGES_DIR/framework-arduinoespressif32-libs/esp32p4_es/include/esp_lcd/interface",
+      "-DESP_LCD_EK79007_VER_MAJOR=2",
+      "-DESP_LCD_EK79007_VER_MINOR=0",
+      "-DESP_LCD_EK79007_VER_PATCH=2"
+    ]
+  }
+}
