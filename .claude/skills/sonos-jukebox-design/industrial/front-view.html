@@ -1,0 +1,62 @@
+<!-- @dsCard group="Industrial Design" viewport="700x430" name="Front elevation — 7in" subtitle="Screen + large dial + 4-button transport, rounded matte-white face" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+:root{--mmv:1.85px}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);background:var(--surface-2);padding:40px 34px 30px;color:var(--ink-900)}
+.wrap{position:relative;width:calc(210*var(--mmv));margin:0 auto}
+/* ---- the unit ---- */
+.face{position:relative;width:calc(210*var(--mmv));height:calc(130*var(--mmv));background:linear-gradient(160deg,#fbfbf9,var(--mat-case));border-radius:calc(14*var(--mmv));box-shadow:var(--shadow-lg),inset 0 1px 0 rgba(255,255,255,.9);display:flex;padding:calc(9*var(--mmv));gap:calc(8*var(--mmv))}
+.screen{flex:1;background:var(--screen-bg);border-radius:calc(7*var(--mmv));box-shadow:var(--inset-well);overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;padding:16px 18px}
+.np-top{display:flex;justify-content:space-between;align-items:center}
+.np-room{font-size:12px;font-weight:600;color:var(--accent)}
+.np-time{font-family:var(--font-mono);font-size:11px;color:var(--screen-text-dim)}
+.np-title{font-size:22px;font-weight:800;color:var(--screen-text);letter-spacing:-.02em;line-height:1.05}
+.np-artist{font-size:13px;color:var(--screen-text-mut);margin-top:3px}
+.np-bar{height:4px;background:var(--screen-elev-2);border-radius:9px;margin-top:14px;position:relative}
+.np-bar::after{content:"";position:absolute;left:0;top:0;height:100%;width:42%;background:var(--accent);border-radius:9px}
+/* control column */
+.col{width:calc(46*var(--mmv));display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:calc(2*var(--mmv)) 0}
+.dial{width:calc(36*var(--mmv));height:calc(36*var(--mmv));border-radius:999px;background:radial-gradient(circle at 38% 32%,var(--mat-knob-hi),var(--mat-knob) 62%);box-shadow:0 6px 14px rgba(0,0,0,.28),inset 0 1px 1px rgba(255,255,255,.15);position:relative;display:grid;place-items:center}
+.dial::before{content:"";position:absolute;inset:5px;border-radius:999px;background:repeating-conic-gradient(from 0deg,rgba(255,255,255,.10) 0 3deg,transparent 3deg 9deg)}
+.dial .tick{width:3px;height:calc(9*var(--mmv));background:var(--accent);border-radius:2px;position:absolute;top:6px;box-shadow:0 0 6px var(--accent)}
+.btns{display:grid;grid-template-columns:repeat(2,1fr);gap:calc(6*var(--mmv))}
+.btn{width:calc(13*var(--mmv));height:calc(13*var(--mmv));border-radius:999px;background:var(--mat-button);box-shadow:0 2px 4px rgba(0,0,0,.14),inset 0 1px 1px rgba(255,255,255,.8),inset 0 -1px 2px rgba(0,0,0,.05);display:grid;place-items:center;font-size:14px;color:var(--ink-500);line-height:1}
+.gl.play{width:0;height:0;border-left:9px solid var(--ink-500);border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:2px}
+/* dimension callouts */
+.wdim{position:absolute;left:0;right:0;bottom:-26px;display:flex;align-items:center}
+.wdim .ln{flex:1;height:1px;background:var(--ink-300);position:relative}
+.wdim .ln::before,.wdim .ln::after{content:"";position:absolute;top:-3px;width:1px;height:7px;background:var(--ink-300)}
+.wdim .ln::before{left:0}.wdim .ln::after{right:0}
+.wdim .lab,.hdim .lab{font-family:var(--font-mono);font-size:10px;color:var(--ink-600,#555);background:var(--surface-2);padding:0 7px;font-weight:500}
+.hdim{position:absolute;top:0;bottom:0;right:-30px;width:14px;display:flex;flex-direction:column;align-items:center}
+.hdim .ln{width:1px;flex:1;background:var(--ink-300);position:relative}
+.hdim .ln::before,.hdim .ln::after{content:"";position:absolute;left:-3px;height:1px;width:7px;background:var(--ink-300)}
+.hdim .ln::before{top:0}.hdim .ln::after{bottom:0}
+.hdim .lab{position:absolute;top:50%;transform:translateY(-50%) rotate(90deg);white-space:nowrap}
+.lead{position:absolute;font-family:var(--font-mono);font-size:10px;color:var(--ink-500);display:flex;align-items:center;gap:5px}
+.lead .dotln{width:26px;height:1px;background:var(--ink-300)}
+.title{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--ink-500);margin:0 0 26px;text-align:center}
+</style></head><body>
+<div class="title">Front Elevation · 7&quot; SKU · 1 : scale-to-fit</div>
+<div class="wrap">
+  <div class="face">
+    <div class="screen">
+      <div class="np-top"><span class="np-room">◉ Kitchen +1</span><span class="np-time">14:32</span></div>
+      <div><div class="np-title">Teardrop</div><div class="np-artist">Massive Attack · Mezzanine</div><div class="np-bar"></div></div>
+    </div>
+    <div class="col">
+      <div class="dial"><span class="tick"></span></div>
+      <div class="btns">
+        <div class="btn"><span class="gl play"></span></div>
+        <div class="btn">⇄</div>
+        <div class="btn">⏮</div>
+        <div class="btn">⏭</div>
+      </div>
+    </div>
+  </div>
+  <div class="wdim"><span class="lab">210 mm</span></div>
+  <div class="hdim"><div class="ln"></div><span class="lab">130 mm</span></div>
+  <div class="lead" style="top:-24px;left:calc(78*var(--mmv))"><span>Ø36 dial · push-select</span><span class="dotln"></span></div>
+  <div class="lead" style="bottom:-24px;left:calc(146*var(--mmv))"><span class="dotln"></span><span>4× Ø13 caps · 9mm pitch</span></div>
+</div>
+</body></html>

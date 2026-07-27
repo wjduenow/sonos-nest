@@ -1,0 +1,50 @@
+/* Sonos Jukebox — Color tokens. Matte-white minimal system. */
+:root{
+  /* Neutral ink + surface ramp (the whole product lives here) */
+  --ink-900:#16181c;   /* primary text, engraved marks */
+  --ink-700:#3a3f47;   /* secondary text */
+  --ink-500:#6b7280;   /* muted / captions */
+  --ink-400:#8b919a;   /* disabled text, hints */
+  --ink-300:#b8bdc4;   /* icon-inactive */
+  --line:#e6e8ec;      /* hairline dividers */
+  --line-strong:#d3d7dd;
+  --surface-0:#ffffff; /* pure white — screen, glass */
+  --surface-1:#f6f7f9; /* matte off-white case */
+  --surface-2:#eef0f3; /* recessed / pressed */
+  --surface-3:#e4e7eb; /* deepest recess, shadow lip */
+
+  /* Screen chrome (the on-glass UI sits on near-black for OLED-like contrast) */
+  --screen-bg:#0e0f12;
+  --screen-elev:#191b20;
+  --screen-elev-2:#23262d;
+  --screen-line:#2c3038;
+  --screen-text:#f4f5f7;
+  --screen-text-mut:#9aa0ab;
+  --screen-text-dim:#6a7079;
+
+  /* Accent family — THREE explorable options. --accent is the live one. */
+  --amber:#e8892b;  --amber-soft:#f7c893;  --amber-deep:#c46a17;
+  --teal:#2fa5a0;   --teal-soft:#9cd6d3;   --teal-deep:#1f7a76;
+  --coral:#f0605a;  --coral-soft:#f8aba7;  --coral-deep:#cf443e;
+
+  --accent:var(--amber);
+  --accent-soft:var(--amber-soft);
+  --accent-deep:var(--amber-deep);
+  --accent-ink:#ffffff; /* text/icon on top of accent fills */
+
+  /* Semantic aliases */
+  --text-body:var(--ink-900);
+  --text-secondary:var(--ink-700);
+  --text-muted:var(--ink-500);
+  --surface-page:var(--surface-1);
+  --surface-card:var(--surface-0);
+  --surface-sunken:var(--surface-2);
+  --focus-ring:color-mix(in oklch, var(--accent) 55%, transparent);
+
+  /* Physical material swatches (documentation of printed / anodized parts) */
+  --mat-case:#f2f2ee;     /* matte white PLA/PETG, warm white */
+  --mat-knob:#2a2c31;     /* anodized dark-gray aluminium dial */
+  --mat-knob-hi:#4a4d55;
+  --mat-button:#f7f7f4;   /* soft-touch button caps */
+  --mat-glass:#0c0d10;    /* screen glass off-state */
+}

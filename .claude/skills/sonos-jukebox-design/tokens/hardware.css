@@ -1,0 +1,48 @@
+/* Sonos Jukebox — Hardware dimension tokens (millimetres).
+   Two SKUs share the same design language. Values are the industrial-design
+   source of truth referenced by the physical views & spec cards. */
+:root{
+  /* drawing scale: 1mm = --mm px */
+  --mm:2.0px;/* @kind other */
+
+  /* ---- 7" SKU (1024 x 600 IPS, ~154 x 86 mm active area) ---- */
+  --u7-face-w:210mm;/* @kind other */
+  --u7-face-h:130mm;/* @kind other */
+  --u7-depth:22mm;/* @kind other */
+  --u7-screen-w:154mm;/* @kind other */
+  --u7-screen-h:86mm;/* @kind other */
+  /* control column width right of screen */
+  --u7-ctrl-col:46mm;/* @kind other */
+
+  /* ---- 5" SKU (800 x 480 IPS, ~108 x 65 mm active area) ---- */
+  --u5-face-w:168mm;/* @kind other */
+  --u5-face-h:112mm;/* @kind other */
+  --u5-depth:22mm;/* @kind other */
+  --u5-screen-w:108mm;/* @kind other */
+  --u5-screen-h:65mm;/* @kind other */
+  --u5-ctrl-col:42mm;/* @kind other */
+
+  /* ---- Shared physical controls ---- */
+  /* rotary dial cap diameter, push-to-select */
+  --knob-dia:36mm;/* @kind other */
+  /* dial cap height proud of face */
+  --knob-height:14mm;/* @kind other */
+  /* transport button cap diameter */
+  --btn-dia:13mm;/* @kind other */
+  /* centre-to-centre spacing */
+  --btn-gap:9mm;/* @kind other */
+  /* face bezel around screen */
+  --bezel:9mm;/* @kind other */
+  /* printed case corner radius (rounded) */
+  --case-radius:14mm;/* @kind other */
+  /* flush plate proud of wall */
+  --wall-plate:3mm;/* @kind other */
+
+  /* ---- Electronics / mount ---- */
+  --board:"ESP32-S3 (dev sample: ESP32-32E, ST7796S 320x480)";/* @kind other */
+  --power:"USB-C in via thin pigtail to rear female USB-C";/* @kind other */
+  /* rear female USB-C receptacle width */
+  --usbc-port:9mm;/* @kind other */
+  /* PCB standoff height */
+  --mount-standoff:4mm;/* @kind other */
+}

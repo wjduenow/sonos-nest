@@ -1,0 +1,33 @@
+/* Sonos Jukebox — Typography tokens.
+   Display/UI: Hanken Grotesk (clean neutral grotesque).
+   Mono: JetBrains Mono (dimension callouts, spec labels).
+   NOTE: substitute webfonts loaded via Google Fonts — see fonts.css. */
+:root{
+  --font-ui:"Hanken Grotesk",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+
+  /* Type scale (screen UI is designed at native px on the panel) */
+  --fs-hero:44px;      /* now-playing track title on 7" */
+  --fs-title:30px;
+  --fs-heading:24px;
+  --fs-subtitle:20px;
+  --fs-body:17px;
+  --fs-label:15px;
+  --fs-caption:13px;
+  --fs-micro:11px;
+
+  --lh-tight:1.05;/* @kind other */
+  --lh-snug:1.2;/* @kind other */
+  --lh-body:1.45;/* @kind other */
+
+  --fw-regular:400;/* @kind other */
+  --fw-medium:500;/* @kind other */
+  --fw-semibold:600;/* @kind other */
+  --fw-bold:700;/* @kind other */
+  --fw-extrabold:800;/* @kind other */
+
+  --tracking-tight:-0.02em;/* @kind other */
+  --tracking-normal:0;/* @kind other */
+  --tracking-wide:0.02em;/* @kind other */
+  --tracking-caps:0.14em;/* @kind other */
+}
