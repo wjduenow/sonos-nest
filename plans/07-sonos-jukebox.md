@@ -1,0 +1,226 @@
+# 07 — sonos-jukebox (third form factor)
+
+**Board chosen:** ELECROW **CrowPanel Advance 7" ESP32-P4 HMI AI Display** (DHE04107D) —
+1024×600 IPS, MIPI-DSI, GT911 touch, dual speakers, camera header.
+**Status:** design system imported. **P4 toolchain proven end-to-end — `pio run -e jukebox-bringup`
+builds and links a flashable image.** Screen bring-up is at stage 1 (not yet flashed to hardware).
+**Current focus: get the screen up.** Buttons/knob are deliberately deferred (see *Physical
+controls* — they are not on this board at all).
+
+A wall-mounted Sonos controller: a large landscape touchscreen with a physical control column to
+its right — a push-to-select rotary dial over a 2×2 grid of momentary caps (play/pause · skip
+forward · skip back · change rooms). Matte-white printed case, flush wall plate, rear USB-C.
+
+## Where the design lives
+
+`.claude/skills/sonos-jukebox-design/` — the full design system, imported from the Claude Design
+project `e55a4165-1f93-46dd-816c-66c679c9a2e6`, registered as the user-invocable
+**`/sonos-jukebox-design`** skill so it loads on demand instead of sitting in every context.
+
+- `tokens/hardware.css` — the case's dimension source of truth (mm).
+- `industrial/` — front elevation, side section (wall mount + rear USB-C), exploded stack,
+  control-layout spec, accent trim variations. CSS technical drawings; open in a browser.
+- `tokens/` + `guidelines/` — near-black `--screen-bg #0e0f12`, single accent
+  (**amber `#e8892b`**, teal/coral as alternates), Hanken Grotesk + JetBrains Mono, 4px grid.
+- `components/` + `ui_kits/jukebox-screen/` — React/HTML **specification** of the screen UI.
+  Not shippable code; the device is LVGL. See the translation note in the skill's `SKILL.md`.
+
+## The board
+
+Manuals, course PDFs and the P4 datasheet: `docs/crowpanel-advance-p4-7in/`.
+Pin map (from Elecrow's `board_config.h`): `src/boards/crowpanel_p4_7in/pins.h`.
+
+| | |
+|---|---|
+| SoC | **ESP32-P4NRW32** — RISC-V dual-core HP @ 360/400 MHz, LP core @ 40 MHz |
+| Memory | 16 MB flash, **32 MB in-package PSRAM**, **768 KB L2MEM** internal |
+| Display | 1024×600 IPS, **MIPI-DSI**, **EK79007** driver IC, active area 155×87 mm |
+| Touch | **GT911** I2C @ 0x5D (INT low at reset) / 0x14 |
+| Audio | **NS4168** class-D amp → **two onboard speakers**, I2S; separate PDM mic |
+| Wireless | **ESP32-C6-MINI-1** (Wi-Fi 6 + BLE 5.3) on a swappable header, **SDIO + ESP-Hosted** |
+| Other | microSD, camera header (MIPI-CSI), 11-pin GPIO header, Crowtail I2C/UART, 2× USB-C |
+| Physical | PCB 180 × 105 mm, 5 V / 2 A |
+
+### What this buys us
+
+This is a much better fit for the design than an ESP32-S3 would have been:
+
+- **768 KB internal L2MEM** vs the S3's ~150 KB free. Internal SRAM is *the* recurring failure mode
+  in this repo — it is why nest OTA is unreliable and why the wake word starved LWIP into
+  "connection refused". That pressure largely goes away here.
+- **MIPI-DSI with a real display controller**, instead of streaming a framebuffer out of PSRAM over
+  RGB-parallel. 1024×600 would have been marginal-to-impossible on an S3; on the P4 it is the
+  intended use case.
+- **Hardware JPEG codec + 2D-DMA + PPA.** Album art currently decodes in software via TJpg_Decoder;
+  the P4 can do it in hardware, and PPA can accelerate LVGL blits.
+- 32 MB PSRAM makes double/triple framebuffering (tear-free mode) affordable.
+
+### What it costs us — read before writing any code
+
+**1. Different silicon ⇒ different toolchain.** The P4 is RISC-V and the official
+`platform = espressif32` does not support it at *any* version. The jukebox envs use the
+**pioarduino** fork (`55.03.311` = Arduino core 3.3.11 / IDF 5.5.5).
+
+> ⚠️ The fork publishes itself under the name **`espressif32`** too. Installing it immediately
+> retargeted `nest` and `sleep-machine` to Arduino 3.x — verified, then fixed by pinning
+> `platform = espressif32@6.9.0` in `[env]` (6.9.0 is the last platform on
+> framework-arduinoespressif32 ~3.20017, which the S3 units are written against).
+> **Both pins are load-bearing. Don't loosen either.** `pio run -e nest` was re-verified green
+> after the pin.
+
+**2. `src/core/` is not yet known to compile under Arduino 3.x.** Everything shared —
+`soap_client`, `ssdp`, `library`, `settings`, `webconfig`, `album_art`, `net/*` — was written
+against Arduino 2.0.17 / IDF 4.4. Expect friction in `WiFi`, `WebServer`, `HTTPClient` and
+`Preferences`. This is why the bring-up env excludes `core/` entirely: screen first, port second.
+
+**3. The P4 has no radio — Wi-Fi is the C6 over SDIO, and it WORKS. ✅ RESOLVED ON HARDWARE.**
+
+The multicast probe now passes **6/6** on the real board:
+
+```
+[PASS] associate            ip=192.168.68.x
+[PASS] dns lookup
+[PASS] M-SEARCH :1900       16 responder(s)
+[PASS] M-SEARCH ephemeral   18 responder(s)
+[PASS] multicast group join join=ok notifies=1
+[PASS] HTTP to speaker      HTTP/1.1 200 OK
+VERDICT: SSDP discovery works over ESP-Hosted.
+```
+
+**`core/sonos/ssdp.cpp` should port across unchanged** — including its `udp.begin(1900)` fixed
+source port, which was the case I was most worried about. Inbound multicast (group join +
+NOTIFY) works too, so a NOTIFY-based discovery fallback is available if ever wanted.
+
+Getting there took two fixes, and the first was the whole problem:
+
+1. **SDIO wiring.** The initial run failed with `sdmmc_send_cmd returned 0x109` (timeout) and
+   never associated, because the build used a stock `esp32-p4*` profile whose ESP-Hosted
+   defaults are Espressif's EV board. Elecrow wires the C6 differently, and **the 7" differs
+   from the 5"**: 1-bit bus @10 MHz on CLK=18/CMD=19/D0=14/D1=15, slave reset GPIO32 active-high,
+   1500 ms. (The 5" is 4-bit on GPIO49–54, reset GPIO20.) That config now lives in
+   `[jukebox_base] custom_sdkconfig`, with the board definition in `boards/crowpanel-p4-7in.json`.
+   Wrong pins do not fail loudly — the board boots and Arduino starts ESP-Hosted before the
+   transport dies, which reads like broken hardware.
+2. **`ARDUINO_USB_CDC_ON_BOOT=1` had to go.** Serial on this board is the CH340K UART bridge,
+   not native USB CDC. With `custom_sdkconfig` the build switches to ESP-IDF mode, where that
+   flag breaks the compile outright (`HardwareSerial.h: 'USBSerial' was not declared`).
+
+**C6 co-processor firmware: still 2.3.0 — the update did not take.** Using Elecrow's linked
+project (`crowpanel-advanced-p4-c6-upgrade`, target `crowpanel-p4-70-90-101`) the transfer
+succeeded but activation did not:
+
+```
+[PASS] Connected to C6 slave in 1886ms
+[PASS] OTA transfer completed in 14153ms
+[FAIL] Activate failed: ESP_ERR_NOT_SUPPORTED (0x106)
+[DIAG] C6 version after OTA: 2.3.0
+```
+
+The shipped 2.3.0 slave is too old to support the activate RPC, so the image was written but
+never marked bootable. **This is not currently blocking anything** — everything above passes
+with 2.3.0 — but the host stack (2.12.x) does warn that a version gap can cause RPC timeouts, so
+it is a latent stability risk worth closing. Next avenue: flash the C6 directly over its own
+UART rather than via SDIO OTA; Elecrow ships a second guide for the ESP-IDF route
+(`docs/crowpanel-advance-p4-7in/c6-upgrade/`, fetched by `fetch-docs.sh`).
+
+Note `custom_sdkconfig` makes PlatformIO build this as an IDF project. It prints
+"the 'src_filter' option cannot be used with ESP-IDF" — **that warning is cosmetic here**;
+`build_src_filter` was verified to still select our sources correctly.
+
+**4. Two build-system landmines, both already hit and worked around.**
+
+- *SCons.* The IDF 5.5 include list pushes compile commands past SCons' default
+  `MAXLINELENGTH`, into a response-file path that is broken in the bundled SCons 4.8.1
+  (`AttributeError: 'CmdStringHolder' object has no attribute 'data'`). It surfaces as a
+  per-object-file failure, so it reads like a code error. Fixed by
+  `tools/p4_maxlinelength.py`, wired into the jukebox envs.
+- *LVGL.* With `lvgl` resolving to 9.5.0 this env fails to compile LVGL's generated
+  `widgets/property/lv_span_properties.c` — "#endif without #if" against
+  `lv_conf_internal.h`. **This is P4-specific, not an LVGL regression**: `nest` was
+  clean-rebuilt from scratch against the same 9.5.0 and succeeded (709 files, unchanged
+  size). The likely cause is `include/lv_conf.h` being an Xtensa/S3 file (it pins
+  `LV_USE_DRAW_SW_ASM=NONE` and its comments assume the S3) meeting 9.5.0's RISC-V paths.
+  Stage 1 sidesteps it by not depending on LVGL at all; **resolve it before stage 3** —
+  probably a board-specific `lv_conf`, or pinning lvgl.
+
+**5. Switching envs re-downloads the framework.** The P4 framework (3.3.11) and the S3
+framework (3.20017) install to the *same* `framework-arduinoespressif32` package directory,
+so alternating `pio run -e nest` and `pio run -e jukebox-bringup` re-fetches ~78 MB each way.
+Annoying, not dangerous. The 2.1 GB `framework-arduinoespressif32-libs` is P4-only and stays.
+
+**6. Elecrow's examples are LVGL 8.3.11**; this repo is on LVGL 9. Their `lvgl_v8_port.cpp` is not
+reusable as-is. Keep LVGL 9 (the core and both existing units depend on it) and write our own
+DSI flush against `esp_lcd`.
+
+### Physical controls — not on this board
+
+The CrowPanel Advance is a bare touchscreen: **there is no rotary encoder and there are no
+transport buttons.** The design's Ø36 push-select dial and 4× Ø13 caps have to be added as
+external hardware on the 11-pin GPIO header / Crowtail connectors. That is a hardware task with
+its own BOM, and it is why the UI work starts touch-only.
+
+Implication for `core/board.h`: when the controls do arrive, add a generic API rather than four
+bespoke functions, mirroring how wake-word phrases are handled (the board reports *which* input
+fired; the unit decides what it means):
+
+```c
+// --- Momentary buttons (optional; 0 on boards without any) ---
+int  buttonCount();
+int  buttonPoll();              // index of a press since the last call, else -1
+const char *buttonName(int i);  // "play" | "next" | "prev" | "rooms" — for logs/UI
+```
+
+Boards without buttons return 0/-1/nullptr, so nest and sleep-machine stay untouched.
+
+### UI sound feedback (two onboard speakers)
+
+The board has an NS4168 amp driving two speakers. Use them for **UI feedback** — a click on
+touch, a tick per volume step, a confirmation on room change — and make it **configurable**
+(on/off + level, persisted in `core/settings`, exposed on the Settings screen).
+
+Notes for whoever implements it:
+- `PIN_AUDIO_CTRL` (GPIO30) gates amp power. Drive it **low when idle** — leaving a class-D amp
+  enabled between clicks wastes current and hisses. Enable it a few ms before a sample and drop it
+  after a short idle timeout.
+- Feedback samples are tiny; keep them as PROGMEM PCM and push them straight to I2S. Do **not**
+  pull in the Helix MP3 decoder for this — the sleep-machine needs that, the jukebox doesn't.
+- This is UI feedback, not media playback. It should not touch `localAudio*` in the board HAL
+  (that contract means "play a file off local storage"); a separate small `uiSound()` is cleaner.
+
+## Sequence
+
+1. **Screen** ← *current step*. `[env:jukebox-bringup]` +
+   `src/boards/crowpanel_p4_7in/display_test.cpp`, staged so a failure names its layer:
+   serial/LED/I2C-scan → MIPI-DSI panel + backlight → LVGL 9 + GT911 indev + FPS.
+2. **Prove multicast over ESP-Hosted** (item 3 above) — **written and building**:
+   `[env:jukebox-mcast]` + `src/boards/crowpanel_p4_7in/multicast_test.cpp`. It replays the exact
+   request `core/sonos/ssdp.cpp` sends and reports PASS/FAIL per layer (association → DNS/TCP →
+   M-SEARCH from :1900 → M-SEARCH from an ephemeral port → multicast group join → HTTP to a
+   discovered speaker), then prints a verdict. The ephemeral-port case matters: `ssdp.cpp` does
+   `udp.begin(1900)`, and if only the fixed source port is broken over the SDIO bridge, the fix is
+   one line rather than an architecture change. **Not yet run on hardware.**
+3. **Port `core/` to Arduino 3.x**, one module at a time, keeping the S3 envs green.
+4. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
+   an LVGL style header that mirrors the `--token` names.
+5. UI sound feedback + settings toggle.
+6. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
+7. OTA + portal registration (`core/net/`), already board-agnostic.
+
+## Case notes
+
+`hardware/jukebox-7/`, generated with the existing Python CSG toolchain (trimesh + manifold3d)
+off `tokens/hardware.css`. Hardware commits stay separate from firmware.
+
+The design's screen cutout is essentially already right — it specifies 154×86 mm and the real
+active area is **155×87 mm**. The face, however, needs rework: the design assumes a 210 mm face
+with a 46 mm control column beside the screen, but the **PCB alone is 180 × 105 mm**, so the
+column cannot overlap it. Either widen the face to roughly 180 + column, or mount the dial and
+buttons on a separate sub-panel. Re-derive from the real PCB outline (Elecrow ships a `.stp`
+model and Eagle files in their GitHub repo) before printing anything.
+
+## Open questions
+
+- Does the dial's RGB light-ring ship in v1? It would be the first software-controllable LED in
+  the project (`PIN_LED` GPIO48 exists on this board, but the ring is external).
+- Camera header is present and unused. Out of scope unless you want presence-wake.
+- Accent locked to amber unless you say otherwise.

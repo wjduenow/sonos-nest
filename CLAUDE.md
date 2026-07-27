@@ -12,12 +12,17 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
+- **sonos-jukebox** — **planned, no firmware yet.** A wall-mounted landscape controller (5" 800×480
+  or 7" 1024×600 IPS, rotary dial + 4 transport caps, printed case). The design system for both the
+  screen UI and the case is in-tree as the **`/sonos-jukebox-design`** skill; the board choice and
+  the SRAM/bandwidth analysis are in **`plans/07-sonos-jukebox.md`** — read that before writing code.
 
-Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
+Units share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
 
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
+- New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
 - Flashing from WSL (USB): **`docs/flashing-wsl.md`**
 - Wireless flashing: the **`/ota` skill** (`.claude/skills/ota`)
 
