@@ -54,15 +54,25 @@ static void report(const char *name, bool ok, const String &detail = String()) {
 // chunked, and a raw stream read leaks chunk-size framing into the JPEG. core/album_art.cpp uses
 // HTTPClient::writeToStream() for exactly that reason. Reproduce that read here (without LVGL or
 // the decoder) and sanity-check the result really is a JPEG.
-static bool fetchArt(const String &url, size_t &bytesOut) {
+static bool fetchArt(const String &url, size_t &bytesOut, int &codeOut) {
   bytesOut = 0;
+  codeOut = 0;
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) return false;
-  http.setConnectTimeout(3000);
-  http.setTimeout(5000);
+  // Deliberately generous: core/album_art.cpp sets no timeouts and so inherits HTTPClient's 5 s
+  // default. Art for cloud/streamed content is proxied by the speaker from the provider's CDN and
+  // can be far slower than art from a local library. Timing the request tells us whether this is
+  // "slow" (raise the timeout) or "broken" (needs redirect handling or a different approach).
+  http.setConnectTimeout(5000);
+  http.setTimeout(20000);
+  uint32_t artT0 = millis();
   int code = http.GET();
-  if (code != HTTP_CODE_OK) { http.end(); return false; }
+  codeOut = code;
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("[art] GET failed after %lu ms\n", (unsigned long)(millis() - artT0));
+    http.end(); return false;
+  }
 
   // Drain via writeToStream so HTTPClient de-chunks for us, counting bytes and keeping the head.
   struct Counter : public Stream {
@@ -73,7 +83,10 @@ static bool fetchArt(const String &url, size_t &bytesOut) {
     int peek() override { return -1; }
     size_t write(uint8_t c) override { if (n < 4) head[n] = c; n++; return 1; }
     size_t write(const uint8_t *b, size_t len) override {
-      for (size_t i = 0; i < len && n < 4; i++) head[n + i] = b[i];
+      // Bound on (n + i), not n: n is fixed for the duration of the loop, so guarding on it
+      // alone lets the index run past head[] and smash the stack. That bug crashed the P4 with
+      // a Load access fault the moment a body actually arrived.
+      for (size_t i = 0; i < len && (n + i) < sizeof(head); i++) head[n + i] = b[i];
       n += len; return len;
     }
   } sink;
@@ -81,6 +94,7 @@ static bool fetchArt(const String &url, size_t &bytesOut) {
   http.writeToStream(&sink);
   http.end();
   bytesOut = sink.n;
+  Serial.printf("[art] %u bytes in %lu ms\n", (unsigned)sink.n, (unsigned long)(millis() - artT0));
   // JPEG SOI marker. If chunk framing leaked in, the first bytes are ASCII hex + CRLF instead.
   return sink.n > 1024 && sink.head[0] == 0xFF && sink.head[1] == 0xD8;
 }
@@ -95,6 +109,25 @@ void setup() {
   Serial.printf("[sys] chip=%s  internal heap free=%lu KB  psram free=%lu KB\n",
                 ESP.getChipModel(), (unsigned long)(ESP.getFreeHeap() / 1024),
                 (unsigned long)(ESP.getFreePsram() / 1024));
+
+  // --- 0. ESP-Hosted SDIO pins, INCLUDING THE C6 RESET LINE --------------------
+  // *** This must run before ANY Wi-Fi call. *** Arduino does not use the ESP-Hosted pins from
+  // sdkconfig: esp32-hal-hosted.c seeds sdio_pin_config from the board VARIANT's
+  // BOARD_SDIO_ESP_HOSTED_* macros and then overwrites the Kconfig values
+  // (`conf.pin_reset.pin = sdio_pin_config.pin_reset`) before esp_hosted_sdio_set_config().
+  // Our board json uses variant "esp32p4", whose macros are Espressif's Function EV Board:
+  // CLK/CMD/D0/D1 = 18/19/14/15 happen to match the CrowPanel exactly — which is why Wi-Fi works
+  // at all — but RESET is 54, not 32. So the C6 is never reset, and a warm P4 reset leaves it
+  // running a stale ESP-Hosted session: the card re-enumerates, the first register read times out
+  // (sdmmc_send_cmd 0x107), and esp_hosted reboots the host on purpose — forever, because the
+  // reboot cannot reset the C6. Only removing power fixes it. GPIO32 is confirmed as net C6_EN
+  // (IC1.EN, 10k pull-up, active high) in Elecrow's own Eagle schematic.
+  //
+  // NOTE the D2/D3 values are for PCB revision V1.0. On V1.1/V1.2 the data lines are REVERSED
+  // (d0=17, d1=16, d2=15, d3=14); reset stays 32. Revision is printed on the top silkscreen.
+  Serial.println("[hosted] setPins clk=18 cmd=19 d0=14 d1=15 d2=16 d3=17 rst=32");
+  if (!WiFi.setPins(18, 19, 14, 15, 16, 17, 32))
+    Serial.println("[hosted] setPins FAILED — too late (ESP-Hosted already initialised?)");
 
   // --- 1. NVS -----------------------------------------------------------------
   settingsInit();
@@ -186,12 +219,15 @@ void setup() {
 
     // --- 6. Album art over chunked HTTP -------------------------------------
     if (ps.artUri.startsWith("http")) {
-      size_t n = 0;
-      bool aOk = fetchArt(ps.artUri, n);
+      size_t n = 0; int httpCode = 0;
+      bool aOk = fetchArt(ps.artUri, n, httpCode);
       report("album art (chunked)", aOk,
              aOk ? (String(n / 1024) + " KB, JPEG SOI ok")
                  : (n ? String("got ") + String(n) + " B but not a JPEG — chunk framing leaked?"
-                      : "fetch failed"));
+                      : String("HTTP ") + String(httpCode) +
+                        (httpCode >= 300 && httpCode < 400
+                             ? " redirect — core/album_art.cpp does not follow redirects"
+                             : " (negative = HTTPClient/transport error)")));
     } else {
       skip("album art (chunked)", "no artUri (idle, or a radio stream without art)");
     }

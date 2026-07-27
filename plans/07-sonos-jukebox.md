@@ -273,10 +273,24 @@ Notes for whoever implements it:
    [PASS] GetTransportInfo   [PASS] GetVolume vol=38   [PASS] GetPositionInfo
    ```
 
-   That is `core/sonos/ssdp.cpp` doing its own M-SEARCH plus the `GetZoneGroupState` topology
-   parse, and three real SOAP calls through `soap_client.cpp`, all over the ESP-Hosted bridge —
-   **with `core/` byte-identical to what the S3 units run**. Still unexercised until something is
-   playing: DIDL against real metadata (the double-unescape trap) and the chunked album-art read.
+   With music playing, **all 8 checks pass**, including the two risky ones:
+
+   ```
+   [PASS] DIDL parse           fields populated   (title/artist/album, artUri single-escaped)
+   [PASS] album art (chunked)  222 KB, JPEG SOI ok   — 228,077 bytes in 1353 ms
+   ```
+
+   So `core/sonos/ssdp.cpp`, `soap_client.cpp`, `didl.cpp` and the `HTTPClient::writeToStream()`
+   de-chunking all work on this silicon, **with `core/` byte-identical to what the S3 units run**.
+
+   ### ⚠️ Latent bug found in shared code: album art >220 KB is silently truncated
+
+   `core/album_art.cpp` has `JPEG_MAX = 220 * 1024` (225,280 B). The very first real cover tested
+   here was **228,077 B** — over the buffer. `BufSink` stops appending at the cap and
+   `albumArtFetch()` only rejects `got < 100`, so an oversized cover is truncated with no error
+   and then fails (or garbles) in TJpg. **This affects nest and sleep-machine equally** — it is
+   not P4-specific and predates this work. Fix is one constant plus a truncation check; PSRAM is
+   nowhere near the constraint (~7 MB free on the S3, 31 MB here).
 
 5. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
    an LVGL style header that mirrors the `--token` names.
@@ -284,7 +298,7 @@ Notes for whoever implements it:
 7. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
 8. OTA + portal registration (`core/net/`), already board-agnostic.
 
-## ⚠️ The C6 wedges on a warm reset — power-cycle to recover
+## ✅ SOLVED: the C6 wedged on a warm reset — Arduino used the wrong reset pin
 
 **This shapes the whole development loop, so read it before debugging anything network-related.**
 
@@ -299,10 +313,38 @@ E (13050) H_SDIO_DRV: failed to read registers
 rst:0xc (SW_CPU_RESET)   ... loops forever
 ```
 
-Working theory: a P4 reset does not reset the C6, which is left mid-transaction and cannot be
-re-enumerated. `CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP=y` with
-`CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=32` is supposed to prevent exactly this, so either the
-GPIO is wrong for this board, is not wired, or the pulse is ineffective. **Unresolved.**
+**Root cause: Arduino ignores the ESP-Hosted pins from sdkconfig.** `esp32-hal-hosted.c` seeds
+`sdio_pin_config` from the board VARIANT's `BOARD_SDIO_ESP_HOSTED_*` macros, then overwrites the
+Kconfig values before calling `esp_hosted_sdio_set_config()`:
+
+```c
+conf.pin_reset.pin = sdio_pin_config.pin_reset;   // clobbers CONFIG_..._RESET_SLAVE=32
+```
+
+Our board JSON uses `"variant": "esp32p4"`, i.e. Espressif's Function EV Board, whose macros are
+CLK/CMD/D0/D1 = **18/19/14/15 — identical to the CrowPanel, which is why Wi-Fi worked at all** —
+but `BOARD_SDIO_ESP_HOSTED_RESET 54`, not 32. So the C6 was never reset. A warm P4 reset left it
+running a stale session: the card re-enumerates, the first register read times out, and
+`H_TRANSPORT_RESTART_ON_FAILURE` makes esp_hosted reboot the host on purpose — forever, since the
+reboot cannot reset the C6.
+
+GPIO32 is confirmed as net **C6_EN** (IC1.EN, 10k pull-up, active high) in Elecrow's own Eagle
+schematic, and their ESPHome example uses `reset_pin: GPIO32, active_high: true`. Not a hardware
+limitation.
+
+**Fix:** call `WiFi.setPins(18, 19, 14, 15, 16, 17, 32)` before *any* Wi-Fi call (it is refused
+once ESP-Hosted has initialised; all seven pins must be >= 0). **Verified on hardware: a warm
+reset now recovers and Wi-Fi comes straight back up.**
+
+The durable fix is a **custom board variant** defining `BOARD_SDIO_ESP_HOSTED_RESET 32`, so no
+future code path has to remember `setPins` first — do that when the board HAL lands.
+
+Two traps for later:
+- **Data lines differ by PCB revision.** 7" V1.0: d0=14,d1=15,d2=16,d3=17. **V1.1/V1.2 reverse
+  them** (d0=17,d1=16,d2=15,d3=14). Reset stays 32 on all. Ours is V1.0; the revision is printed
+  on the top silkscreen.
+- **GPIO54 is the swappable radio header's NRST** per Elecrow's wiki — ESP-Hosted was pulsing it
+  every boot. Harmless with the C6 fitted, but not a no-op if a LoRa module is ever installed.
 
 Consequences, all of which cost time here:
 - **Every `-t upload` must be followed by a power cycle** before Wi-Fi will work.
@@ -313,10 +355,9 @@ Consequences, all of which cost time here:
   hypotheses were "falsified" here against a board that could not have passed regardless. Always
   re-establish a known-good control on a freshly power-cycled board first.
 
-This is also a **product risk**, not just a dev annoyance: the jukebox is wall-mounted, so a fault
-that only clears by unplugging is not acceptable in the field. It needs to be understood — either
-it is specific to crash loops (then: don't crash, and add a watchdog that pulses the C6 reset), or
-the reset line needs verifying against Elecrow's schematic.
+Optional hardening, not the fix: `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n` turns the
+unrecoverable boot loop into an `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` event the app can handle.
+Worth considering for a wall-mounted unit as a safety net.
 
 ## Case notes
 
