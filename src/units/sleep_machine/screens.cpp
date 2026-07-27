@@ -309,6 +309,11 @@ static void handleWakeWord() {
   if (i < 0) return;
   const char *p = wakeWordPhrase(i);
   if (!p) return;
+  // Voice never touches the LVGL indev, so the screensaver's exit-on-activity path never runs and
+  // its early return in uiTick() would short-circuit the ST_STARTING handshake that actually starts
+  // the Sleep playlist — the command would set up but never fire until a touch woke the screen.
+  // Undim here (without exitScreensaver()'s showOnly(): the action below sets the right page).
+  if (s_ssOn) { s_ssOn = false; backlightSet(settingsBrightness()); }
   showToast(p);                                   // visible confirmation it heard you
 
   if (!strcmp(p, "Kinder Bedtime")) {
