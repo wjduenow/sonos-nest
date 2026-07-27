@@ -6,7 +6,12 @@
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 static const int    ART_MAX  = 180;
-static const size_t JPEG_MAX = 220 * 1024;   // high-res covers can exceed 100 KB
+// Raw JPEG download cap. 220 KB was too tight: a real Sonos cover measured 228,077 bytes, i.e.
+// it overran the buffer and was silently truncated (see BufSink::dropped below). Art comes from
+// the streaming service via the speaker, so the ceiling isn't ours to control — leave generous
+// headroom. This lives in PSRAM, which is nowhere near the constraint on any unit (~7 MB free on
+// the ESP32-S3 boards, ~31 MB on the P4); internal SRAM, which IS tight, is unaffected.
+static const size_t JPEG_MAX = 512 * 1024;
 
 static uint8_t  *s_jpeg = nullptr;          // raw JPEG download buffer (PSRAM)
 static uint16_t *s_buf[2] = {nullptr, nullptr};  // double-buffered RGB565 (PSRAM)
@@ -23,10 +28,16 @@ class BufSink : public Stream {
  public:
   BufSink(uint8_t *b, size_t cap) : _b(b), _cap(cap) {}
   size_t len = 0;
-  size_t write(uint8_t c) override { if (len < _cap) { _b[len++] = c; return 1; } return 0; }
+  size_t dropped = 0;   // bytes that did not fit — see albumArtFetch(), which must not ignore this
+  size_t write(uint8_t c) override {
+    if (len < _cap) { _b[len++] = c; return 1; }
+    dropped++; return 0;
+  }
   size_t write(const uint8_t *d, size_t n) override {
     size_t t = (len + n <= _cap) ? n : (_cap - len);
-    memcpy(_b + len, d, t); len += t; return t;
+    memcpy(_b + len, d, t); len += t;
+    dropped += n - t;
+    return t;
   }
   int available() override { return 0; }
   int read() override { return -1; }
@@ -79,8 +90,17 @@ bool albumArtFetch(const String &url) {
   BufSink sink(s_jpeg, JPEG_MAX);
   http.writeToStream(&sink);
   size_t got = sink.len;
+  size_t dropped = sink.dropped;
   http.end();
   if (got < 100) { Serial.printf("[art] short read (%u bytes)\n", (unsigned)got); return false; }
+  // A cover larger than JPEG_MAX used to be truncated silently: TJpg then failed or produced a
+  // garbled image, with nothing in the log pointing at the buffer. Refuse it loudly instead —
+  // no art beats wrong art, and the message says exactly what to raise.
+  if (dropped) {
+    Serial.printf("[art] TRUNCATED: %u bytes did not fit (JPEG_MAX=%u). Raise JPEG_MAX.\n",
+                  (unsigned)dropped, (unsigned)JPEG_MAX);
+    return false;
+  }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
   uint16_t w = 0, h = 0;
