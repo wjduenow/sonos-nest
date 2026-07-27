@@ -8,6 +8,19 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <esp_arduino_version.h>   // ESP_ARDUINO_VERSION_MAJOR — see mdnsResultIp() below
+
+// Arduino-ESP32 3.x renamed MDNSResponder::IP(idx) to address(idx). This file has to compile on
+// both: the ESP32-S3 units (nest, sleep-machine) are pinned to Arduino 2.0.17, while sonos-jukebox
+// is ESP32-P4 and can only build on 3.x. Keep this shim rather than bumping the S3 units — see
+// plans/07-sonos-jukebox.md for why those pins are load-bearing.
+static inline IPAddress mdnsResultIp(int idx) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  return MDNS.address(idx);
+#else
+  return MDNS.IP(idx);
+#endif
+}
 
 // Firmware version string — injected per build by tools/git_version.py (git describe). Default
 // keeps a plain `pio run` from any checkout compiling; the real value comes from the build flag.
@@ -37,7 +50,7 @@ static const char *serviceName() {
 static bool resolvePortal() {
   int n = MDNS.queryService(serviceName(), "tcp");
   if (n > 0) {
-    s_host = MDNS.IP(0).toString();
+    s_host = mdnsResultIp(0).toString();
     s_port = MDNS.port(0);
     settingsSetPortal(s_host + ":" + String(s_port));
     Serial.printf("[registrar] portal @ %s:%u (mDNS)\n", s_host.c_str(), s_port);

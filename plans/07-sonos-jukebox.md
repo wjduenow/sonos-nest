@@ -245,9 +245,26 @@ Notes for whoever implements it:
    discovered speaker), then prints a verdict. The ephemeral-port case matters: `ssdp.cpp` does
    `udp.begin(1900)`, and if only the fixed source port is broken over the SDIO bridge, the fix is
    one line rather than an architecture change. **Not yet run on hardware.**
-3. **Port `core/` to Arduino 3.x**, one module at a time, keeping the S3 envs green.
-   This is now the critical path — the board is proven end to end (panel, touch, Wi-Fi, SSDP)
-   and nothing further can be built until the shared code compiles here.
+3. **Port `core/` to Arduino 3.x** — **compiles clean.** All 3,127 lines of `src/core/` build
+   against Arduino 3.3.11 / IDF 5.5 with a single shim: Arduino 3.x renamed
+   `MDNSResponder::IP(idx)` to `address(idx)`, so `net/registrar.cpp` has a version-conditional
+   `mdnsResultIp()`. Nothing else — `WiFi`, `HTTPClient`, `Preferences`, `WiFiUDP`, `ArduinoOTA`
+   and `WebServer` all compiled unmodified, which was better than expected. `nest` and
+   `sleep-machine` were rebuilt afterwards and are green, so the shim is genuinely portable.
+
+   `[env:jukebox-core]` compiles `core/` with no board or unit purely to catch regressions
+   against 3.x; it is not meant to link.
+
+   **Compiling is not running.** Nothing in `core/` has executed on this board yet. Two areas to
+   distrust until they have:
+   - `WebServer`. The sleep-machine deliberately bypasses its multipart and raw body paths
+     because both are broken in 2.0.17 (see CLAUDE.md). Those workarounds may be unnecessary, or
+     actively wrong, on 3.x. That code is board-side (es3c28p) so it does not affect the jukebox
+     directly, but the same reasoning applies to anything new we serve here.
+   - `HTTPClient` chunked reads, which album art depends on (`writeToStream()`).
+
+4. **Runtime-prove `core/` on the P4** — a smoke test that boots Wi-Fi, runs SSDP discovery and
+   makes one real SOAP call, before any UI exists.
 4. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
    an LVGL style header that mirrors the `--token` names.
 5. UI sound feedback + settings toggle.

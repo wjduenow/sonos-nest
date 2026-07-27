@@ -14,8 +14,9 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
 - **sonos-jukebox** — **in bring-up.** A wall-mounted landscape controller on an ELECROW CrowPanel
   Advance 7" **ESP32-P4** (1024×600 MIPI-DSI, EK79007, GT911 touch, dual speakers, ESP32-C6 for
-  Wi-Fi). **Working**: DSI panel, LVGL 9 + GT911 touch, and SSDP discovery over the C6. **Not yet**:
-  the `core/` port to Arduino 3.x (the critical path), and any UI. The screen UI + case design system is in-tree as the
+  Wi-Fi). **Working**: DSI panel, LVGL 9 + GT911 touch, and SSDP discovery over the C6. `core/` compiles on
+  Arduino 3.x (one shim in `net/registrar.cpp`). **Not yet**: `core/` proven at runtime here, the
+  board HAL (`core/board.h`), and any UI. The screen UI + case design system is in-tree as the
   **`/sonos-jukebox-design`** skill. **Read `plans/07-sonos-jukebox.md` before touching this** —
   it is different silicon (RISC-V) on a different toolchain, and several failure modes here are
   silent.
