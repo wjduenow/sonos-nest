@@ -189,12 +189,39 @@ Notes for whoever implements it:
 
 ## Sequence
 
-1. **Screen** — stages 1 and 2 **done and confirmed on hardware**; stage 3 (LVGL + touch) next.
+1. **Screen — DONE, all three stages confirmed on hardware.**
    `[env:jukebox-bringup]` + `src/boards/crowpanel_p4_7in/display_test.cpp`.
    The EK79007 comes up at 1024x600, DSI 2 lanes @900 Mbps, DPI 52 MHz, and a hand-drawn
    design-system frame renders with correct colours (`rgb_ele_order = RGB`) and no artefacts.
    Headroom is excellent: **428 KB internal heap free**, and the 1200 KB frame buffer lands in
    PSRAM, leaving internal RAM alone.
+
+   **Stage 3 (LVGL 9 + GT911) works.** LVGL renders in `LV_DISPLAY_RENDER_MODE_DIRECT` straight
+   into the DSI frame buffer — no second buffer, no blit; the flush callback only writes the
+   dirty rows back out of cache. Touch is a hand-written GT911 reader (~60 lines of I2C) rather
+   than another managed component.
+
+   Measured, with an animation running so the figures mean something:
+
+   | | |
+   |---|---|
+   | renders/sec | **~32 idle, ~50 under touch** — LVGL's default 33 ms `LV_DEF_REFR_PERIOD`, not a compute limit |
+   | dirty rows/sec | 3.5k–6k (~7–12 MB/s) |
+   | internal heap free | **328 KB** after panel + LVGL |
+
+   Two measurement traps worth avoiding: a *static* screen idles around 480 loops/sec because
+   LVGL finds nothing dirty and never renders, and even with an animation the loop rate is
+   bounded by `delay()` and the refresh period. Count **flush callbacks**, not loop iterations.
+
+   **GT911 coordinate decode.** The widely-quoted register map puts a track-ID byte at 0x8150
+   with x_lo at p[1]. This controller does not — coordinates start at p[0]. Decoding with the
+   track-ID offset yields values like `0x5003`, an x-high byte sitting where the low byte was
+   expected. Raw bytes `C1 03 46 02 ...` decode as (961, 582) for a bottom-right press on a
+   1024x600 panel, which also confirms **no axis swap and no inversion** is needed: X runs
+   left→right over 1024, Y top→bottom over 600. `GT911_RAW_DUMP` in `display_test.cpp` prints
+   the raw block and both candidate decodings; it also *latches* the last touch and reprints it
+   every second, because otherwise reading touch over serial is a synchronisation game where an
+   empty capture window is indistinguishable from broken hardware.
 
    Three things cost real time here — see also `lib/esp_lcd_ek79007/VENDORING.md`:
 
@@ -219,6 +246,8 @@ Notes for whoever implements it:
    `udp.begin(1900)`, and if only the fixed source port is broken over the SDIO bridge, the fix is
    one line rather than an architecture change. **Not yet run on hardware.**
 3. **Port `core/` to Arduino 3.x**, one module at a time, keeping the S3 envs green.
+   This is now the critical path — the board is proven end to end (panel, touch, Wi-Fi, SSDP)
+   and nothing further can be built until the shared code compiles here.
 4. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
    an LVGL style header that mirrors the `--token` names.
 5. UI sound feedback + settings toggle.

@@ -8,7 +8,7 @@
 // Staged on purpose, so a failure tells you *which* layer broke:
 //   Stage 1  serial + LED + I2C scan   -> is the board alive, is GT911 on the bus
 //   Stage 2  MIPI-DSI panel + backlight -> does the EK79007 light up
-//   Stage 3  LVGL 9 + GT911 indev       -> does it render, and how fast          (TODO)
+//   Stage 3  LVGL 9 + GT911 indev       -> does it render, and how fast
 //
 // Run:  pio run -e jukebox-bringup -t upload && python3 tools/readser.py /dev/ttyUSB0 40
 #ifdef JUKEBOX_BRINGUP
@@ -18,6 +18,8 @@
 
 // MIPI-DSI stack. All ESP-IDF — there is no Arduino display API for DSI, and Arduino_GFX
 // (pinned at 1.3.1 for the S3 boards) has nothing to offer here.
+#include <lvgl.h>
+
 #include "esp_cache.h"
 #include "esp_lcd_ek79007.h"     // vendored driver — see lib/esp_lcd_ek79007/VENDORING.md
 #include "esp_lcd_mipi_dsi.h"
@@ -213,6 +215,199 @@ static bool stage2Panel() {
   return true;
 }
 
+// --- Stage 3: GT911 touch + LVGL 9 ---------------------------------------------
+
+// Minimal GT911 reader. Deliberately hand-written rather than pulling
+// espressif/esp_lcd_touch_gt911: after the EK79007 experience (see VENDORING.md), another
+// managed component is more friction than 60 lines of I2C, and the protocol is trivial.
+// Registers are 16-bit, big-endian on the wire.
+// Set to 1 to print the raw 8-byte point block on every touch — the tool for settling coordinate
+// questions (offset, axis order, inversion) from data instead of from a datasheet.
+#define GT911_RAW_DUMP 0
+
+static const uint16_t GT911_REG_STATUS = 0x814E;  // bit7 = data ready, low nibble = touch count
+static const uint16_t GT911_REG_POINT1 = 0x8150;  // 8 bytes per point
+
+static bool gt911Read(uint16_t reg, uint8_t *buf, size_t len) {
+  Wire.beginTransmission(GT911_ADDR_LOW);
+  Wire.write((uint8_t)(reg >> 8));
+  Wire.write((uint8_t)(reg & 0xFF));
+  if (Wire.endTransmission(false) != 0) return false;      // repeated start
+  size_t got = Wire.requestFrom((int)GT911_ADDR_LOW, (int)len);
+  for (size_t i = 0; i < got && i < len; i++) buf[i] = Wire.read();
+  return got == len;
+}
+
+static void gt911Write(uint16_t reg, uint8_t val) {
+  Wire.beginTransmission(GT911_ADDR_LOW);
+  Wire.write((uint8_t)(reg >> 8));
+  Wire.write((uint8_t)(reg & 0xFF));
+  Wire.write(val);
+  Wire.endTransmission();
+}
+
+// Latest touch state, refreshed by the LVGL indev callback.
+static volatile int32_t s_touchX = 0, s_touchY = 0;
+static volatile bool s_touchDown = false;
+// Latched so a press can be inspected long after it happened. Reading raw touch over serial is
+// otherwise a synchronisation game — the capture window has to overlap the press, and an empty
+// window is indistinguishable from broken touch.
+static uint8_t  s_lastRaw[8] = {0};
+static uint32_t s_touchCount = 0;
+
+static void touchRead(lv_indev_t *indev, lv_indev_data_t *data) {
+  (void)indev;
+  uint8_t status = 0;
+  if (!gt911Read(GT911_REG_STATUS, &status, 1)) {
+    data->state = LV_INDEV_STATE_RELEASED;
+    return;
+  }
+  if (status & 0x80) {                       // a fresh sample is ready
+    uint8_t n = status & 0x0F;
+    if (n > 0) {
+      uint8_t p[8];
+      if (gt911Read(GT911_REG_POINT1, p, sizeof(p))) {
+        // Byte layout at 0x8150. The widely-quoted GT911 map puts a track-ID byte first
+        // (x_lo at p[1]), but this panel's controller returns coordinates from p[0] — decoding
+        // with the track-ID offset produced values like 0x5003, i.e. an x-high byte sitting
+        // where the low byte was expected. GT911_RAW_DUMP prints both readings so the choice is
+        // made from data rather than from a datasheet that doesn't match the part.
+        s_touchX = (int32_t)(p[0] | (p[1] << 8));
+        s_touchY = (int32_t)(p[2] | (p[3] << 8));
+        s_touchDown = true;
+        memcpy(s_lastRaw, p, sizeof(s_lastRaw));
+        s_touchCount++;
+      }
+    } else {
+      s_touchDown = false;
+    }
+    gt911Write(GT911_REG_STATUS, 0);         // MUST clear, or the controller stops reporting
+  }
+  data->point.x = s_touchX;
+  data->point.y = s_touchY;
+  data->state = s_touchDown ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+static uint32_t lvglTickCb() { return millis(); }
+
+// DIRECT render mode: LVGL draws straight into the DPI frame buffer that the DSI peripheral is
+// already scanning out, so there is no second buffer and no blit. The only thing flush has to do
+// is write the dirty rows back out of the CPU cache — same hazard as stage 2, just per-region.
+static uint8_t *s_fb = nullptr;
+
+static volatile uint32_t s_flushes = 0;      // real renders, as opposed to loop iterations
+static volatile uint32_t s_flushRows = 0;    // rows pushed, i.e. how much area is actually dirty
+
+static void lvglFlushCb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
+  (void)px;
+  s_flushes++;
+  s_flushRows += (uint32_t)(area->y2 - area->y1 + 1);
+  // Sync whole rows: a row is 1024*2 = 2048 bytes, a clean multiple of the 64-byte cache line,
+  // so this stays aligned without rounding. Syncing only the dirty rows rather than the whole
+  // 1200 KB buffer is what keeps the frame rate up.
+  const size_t rowBytes = (size_t)LCD_WIDTH * 2;
+  uint8_t *start = s_fb + (size_t)area->y1 * rowBytes;
+  size_t len = (size_t)(area->y2 - area->y1 + 1) * rowBytes;
+  esp_cache_msync(start, len, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  lv_display_flush_ready(disp);
+}
+
+static lv_obj_t *s_touchLabel = nullptr;
+static lv_obj_t *s_fpsLabel = nullptr;
+
+// A deliberately design-system-flavoured screen: near-black ground, one amber accent, mono-ish
+// metadata. It doubles as a first look at whether the tokens actually read well at 7".
+static void buildTestUi() {
+  lv_obj_t *scr = lv_screen_active();
+  lv_obj_set_style_bg_color(scr, lv_color_hex(0x0e0f12), 0);   // --screen-bg
+  lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+  lv_obj_t *title = lv_label_create(scr);
+  lv_label_set_text(title, "Sonos Jukebox");
+  lv_obj_set_style_text_color(title, lv_color_hex(0xf4f5f7), 0);  // --screen-text
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_48, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 40, 32);
+
+  lv_obj_t *sub = lv_label_create(scr);
+  lv_label_set_text(sub, "stage 3  .  LVGL 9 + GT911");
+  lv_obj_set_style_text_color(sub, lv_color_hex(0x9aa0ab), 0);    // --screen-text-mut
+  lv_obj_set_style_text_font(sub, &lv_font_montserrat_20, 0);
+  lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 40, 96);
+
+  // Accent slab — the one saturated thing on screen, per the design system's "one accent" rule.
+  lv_obj_t *accent = lv_obj_create(scr);
+  lv_obj_set_size(accent, 240, 120);
+  lv_obj_align(accent, LV_ALIGN_TOP_RIGHT, -40, 32);
+  lv_obj_set_style_bg_color(accent, lv_color_hex(0xe8892b), 0);   // --accent
+  lv_obj_set_style_border_width(accent, 0, 0);
+  lv_obj_set_style_radius(accent, 20, 0);                        // --r-lg
+
+  // Touch target: press it and it fills; release and it goes back to outline.
+  lv_obj_t *btn = lv_button_create(scr);
+  lv_obj_set_size(btn, 320, 110);
+  lv_obj_align(btn, LV_ALIGN_CENTER, 0, 40);
+  lv_obj_set_style_bg_color(btn, lv_color_hex(0x191b20), 0);     // --screen-elev
+  lv_obj_set_style_bg_color(btn, lv_color_hex(0xe8892b), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(btn, lv_color_hex(0x2c3038), 0); // --screen-line
+  lv_obj_set_style_border_width(btn, 1, 0);
+  lv_obj_set_style_radius(btn, 20, 0);
+  lv_obj_t *btnLabel = lv_label_create(btn);
+  lv_label_set_text(btnLabel, "TOUCH ME");
+  lv_obj_set_style_text_font(btnLabel, &lv_font_montserrat_24, 0);
+  lv_obj_center(btnLabel);
+
+  s_touchLabel = lv_label_create(scr);
+  lv_label_set_text(s_touchLabel, "touch: --");
+  lv_obj_set_style_text_color(s_touchLabel, lv_color_hex(0x9aa0ab), 0);
+  lv_obj_set_style_text_font(s_touchLabel, &lv_font_montserrat_24, 0);
+  lv_obj_align(s_touchLabel, LV_ALIGN_BOTTOM_LEFT, 40, -40);
+
+  // Something must actually move, or the fps figure is meaningless: with a static screen LVGL
+  // finds nothing dirty and skips rendering entirely (that path idles around 480). Sliding the
+  // accent slab forces a real redraw of a representative dirty area every frame.
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, accent);
+  lv_anim_set_values(&a, 0, -520);
+  lv_anim_set_duration(&a, 1400);
+  lv_anim_set_playback_duration(&a, 1400);
+  lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
+    lv_obj_align((lv_obj_t *)obj, LV_ALIGN_TOP_RIGHT, -40 + v, 32);
+  });
+  lv_anim_start(&a);
+
+  s_fpsLabel = lv_label_create(scr);
+  lv_label_set_text(s_fpsLabel, "fps: --");
+  lv_obj_set_style_text_color(s_fpsLabel, lv_color_hex(0x6a7079), 0);  // --screen-text-dim
+  lv_obj_set_style_text_font(s_fpsLabel, &lv_font_montserrat_24, 0);
+  lv_obj_align(s_fpsLabel, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
+}
+
+static bool stage3Lvgl() {
+  if (esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, (void **)&s_fb) != ESP_OK || !s_fb) {
+    Serial.println("[stage3] FAIL: no frame buffer");
+    return false;
+  }
+
+  lv_init();
+  lv_tick_set_cb(lvglTickCb);
+
+  lv_display_t *disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
+  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+  lv_display_set_flush_cb(disp, lvglFlushCb);
+  lv_display_set_buffers(disp, s_fb, nullptr, (uint32_t)LCD_WIDTH * LCD_HEIGHT * 2,
+                         LV_DISPLAY_RENDER_MODE_DIRECT);
+
+  lv_indev_t *indev = lv_indev_create();
+  lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(indev, touchRead);
+
+  buildTestUi();
+  Serial.println("[stage3] LVGL 9 up, GT911 indev registered, DIRECT render into the DSI buffer");
+  return true;
+}
+
 void setup() {
   Serial.begin(115200);
   uint32_t t0 = millis();
@@ -253,14 +448,66 @@ void setup() {
   Serial.printf("[sys] internal heap after panel init: free=%lu KB  psram free=%lu KB\n",
                 (unsigned long)(ESP.getFreeHeap() / 1024),
                 (unsigned long)(ESP.getFreePsram() / 1024));
-  Serial.println("[stage3] LVGL 9 + GT911 indev not written yet.");
+
+  delay(3000);   // let the stage-2 frame stand for a moment before LVGL paints over it
+
+  if (stage3Lvgl()) {
+    Serial.println("[stage3] ok — touch the button; coords and fps are on screen and on serial.");
+  } else {
+    Serial.println("[stage3] FAILED.");
+  }
+  Serial.printf("[sys] internal heap after LVGL init: free=%lu KB  largest block=%lu KB\n",
+                (unsigned long)(ESP.getFreeHeap() / 1024),
+                (unsigned long)(ESP.getMaxAllocHeap() / 1024));
 }
 
 void loop() {
-  digitalWrite(PIN_LED, HIGH);
-  delay(500);
-  digitalWrite(PIN_LED, LOW);
-  delay(500);
+  static uint32_t frames = 0, lastReport = 0, lastBlink = 0;
+  static bool led = false;
+
+  lv_timer_handler();
+  frames++;
+
+  uint32_t now = millis();
+  if (now - lastBlink >= 500) {
+    lastBlink = now;
+    led = !led;
+    digitalWrite(PIN_LED, led);
+  }
+  if (now - lastReport >= 1000) {
+    uint32_t fps = frames * 1000 / (now - lastReport);
+    frames = 0;
+    lastReport = now;
+
+    if (s_fpsLabel) lv_label_set_text_fmt(s_fpsLabel, "loop %lu/s", (unsigned long)fps);
+    if (s_touchLabel) {
+      if (s_touchDown) lv_label_set_text_fmt(s_touchLabel, "touch: %ld, %ld",
+                                             (long)s_touchX, (long)s_touchY);
+      else lv_label_set_text(s_touchLabel, "touch: --");
+    }
+    // Serial too — the on-screen numbers are useless for diagnosing a panel that isn't drawing.
+    // `loop` is iterations/sec — bounded by delay(2) and by LVGL's ~33 ms refresh period, so it
+    // says nothing about render cost. `flush` is actual renders/sec and `rows` the area they
+    // covered; those two are the numbers that matter.
+    uint32_t flushes = s_flushes, rows = s_flushRows;
+    s_flushes = 0; s_flushRows = 0;
+    Serial.printf("[stage3] loop=%lu/s  flush=%lu/s rows=%lu  touch=%s (%ld,%ld)  heap=%lu KB\n",
+                  (unsigned long)fps, (unsigned long)flushes, (unsigned long)rows,
+                  s_touchDown ? "down" : "up ", (long)s_touchX, (long)s_touchY,
+                  (unsigned long)(ESP.getFreeHeap() / 1024));
+#if GT911_RAW_DUMP
+    if (s_touchCount) {
+      const uint8_t *p = s_lastRaw;
+      Serial.printf("[gt911] n=%lu raw %02X %02X %02X %02X %02X %02X %02X %02X | "
+                    "p0=(%ld,%ld)  p1=(%ld,%ld)\n",
+                    (unsigned long)s_touchCount,
+                    p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
+                    (long)(p[0] | (p[1] << 8)), (long)(p[2] | (p[3] << 8)),
+                    (long)(p[1] | (p[2] << 8)), (long)(p[3] | (p[4] << 8)));
+    }
+#endif
+  }
+  delay(2);
 }
 
 #endif  // JUKEBOX_BRINGUP
