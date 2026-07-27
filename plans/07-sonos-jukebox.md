@@ -292,11 +292,16 @@ Notes for whoever implements it:
    not P4-specific and predates this work. Fix is one constant plus a truncation check; PSRAM is
    nowhere near the constraint (~7 MB free on the S3, 31 MB here).
 
-5. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
+5. **Board HAL — DONE.** `boards/crowpanel_p4_7in/{display,touch,board}.{h,cpp}` implements
+   `core/board.h`; `units/sonos_jukebox/` implements `core/unit.h`; `[env:sonos-jukebox]` is the
+   app. Boots end to end on hardware: panel + touch + Wi-Fi + zone pick + OTA + portal
+   registration. The unit's screens are a **scaffold** — real state on the glass, but not the
+   designed UI.
+6. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
    an LVGL style header that mirrors the `--token` names.
-6. UI sound feedback + settings toggle.
-7. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
-8. OTA + portal registration (`core/net/`), already board-agnostic.
+7. UI sound feedback + settings toggle.
+8. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
+9. OTA + portal registration — **already working**, board-agnostic as designed.
 
 ## ✅ SOLVED: the C6 wedged on a warm reset — Arduino used the wrong reset pin
 

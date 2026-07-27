@@ -14,9 +14,11 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
 - **sonos-jukebox** — **in bring-up.** A wall-mounted landscape controller on an ELECROW CrowPanel
   Advance 7" **ESP32-P4** (1024×600 MIPI-DSI, EK79007, GT911 touch, dual speakers, ESP32-C6 for
-  Wi-Fi). **Working**: DSI panel, LVGL 9 + GT911 touch, and SSDP discovery over the C6. `core/` runs here unmodified
-  (one shim in `net/registrar.cpp` was the whole Arduino 3.x port). **Not yet**: the board HAL
-  (`core/board.h`) and any UI.
+  Wi-Fi). **Working**: DSI panel, LVGL 9 + GT911 touch, and SSDP discovery over the C6. **it boots as a real unit** — board HAL, Wi-Fi,
+  zone selection, OTA and portal registration all work; `core/` needed only one shim in
+  `net/registrar.cpp` for Arduino 3.x. **Not yet**: the designed UI (the on-glass screens are a
+  scaffold), and the dial + transport buttons, which are **not on this board** and have to be
+  added as external hardware.
   > ⚠️ **The C6 wedges on a warm reset.** Wi-Fi works only on the first boot after a full power
   > cycle; after any P4 reset (flashing included) ESP-Hosted dies with `sdmmc_send_cmd 0x107` and
   > boot-loops until power is removed. So: **power-cycle after every upload**, never reset the
