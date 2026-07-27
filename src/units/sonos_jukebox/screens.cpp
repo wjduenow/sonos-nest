@@ -17,9 +17,13 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
+#include <vector>
+
 #include "core/album_art.h"
 #include "core/board.h"
+#include "core/library.h"
 #include "core/player_state.h"
+#include "core/sonos/ssdp.h"
 #include "core/unit.h"
 #include "ui_scale.h"
 
@@ -33,6 +37,24 @@ static const lv_coord_t GAP       = 34;    // art -> text column
 
 static lv_obj_t *s_content = nullptr;
 static lv_obj_t *s_provisioning = nullptr;
+
+// Pages live inside the content area and are shown/hidden rather than rebuilt: the design's rail
+// is instant navigation, and tearing down LVGL trees on every switch would both stutter and churn
+// the LV_MEM_SIZE pool.
+enum Page { PAGE_NOW = 0, PAGE_RADIO = 1, PAGE_ROOMS = 2, PAGE_COUNT = 3 };
+static lv_obj_t *s_page[PAGE_COUNT] = {nullptr, nullptr, nullptr};
+static lv_obj_t *s_railBtn[PAGE_COUNT] = {nullptr, nullptr, nullptr};
+static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr, nullptr, nullptr};
+static int s_cur = PAGE_NOW;
+
+// Radio (Sonos Favourites, FV:2)
+static lv_obj_t *s_radioList = nullptr, *s_radioStatus = nullptr;
+static bool s_radioRequested = false;    // a browse has been asked for since entering the page
+
+// Rooms
+static lv_obj_t *s_roomsWrap = nullptr;
+static std::vector<String> s_roomIps;      // parallel to the chips
+static uint32_t s_roomsGen = UINT32_MAX;   // last-rendered g_zonesGen
 
 // Status bar
 static lv_obj_t *s_dot = nullptr, *s_room = nullptr, *s_group = nullptr, *s_clock = nullptr;
@@ -118,6 +140,11 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
 }
 
 // --- Screen -----------------------------------------------------------------------------------
+// Forward decls: buildRail() wires the nav callbacks, which are defined further down alongside
+// the pages they switch to.
+static void showPage(int page);
+static void railCb(lv_event_t *e);
+
 static void buildRail(lv_obj_t *scr) {
   lv_obj_t *rail = panel(scr, RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
   lv_obj_align(rail, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -127,12 +154,21 @@ static void buildRail(lv_obj_t *scr) {
 
   // Only Now Playing exists so far; Radio and Rooms are placeholders so the rail reads as the
   // designed 3-item nav rather than appearing broken.
-  const char *icons[3] = {LV_SYMBOL_AUDIO, LV_SYMBOL_LIST, LV_SYMBOL_VOLUME_MAX};
-  for (int i = 0; i < 3; i++) {
-    lv_obj_t *b = panel(scr, 48, 48, i == 0 ? JB_SCREEN_ELEV_2 : JB_SCREEN_BG, JB_R_MD);
+  // Now / Radio / Rooms, matching the design's rail order.
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, LV_SYMBOL_LIST, LV_SYMBOL_VOLUME_MAX};
+  for (int i = 0; i < PAGE_COUNT; i++) {
+    lv_obj_t *b = lv_button_create(scr);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, 48, 48);
+    lv_obj_set_style_radius(b, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_BG), 0);
     lv_obj_align(b, LV_ALIGN_TOP_LEFT, (RAIL_W - 48) / 2, PAD_TOP + i * 58);
-    lv_obj_t *l = label(b, icons[i], &lv_font_montserrat_20, i == 0 ? JB_ACCENT : JB_TEXT_DIM);
+    lv_obj_add_event_cb(b, railCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_t *l = label(b, icons[i], &lv_font_montserrat_20, JB_TEXT_DIM);
     lv_obj_center(l);
+    s_railBtn[i] = b;
+    s_railIcon[i] = l;
   }
 }
 
@@ -153,7 +189,7 @@ static void buildStatusBar() {
 static void buildNowPlaying() {
   // Album art. Solid --screen-elev until core/album_art delivers a real cover; the design uses a
   // rounded tile with a hairline, never a bare rectangle.
-  s_art = panel(s_content, ART, ART, JB_SCREEN_ELEV, JB_R_LG);
+  s_art = panel(s_page[PAGE_NOW], ART, ART, JB_SCREEN_ELEV, JB_R_LG);
   lv_obj_align(s_art, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_set_style_border_width(s_art, 1, 0);
   lv_obj_set_style_border_color(s_art, lv_color_hex(JB_SCREEN_LINE), 0);
@@ -171,28 +207,28 @@ static void buildNowPlaying() {
   const lv_coord_t textX = ART + GAP;
   const lv_coord_t textW = SCREEN_W - RAIL_W - PAD_X * 2 - textX;
 
-  s_badgeSrc = label(s_content, "", &lv_font_montserrat_12, JB_ACCENT);
+  s_badgeSrc = label(s_page[PAGE_NOW], "", &lv_font_montserrat_12, JB_ACCENT);
   lv_obj_align(s_badgeSrc, LV_ALIGN_LEFT_MID, textX, -118);
 
-  s_title = label(s_content, "Sonos Jukebox", &lv_font_montserrat_48, JB_TEXT);
+  s_title = label(s_page[PAGE_NOW], "Sonos Jukebox", &lv_font_montserrat_48, JB_TEXT);
   lv_label_set_long_mode(s_title, LV_LABEL_LONG_DOT);
   lv_obj_set_width(s_title, textW);
   lv_obj_align(s_title, LV_ALIGN_LEFT_MID, textX, -64);
 
-  s_meta = label(s_content, "starting up", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_meta = label(s_page[PAGE_NOW], "starting up", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_label_set_long_mode(s_meta, LV_LABEL_LONG_DOT);
   lv_obj_set_width(s_meta, textW);
   lv_obj_align(s_meta, LV_ALIGN_LEFT_MID, textX, -8);
 
   // Scrubber: 6px track, accent fill, mono-ish timecodes beneath.
-  s_track = panel(s_content, textW, 6, JB_SCREEN_ELEV_2, 3);
+  s_track = panel(s_page[PAGE_NOW], textW, 6, JB_SCREEN_ELEV_2, 3);
   lv_obj_align(s_track, LV_ALIGN_LEFT_MID, textX, 48);
   s_fill = panel(s_track, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_fill, LV_ALIGN_LEFT_MID, 0, 0);
 
-  s_elapsed = label(s_content, "0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_elapsed = label(s_page[PAGE_NOW], "0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
   lv_obj_align(s_elapsed, LV_ALIGN_LEFT_MID, textX, 68);
-  s_remain = label(s_content, "-0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_remain = label(s_page[PAGE_NOW], "-0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
   lv_obj_align(s_remain, LV_ALIGN_LEFT_MID, textX + textW - 44, 68);
 }
 
@@ -200,27 +236,182 @@ static void buildTransport() {
   // Bottom row: volume left, transport right (design: VolumeBar flex + button cluster gap 14).
   const lv_coord_t rowY = -PAD_BOT;
 
-  s_volIcon = label(s_content, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, JB_TEXT_MUTED);
+  s_volIcon = label(s_page[PAGE_NOW], LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, JB_TEXT_MUTED);
   lv_obj_align(s_volIcon, LV_ALIGN_BOTTOM_LEFT, 0, rowY - 12);
 
-  lv_obj_t *volTrack = panel(s_content, 260, 6, JB_SCREEN_ELEV_2, 3);
+  lv_obj_t *volTrack = panel(s_page[PAGE_NOW], 260, 6, JB_SCREEN_ELEV_2, 3);
   lv_obj_align(volTrack, LV_ALIGN_BOTTOM_LEFT, 34, rowY - 18);
   s_volFill = panel(volTrack, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_volFill, LV_ALIGN_LEFT_MID, 0, 0);
 
-  s_volPct = label(s_content, "0", &lv_font_montserrat_12, JB_TEXT_MUTED);
+  s_volPct = label(s_page[PAGE_NOW], "0", &lv_font_montserrat_12, JB_TEXT_MUTED);
   lv_obj_align(s_volPct, LV_ALIGN_BOTTOM_LEFT, 306, rowY - 14);
 
   // 44px is the design system's --hit-min. These are the ONLY transport controls until the
   // physical caps are wired, so they are sized generously rather than as a secondary affordance.
-  lv_obj_t *prev = transportBtn(s_content, LV_SYMBOL_PREV, 56, false, prevCb);
+  lv_obj_t *prev = transportBtn(s_page[PAGE_NOW], LV_SYMBOL_PREV, 56, false, prevCb);
   lv_obj_align(prev, LV_ALIGN_BOTTOM_RIGHT, -(72 + 56 + 28), rowY);
 
-  s_play = transportBtn(s_content, LV_SYMBOL_PLAY, 72, true, playCb, &s_playLbl);
+  s_play = transportBtn(s_page[PAGE_NOW], LV_SYMBOL_PLAY, 72, true, playCb, &s_playLbl);
   lv_obj_align(s_play, LV_ALIGN_BOTTOM_RIGHT, -(56 + 14), rowY);
 
-  lv_obj_t *next = transportBtn(s_content, LV_SYMBOL_NEXT, 56, false, nextCb);
+  lv_obj_t *next = transportBtn(s_page[PAGE_NOW], LV_SYMBOL_NEXT, 56, false, nextCb);
   lv_obj_align(next, LV_ALIGN_BOTTOM_RIGHT, 0, rowY);
+}
+
+static void showPage(int page) {
+  if (page < 0 || page >= PAGE_COUNT) return;
+
+  // Leaving Radio: free the rows AND the cached browse results. CLAUDE.md is explicit that a long
+  // browse list can fill LV_MEM_SIZE and freeze the UI on a layer-alloc retry loop, so this is not
+  // optional tidiness.
+  if (s_cur == PAGE_RADIO && page != PAGE_RADIO) {
+    lv_obj_clean(s_radioList);
+    library::clearResults();
+    s_radioRequested = false;
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_radioStatus, "Loading favourites" LV_SYMBOL_REFRESH);
+  }
+
+  s_cur = page;
+  for (int i = 0; i < PAGE_COUNT; i++) {
+    if (!s_page[i]) continue;
+    if (i == page) lv_obj_remove_flag(s_page[i], LV_OBJ_FLAG_HIDDEN);
+    else           lv_obj_add_flag(s_page[i], LV_OBJ_FLAG_HIDDEN);
+    // Rail selected state: accent tint + accent glyph, per the design's nav rail.
+    if (s_railBtn[i]) {
+      lv_obj_set_style_bg_color(s_railBtn[i],
+                                lv_color_hex(i == page ? JB_SCREEN_ELEV_2 : JB_SCREEN_BG), 0);
+      lv_obj_set_style_text_color(s_railIcon[i],
+                                  lv_color_hex(i == page ? JB_ACCENT : JB_TEXT_DIM), 0);
+    }
+  }
+}
+
+static void railCb(lv_event_t *e) {
+  showPage((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+// Tapping a room chip switches the controlled zone. The net task resolves the coordinator and
+// re-polls; the UI just states the intent.
+static void roomCb(lv_event_t *e) {
+  int idx = (int)(intptr_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= (int)s_roomIps.size()) return;
+  if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
+  showPage(PAGE_NOW);      // the design treats picking a room as "now show me that room"
+}
+
+// Room chips, per the design's RoomChip: pill, status dot, accent tint + accent border when it is
+// the controlled zone. Rebuilt only when discovery reports a change (g_zonesGen).
+static void rebuildRooms() {
+  lv_obj_clean(s_roomsWrap);
+  s_roomIps.clear();
+
+  String cur;
+  if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
+
+  const std::vector<sonos::Zone> &zs = sonos::zones();
+  if (zs.empty()) {
+    lv_obj_t *l = label(s_roomsWrap, "Searching for speakers" LV_SYMBOL_REFRESH,
+                        &lv_font_montserrat_22, JB_TEXT_MUTED);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
+    return;
+  }
+
+  const lv_coord_t chipW = 220, chipH = 56, gapX = 14, gapY = 12;
+  const int cols = 3;
+  for (size_t i = 0; i < zs.size(); ++i) {
+    const bool active = (zs[i].name == cur);
+    s_roomIps.push_back(zs[i].ip);
+
+    lv_obj_t *chip = lv_button_create(s_roomsWrap);
+    lv_obj_remove_style_all(chip);
+    lv_obj_set_size(chip, chipW, chipH);
+    lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_border_width(chip, 1, 0);
+    lv_obj_set_style_border_color(chip, lv_color_hex(active ? JB_ACCENT : JB_SCREEN_LINE), 0);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+    lv_obj_align(chip, LV_ALIGN_TOP_LEFT, (lv_coord_t)((i % cols) * (chipW + gapX)),
+                 (lv_coord_t)((i / cols) * (chipH + gapY)));
+    lv_obj_add_event_cb(chip, roomCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    lv_obj_t *dot = panel(chip, 8, 8, active ? JB_ACCENT : JB_TEXT_DIM, LV_RADIUS_CIRCLE);
+    lv_obj_align(dot, LV_ALIGN_LEFT_MID, 16, 0);
+
+    lv_obj_t *nm = label(chip, zs[i].name.c_str(), &lv_font_montserrat_16,
+                         active ? JB_TEXT : JB_TEXT_MUTED);
+    lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(nm, chipW - 44);
+    lv_obj_align(nm, LV_ALIGN_LEFT_MID, 32, 0);
+  }
+}
+
+static void buildRooms() {
+  lv_obj_t *pg = s_page[PAGE_ROOMS];
+  lv_obj_t *h = label(pg, "Rooms", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 34);
+
+  s_roomsWrap = panel(pg, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - 150, JB_SCREEN_BG, 0);
+  lv_obj_align(s_roomsWrap, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
+}
+
+// Play the tapped favourite. library:: was told PLAY_FAVORITE at browse time, so this becomes a
+// SetAVTransportURI + Play on the coordinator — the net task does the SOAP, as always.
+static void favouriteCb(lv_event_t *e) {
+  library::requestPlay((int)(intptr_t)lv_event_get_user_data(e));
+  showPage(PAGE_NOW);
+}
+
+// One row per favourite, following the design's ListRow: art tile, title, subtitle, trailing
+// badge. There is no per-item artwork from a Favourites browse (only labels), so the tile carries
+// a glyph rather than a fake image.
+static void buildRadioRows(const std::vector<String> &labels) {
+  lv_obj_clean(s_radioList);
+  const lv_coord_t rowH = 72, rowW = lv_obj_get_width(s_radioList) - 8;
+
+  for (size_t i = 0; i < labels.size(); ++i) {
+    lv_obj_t *row = lv_button_create(s_radioList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, rowW, rowH);
+    lv_obj_set_style_radius(row, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), LV_STATE_PRESSED);
+    lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, (lv_coord_t)(i * (rowH + 2)));
+    lv_obj_add_event_cb(row, favouriteCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    lv_obj_t *tile = panel(row, 52, 52, JB_SCREEN_ELEV_2, 10);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_obj_t *g = label(tile, LV_SYMBOL_AUDIO, &lv_font_montserrat_20, JB_TEXT_DIM);
+    lv_obj_center(g);
+
+    lv_obj_t *t = label(row, labels[i].c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(t, rowW - 80);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 72, 0);
+  }
+  lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void buildRadio() {
+  lv_obj_t *pg = s_page[PAGE_RADIO];
+  lv_obj_t *h = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 34);
+
+  s_radioStatus = label(pg, "Loading favourites" LV_SYMBOL_REFRESH, &lv_font_montserrat_22,
+                        JB_TEXT_DIM);
+  lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
+
+  s_radioList = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_radioList);
+  lv_obj_set_size(s_radioList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 90) - PAD_BOT);
+  lv_obj_align(s_radioList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
+  lv_obj_set_style_bg_opa(s_radioList, LV_OPA_TRANSP, 0);
+  // Scrollable: a Favourites list is arbitrarily long and this panel is finite.
+  lv_obj_set_scroll_dir(s_radioList, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(s_radioList, LV_SCROLLBAR_MODE_AUTO);
 }
 
 void uiInit() {
@@ -236,10 +427,20 @@ void uiInit() {
   s_content = panel(scr, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H, JB_SCREEN_BG, 0);
   lv_obj_align(s_content, LV_ALIGN_TOP_LEFT, RAIL_W + PAD_X, 0);
 
-  buildStatusBar();
+  buildStatusBar();     // shared chrome: visible on every page
+
+  const lv_coord_t pw = SCREEN_W - RAIL_W - PAD_X * 2;
+  for (int i = 0; i < PAGE_COUNT; i++) {
+    s_page[i] = panel(s_content, pw, SCREEN_H, JB_SCREEN_BG, 0);
+    lv_obj_align(s_page[i], LV_ALIGN_TOP_LEFT, 0, 0);
+  }
+
   buildNowPlaying();
   buildTransport();
+  buildRadio();
+  buildRooms();
 
+  showPage(PAGE_NOW);
   backlightSet(100);
 }
 
@@ -329,6 +530,27 @@ void uiTick() {
     } else {
       lv_obj_add_flag(s_artImg, LV_OBJ_FLAG_HIDDEN);
       lv_obj_remove_flag(s_artPh, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  // Rooms: rebuild only when discovery actually changed (g_zonesGen), and only while the page is
+  // visible — rebuilding a hidden tree is pure churn on the LVGL pool.
+  if (s_cur == PAGE_ROOMS && s_roomsGen != g_zonesGen) {
+    s_roomsGen = g_zonesGen;
+    rebuildRooms();
+  }
+
+  // Radio: ask once on arrival, then poll for the async result. The browse runs on the net task;
+  // takeResults() returns true exactly once when a new set lands.
+  if (s_cur == PAGE_RADIO) {
+    if (!s_radioRequested) {
+      s_radioRequested = true;
+      library::requestBrowse("FV:2", library::PLAY_FAVORITE);
+    }
+    std::vector<String> labels;
+    if (library::takeResults(labels)) {
+      if (labels.empty()) lv_label_set_text(s_radioStatus, "No favourites on this system");
+      else                buildRadioRows(labels);
     }
   }
 
