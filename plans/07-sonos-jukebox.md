@@ -263,13 +263,60 @@ Notes for whoever implements it:
      directly, but the same reasoning applies to anything new we serve here.
    - `HTTPClient` chunked reads, which album art depends on (`writeToStream()`).
 
-4. **Runtime-prove `core/` on the P4** — a smoke test that boots Wi-Fi, runs SSDP discovery and
-   makes one real SOAP call, before any UI exists.
-4. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
+4. **Runtime-prove `core/` on the P4** — **done, `core/` runs unmodified.** `[env:jukebox-smoke]`
+   + `src/boards/crowpanel_p4_7in/core_smoke_test.cpp` drives the real shared code on hardware:
+
+   ```
+   [PASS] NVS round-trip     Preferences ok
+   [PASS] wifiConnect()      ip=192.168.68.70  ssid=RB-West
+   [PASS] ssdpDiscover()     9 zone(s) in 642 ms
+   [PASS] GetTransportInfo   [PASS] GetVolume vol=38   [PASS] GetPositionInfo
+   ```
+
+   That is `core/sonos/ssdp.cpp` doing its own M-SEARCH plus the `GetZoneGroupState` topology
+   parse, and three real SOAP calls through `soap_client.cpp`, all over the ESP-Hosted bridge —
+   **with `core/` byte-identical to what the S3 units run**. Still unexercised until something is
+   playing: DIDL against real metadata (the double-unescape trap) and the chunked album-art read.
+
+5. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
    an LVGL style header that mirrors the `--token` names.
-5. UI sound feedback + settings toggle.
-6. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
-7. OTA + portal registration (`core/net/`), already board-agnostic.
+6. UI sound feedback + settings toggle.
+7. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
+8. OTA + portal registration (`core/net/`), already board-agnostic.
+
+## ⚠️ The C6 wedges on a warm reset — power-cycle to recover
+
+**This shapes the whole development loop, so read it before debugging anything network-related.**
+
+Wi-Fi works only on the first boot after a **full power cycle** (USB-C unplugged and replugged).
+After any P4-only reset — flashing, an EN pulse, or a panic reboot — the next boot does this, and
+every boot after it, until power is removed:
+
+```
+[   47][I][esp32-hal-hosted.c:290] hostedInit(): Initializing ESP-Hosted
+E (13050) sdmmc_io: sdmmc_io_rw_extended: sdmmc_send_cmd returned 0x107   (ESP_ERR_TIMEOUT)
+E (13050) H_SDIO_DRV: failed to read registers
+rst:0xc (SW_CPU_RESET)   ... loops forever
+```
+
+Working theory: a P4 reset does not reset the C6, which is left mid-transaction and cannot be
+re-enumerated. `CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP=y` with
+`CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=32` is supposed to prevent exactly this, so either the
+GPIO is wrong for this board, is not wired, or the pulse is ineffective. **Unresolved.**
+
+Consequences, all of which cost time here:
+- **Every `-t upload` must be followed by a power cycle** before Wi-Fi will work.
+- **Do not reset the board to "see the output properly".** That re-wedges the C6 and destroys the
+  run you were trying to observe. Have the firmware reprint its result on a timer instead
+  (`core_smoke_test.cpp` reprints the whole table every 5 s) and read at leisure.
+- **Any experiment run after a failure is measuring a wedged C6, not your change.** Four separate
+  hypotheses were "falsified" here against a board that could not have passed regardless. Always
+  re-establish a known-good control on a freshly power-cycled board first.
+
+This is also a **product risk**, not just a dev annoyance: the jukebox is wall-mounted, so a fault
+that only clears by unplugging is not acceptable in the field. It needs to be understood — either
+it is specific to crash loops (then: don't crash, and add a watchdog that pulses the C6 reset), or
+the reset line needs verifying against Elecrow's schematic.
 
 ## Case notes
 
