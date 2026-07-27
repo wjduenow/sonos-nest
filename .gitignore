@@ -22,3 +22,18 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Vendor documentation — large PDFs (~78 MB), fetched on demand via docs/*/fetch-docs.sh
+docs/crowpanel-advance-p4-7in/*.pdf
+docs/crowpanel-advance-p4-7in/*.zip
+docs/crowpanel-advance-p4-7in/c6-upgrade/
+
+# ESP-IDF build byproducts — the sonos-jukebox (ESP32-P4) envs use custom_sdkconfig, which makes
+# PlatformIO build them as an IDF project. All of these are regenerated from platformio.ini's
+# custom_sdkconfig on every build; the config of record is platformio.ini, not these files.
+# (src/idf_component.yml is deliberately NOT ignored — it becomes meaningful the moment we
+# declare a real managed component, e.g. the EK79007 DSI panel driver.)
+.dummy/
+managed_components/
+sdkconfig.defaults
+sdkconfig.*
