@@ -5,7 +5,15 @@
 #include <WiFiClient.h>
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
-static const int    ART_MAX  = 180;
+// Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
+// sleep-machine's 320x240, but the jukebox's 7" 1024x600 design calls for a 280 px tile, where
+// 180 px art is visibly soft. Costs ART_MAX^2 * 2 * 2 bytes of PSRAM (double-buffered): 130 KB at
+// 180, 314 KB at 280 — irrelevant against ~7 MB free on the S3 boards and ~31 MB on the P4.
+// Override per env with -DART_MAX_PX=<n>.
+#ifndef ART_MAX_PX
+#define ART_MAX_PX 180
+#endif
+static const int    ART_MAX  = ART_MAX_PX;
 static const size_t JPEG_MAX = 220 * 1024;   // high-res covers can exceed 100 KB
 
 static uint8_t  *s_jpeg = nullptr;          // raw JPEG download buffer (PSRAM)

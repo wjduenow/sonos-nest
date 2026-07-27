@@ -36,6 +36,15 @@
 #define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_48 1   // clock screensaver
 
+// sonos-jukebox only (1024x600). The design system specifies 52/22/15/13/10 px; these fill the
+// gaps between the sizes above. Scoped to UNIT_JUKEBOX because every enabled face costs flash in
+// EVERY unit's binary, and the S3 boards have no use for them.
+#ifdef UNIT_JUKEBOX
+#define LV_FONT_MONTSERRAT_12 1   // badges (design 10), timecodes (12)
+#define LV_FONT_MONTSERRAT_16 1   // status bar room name (15)
+#define LV_FONT_MONTSERRAT_22 1   // artist / album line (22)
+#endif
+
 // --- Default theme ---
 #define LV_USE_THEME_DEFAULT 1
 
