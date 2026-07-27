@@ -336,8 +336,13 @@ limitation.
 once ESP-Hosted has initialised; all seven pins must be >= 0). **Verified on hardware: a warm
 reset now recovers and Wi-Fi comes straight back up.**
 
-The durable fix is a **custom board variant** defining `BOARD_SDIO_ESP_HOSTED_RESET 32`, so no
-future code path has to remember `setPins` first — do that when the board HAL lands.
+**The durable fix is now in place:** `variants/crowpanel_p4_7in/pins_arduino.h` (a copy of the
+stock `esp32p4` variant with that one line changed) plus `board_build.variants_dir = variants`.
+No app code calls `setPins` any more. Verified with `setPins` removed: two consecutive host
+resets, Wi-Fi up both times, no SDIO errors.
+
+Caveat worth knowing: setting `variants_dir` makes PlatformIO look for variants **only** in the
+project folder, so any variant named by a board json here must exist under `variants/`.
 
 Two traps for later:
 - **Data lines differ by PCB revision.** 7" V1.0: d0=14,d1=15,d2=16,d3=17. **V1.1/V1.2 reverse

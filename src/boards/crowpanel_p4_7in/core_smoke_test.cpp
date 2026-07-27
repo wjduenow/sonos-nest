@@ -110,24 +110,10 @@ void setup() {
                 ESP.getChipModel(), (unsigned long)(ESP.getFreeHeap() / 1024),
                 (unsigned long)(ESP.getFreePsram() / 1024));
 
-  // --- 0. ESP-Hosted SDIO pins, INCLUDING THE C6 RESET LINE --------------------
-  // *** This must run before ANY Wi-Fi call. *** Arduino does not use the ESP-Hosted pins from
-  // sdkconfig: esp32-hal-hosted.c seeds sdio_pin_config from the board VARIANT's
-  // BOARD_SDIO_ESP_HOSTED_* macros and then overwrites the Kconfig values
-  // (`conf.pin_reset.pin = sdio_pin_config.pin_reset`) before esp_hosted_sdio_set_config().
-  // Our board json uses variant "esp32p4", whose macros are Espressif's Function EV Board:
-  // CLK/CMD/D0/D1 = 18/19/14/15 happen to match the CrowPanel exactly — which is why Wi-Fi works
-  // at all — but RESET is 54, not 32. So the C6 is never reset, and a warm P4 reset leaves it
-  // running a stale ESP-Hosted session: the card re-enumerates, the first register read times out
-  // (sdmmc_send_cmd 0x107), and esp_hosted reboots the host on purpose — forever, because the
-  // reboot cannot reset the C6. Only removing power fixes it. GPIO32 is confirmed as net C6_EN
-  // (IC1.EN, 10k pull-up, active high) in Elecrow's own Eagle schematic.
-  //
-  // NOTE the D2/D3 values are for PCB revision V1.0. On V1.1/V1.2 the data lines are REVERSED
-  // (d0=17, d1=16, d2=15, d3=14); reset stays 32. Revision is printed on the top silkscreen.
-  Serial.println("[hosted] setPins clk=18 cmd=19 d0=14 d1=15 d2=16 d3=17 rst=32");
-  if (!WiFi.setPins(18, 19, 14, 15, 16, 17, 32))
-    Serial.println("[hosted] setPins FAILED — too late (ESP-Hosted already initialised?)");
+  // NOTE: no WiFi.setPins() here. The ESP-Hosted C6 reset pin is fixed properly, in the board
+  // variant (variants/crowpanel_p4_7in/pins_arduino.h), so nothing in app code has to remember
+  // to call setPins before the first Wi-Fi access. If a warm reset ever wedges Wi-Fi again, that
+  // variant — or board_build.variants_dir — is the first thing to check.
 
   // --- 1. NVS -----------------------------------------------------------------
   settingsInit();

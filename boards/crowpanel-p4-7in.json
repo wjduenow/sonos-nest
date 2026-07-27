@@ -16,7 +16,7 @@
     ],
     "mcu": "esp32p4",
     "chip_variant": "esp32p4_es",
-    "variant": "esp32p4"
+    "variant": "crowpanel_p4_7in"
   },
   "arduino": {
     "partitions": "default_16MB.csv"
