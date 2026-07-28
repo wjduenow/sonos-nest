@@ -12,21 +12,24 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
-- **sonos-jukebox** — **in bring-up.** A wall-mounted landscape controller on an ELECROW CrowPanel
-  Advance 7" **ESP32-P4** (1024×600 MIPI-DSI, EK79007, GT911 touch, dual speakers, ESP32-C6 for
-  Wi-Fi). **Working**: DSI panel, LVGL 9 + GT911 touch, and SSDP discovery over the C6. **it boots as a real unit** — board HAL, Wi-Fi,
-  zone selection, OTA and portal registration all work; `core/` needed only one shim in
-  `net/registrar.cpp` for Arduino 3.x. **Not yet**: the designed UI (the on-glass screens are a
-  scaffold), and the dial + transport buttons, which are **not on this board** and have to be
-  added as external hardware.
-  > ⚠️ **The C6 wedges on a warm reset.** Wi-Fi works only on the first boot after a full power
-  > cycle; after any P4 reset (flashing included) ESP-Hosted dies with `sdmmc_send_cmd 0x107` and
-  > boot-loops until power is removed. So: **power-cycle after every upload**, never reset the
-  > board to "see the output" (have the firmware reprint on a timer instead), and re-establish a
-  > known-good control before trusting any experiment. See `plans/07-sonos-jukebox.md`. The screen UI + case design system is in-tree as the
-  **`/sonos-jukebox-design`** skill. **Read `plans/07-sonos-jukebox.md` before touching this** —
-  it is different silicon (RISC-V) on a different toolchain, and several failure modes here are
-  silent.
+- **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
+  ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
+  ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
+  discovery/switching, transport, album art, OTA, portal registration, UI click feedback on the
+  onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). `core/` runs
+  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. **Not done**: the dial and
+  4 transport buttons (**not on this board** — external hardware on the 11-pin header), and the case.
+  > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
+  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
+  > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
+  > users hard-freezes the device. Next leads are a slower SDIO clock and the C6 firmware upgrade.
+  > ⚠️ **Power-cycle after every upload**, and read the `[health]` heartbeat before diagnosing any
+  > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
+  > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
+  > different faults, identical on screen.
+  The screen UI + case design system is in-tree as the **`/sonos-jukebox-design`** skill.
+  **Read `plans/07-sonos-jukebox.md` before touching this** — it is different silicon (RISC-V) on a
+  different toolchain, and several failure modes here are silent.
   > ⚠️ The jukebox envs use the **pioarduino** fork of platform-espressif32, which publishes
   > itself under the name `espressif32` too. `[env]` pins `platform = espressif32@6.9.0` to keep
   > the S3 units on Arduino 2.0.17; installing the fork without that pin silently retargets

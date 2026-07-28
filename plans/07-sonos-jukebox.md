@@ -1,15 +1,65 @@
 # 07 — sonos-jukebox (third form factor)
 
-**Board chosen:** ELECROW **CrowPanel Advance 7" ESP32-P4 HMI AI Display** (DHE04107D) —
-1024×600 IPS, MIPI-DSI, GT911 touch, dual speakers, camera header.
-**Status:** design system imported. **P4 toolchain proven end-to-end — `pio run -e jukebox-bringup`
-builds and links a flashable image.** Screen bring-up is at stage 1 (not yet flashed to hardware).
-**Current focus: the screen — panel is up, LVGL + touch is next.** Buttons/knob are deliberately deferred (see *Physical
-controls* — they are not on this board at all).
+**Board:** ELECROW **CrowPanel Advance 7" ESP32-P4 HMI AI Display** (DHE04107D, PCB **V1.0**) —
+1024×600 IPS MIPI-DSI, GT911 touch, dual speakers, ESP32-C6 for Wi-Fi.
+
+**Status: it is a working Sonos controller.** Panel, touch, LVGL 9, Wi-Fi, zone discovery and
+switching, transport control, album art, OTA, portal registration, UI sound feedback and four
+screens (Now Playing · Rooms · Radio · Settings) all run on hardware. `src/core/` runs
+**byte-identical** to what the S3 units run, with one Arduino-3.x shim.
+
+**Not done:** the physical dial and transport buttons (not on this board — external hardware),
+the case (dimension conflict, see *Case notes*), and one **unresolved network fault** (the
+ESP-Hosted link dies under load; currently recovered by an automatic reboot, not cured).
 
 A wall-mounted Sonos controller: a large landscape touchscreen with a physical control column to
 its right — a push-to-select rotary dial over a 2×2 grid of momentary caps (play/pause · skip
 forward · skip back · change rooms). Matte-white printed case, flush wall plate, rear USB-C.
+
+---
+
+## Resuming this work — read this first
+
+**Everything lives on the branch `feat/sonos-jukebox`** (18 commits, pushed). A second branch
+`fix/album-art-truncation` holds a shared-core fix that is **blocked on a measurement** — see
+*Open items*. The work was done in a git worktree; `main` is untouched.
+
+Three things will waste your time if you don't know them, in order of how much they cost here:
+
+1. **Power-cycle after every upload.** A P4-only reset used to wedge the C6 forever; that is
+   fixed (see *SOLVED: the C6 wedged on a warm reset*), but the habit is still correct because
+   the C6 needs its reset to actually fire, and a wedged co-processor makes every subsequent
+   experiment measure the wrong thing. **Any experiment run after a failure may be measuring a
+   broken radio rather than your change.** Four hypotheses were "falsified" here against a board
+   that could not have passed regardless. Re-establish a known-good control on a freshly
+   power-cycled board before believing any negative result.
+2. **Never open a serial capture window while asking the user to act.** An empty window is
+   indistinguishable from broken hardware. Have the firmware **latch** state and reprint it on a
+   timer, then read at leisure. This bit twice.
+3. **Read the health heartbeat before diagnosing any "hang".** It is the single most useful
+   diagnostic on this device — see the playbook below.
+
+### The health heartbeat, and how to read it
+
+`uiTick()` prints this every 10 s:
+
+```
+[health] up=81s heap=70KB min=49KB psram=31025KB wifi=3 rssi=-54 ip=192.168.68.59 zones=9 lvgl_free=67KB
+```
+
+Because it is printed **from the UI task**, its presence or absence separates two faults that look
+identical on the glass — a frozen screen that ignores touch:
+
+| Symptom | Heartbeat | Meaning |
+|---|---|---|
+| Screen stuck, no rail response | **absent** | The **UI task** is stuck. netTask is probably still fine (it only logs on events). Suspect the LVGL pool. |
+| Screen responsive but a list is empty | **present**, `zones=0`, `rssi=0` | The **link** is dead. The UI is fine and has nothing to draw. |
+
+`rssi=0` while `wifi=3` is the dead-link signature and is worth memorising: RSSI can only come
+from the C6 over an RPC, so zero-while-connected means the RPC is dead and only the host's cached
+association state remains.
+
+---
 
 ## Where the design lives
 
@@ -24,6 +74,9 @@ project `e55a4165-1f93-46dd-816c-66c679c9a2e6`, registered as the user-invocable
   (**amber `#e8892b`**, teal/coral as alternates), Hanken Grotesk + JetBrains Mono, 4px grid.
 - `components/` + `ui_kits/jukebox-screen/` — React/HTML **specification** of the screen UI.
   Not shippable code; the device is LVGL. See the translation note in the skill's `SKILL.md`.
+
+The tokens are mirrored into `src/units/sonos_jukebox/ui_scale.h` under matching names, so the
+LVGL styles can be diffed against the design by eye.
 
 ## The board
 
@@ -41,19 +94,20 @@ Pin map (from Elecrow's `board_config.h`): `src/boards/crowpanel_p4_7in/pins.h`.
 | Other | microSD, camera header (MIPI-CSI), 11-pin GPIO header, Crowtail I2C/UART, 2× USB-C |
 | Physical | PCB 180 × 105 mm, 5 V / 2 A |
 
+An **unidentified I2C device answers at 0x2F** — not in Elecrow's documentation, harmless so far.
+
 ### What this buys us
 
-This is a much better fit for the design than an ESP32-S3 would have been:
+Much better fit for the design than an ESP32-S3 would have been:
 
 - **768 KB internal L2MEM** vs the S3's ~150 KB free. Internal SRAM is *the* recurring failure mode
   in this repo — it is why nest OTA is unreliable and why the wake word starved LWIP into
-  "connection refused". That pressure largely goes away here.
-- **MIPI-DSI with a real display controller**, instead of streaming a framebuffer out of PSRAM over
-  RGB-parallel. 1024×600 would have been marginal-to-impossible on an S3; on the P4 it is the
-  intended use case.
-- **Hardware JPEG codec + 2D-DMA + PPA.** Album art currently decodes in software via TJpg_Decoder;
-  the P4 can do it in hardware, and PPA can accelerate LVGL blits.
-- 32 MB PSRAM makes double/triple framebuffering (tear-free mode) affordable.
+  "connection refused". **That pressure is genuinely gone**: this unit idles at ~70–100 KB free
+  internal heap with the whole app running, and PSRAM sits at ~31 MB free.
+- **MIPI-DSI with a real display controller.** 1024×600 would have been marginal-to-impossible on
+  an S3; here it is the intended use case, and the 1200 KB frame buffer lives in PSRAM.
+- **Hardware JPEG codec + 2D-DMA + PPA** — not yet used. Album art still decodes in software via
+  TJpg_Decoder. An easy future win.
 
 ### What it costs us — read before writing any code
 
@@ -65,256 +119,246 @@ This is a much better fit for the design than an ESP32-S3 would have been:
 > retargeted `nest` and `sleep-machine` to Arduino 3.x — verified, then fixed by pinning
 > `platform = espressif32@6.9.0` in `[env]` (6.9.0 is the last platform on
 > framework-arduinoespressif32 ~3.20017, which the S3 units are written against).
-> **Both pins are load-bearing. Don't loosen either.** `pio run -e nest` was re-verified green
-> after the pin.
+> **Both pins are load-bearing. Don't loosen either.**
 
-**2. `src/core/` is not yet known to compile under Arduino 3.x.** Everything shared —
-`soap_client`, `ssdp`, `library`, `settings`, `webconfig`, `album_art`, `net/*` — was written
-against Arduino 2.0.17 / IDF 4.4. Expect friction in `WiFi`, `WebServer`, `HTTPClient` and
-`Preferences`. This is why the bring-up env excludes `core/` entirely: screen first, port second.
+**2. Switching envs re-downloads the framework.** The P4 framework (3.3.11) and the S3 framework
+(3.20017) install to the *same* `framework-arduinoespressif32` package directory, so alternating
+`pio run -e nest` and a jukebox env re-fetches ~78 MB each way. Annoying, not dangerous.
 
-**3. The P4 has no radio — Wi-Fi is the C6 over SDIO, and it WORKS. ✅ RESOLVED ON HARDWARE.**
+**3. `custom_sdkconfig` makes PlatformIO build this as an IDF project.** It prints
+"the 'src_filter' option cannot be used with ESP-IDF" — **cosmetic here**; `build_src_filter` was
+verified to still select our sources correctly. It also means `ARDUINO_USB_CDC_ON_BOOT=1` breaks
+the compile outright (`HardwareSerial.h: 'USBSerial' was not declared`); serial on this board is
+the CH340K UART bridge anyway, not native USB CDC.
 
-The multicast probe now passes **6/6** on the real board:
+**4. Two build-system landmines, both already worked around.**
 
-```
-[PASS] associate            ip=192.168.68.x
-[PASS] dns lookup
-[PASS] M-SEARCH :1900       16 responder(s)
-[PASS] M-SEARCH ephemeral   18 responder(s)
-[PASS] multicast group join join=ok notifies=1
-[PASS] HTTP to speaker      HTTP/1.1 200 OK
-VERDICT: SSDP discovery works over ESP-Hosted.
-```
-
-**`core/sonos/ssdp.cpp` should port across unchanged** — including its `udp.begin(1900)` fixed
-source port, which was the case I was most worried about. Inbound multicast (group join +
-NOTIFY) works too, so a NOTIFY-based discovery fallback is available if ever wanted.
-
-Getting there took two fixes, and the first was the whole problem:
-
-1. **SDIO wiring.** The initial run failed with `sdmmc_send_cmd returned 0x109` (timeout) and
-   never associated, because the build used a stock `esp32-p4*` profile whose ESP-Hosted
-   defaults are Espressif's EV board. Elecrow wires the C6 differently, and **the 7" differs
-   from the 5"**: 1-bit bus @10 MHz on CLK=18/CMD=19/D0=14/D1=15, slave reset GPIO32 active-high,
-   1500 ms. (The 5" is 4-bit on GPIO49–54, reset GPIO20.) That config now lives in
-   `[jukebox_base] custom_sdkconfig`, with the board definition in `boards/crowpanel-p4-7in.json`.
-   Wrong pins do not fail loudly — the board boots and Arduino starts ESP-Hosted before the
-   transport dies, which reads like broken hardware.
-2. **`ARDUINO_USB_CDC_ON_BOOT=1` had to go.** Serial on this board is the CH340K UART bridge,
-   not native USB CDC. With `custom_sdkconfig` the build switches to ESP-IDF mode, where that
-   flag breaks the compile outright (`HardwareSerial.h: 'USBSerial' was not declared`).
-
-**C6 co-processor firmware: still 2.3.0 — the update did not take.** Using Elecrow's linked
-project (`crowpanel-advanced-p4-c6-upgrade`, target `crowpanel-p4-70-90-101`) the transfer
-succeeded but activation did not:
-
-```
-[PASS] Connected to C6 slave in 1886ms
-[PASS] OTA transfer completed in 14153ms
-[FAIL] Activate failed: ESP_ERR_NOT_SUPPORTED (0x106)
-[DIAG] C6 version after OTA: 2.3.0
-```
-
-The shipped 2.3.0 slave is too old to support the activate RPC, so the image was written but
-never marked bootable. **This is not currently blocking anything** — everything above passes
-with 2.3.0 — but the host stack (2.12.x) does warn that a version gap can cause RPC timeouts, so
-it is a latent stability risk worth closing. Next avenue: flash the C6 directly over its own
-UART rather than via SDIO OTA; Elecrow ships a second guide for the ESP-IDF route
-(`docs/crowpanel-advance-p4-7in/c6-upgrade/`, fetched by `fetch-docs.sh`).
-
-Note `custom_sdkconfig` makes PlatformIO build this as an IDF project. It prints
-"the 'src_filter' option cannot be used with ESP-IDF" — **that warning is cosmetic here**;
-`build_src_filter` was verified to still select our sources correctly.
-
-**4. Two build-system landmines, both already hit and worked around.**
-
-- *SCons.* The IDF 5.5 include list pushes compile commands past SCons' default
-  `MAXLINELENGTH`, into a response-file path that is broken in the bundled SCons 4.8.1
+- *SCons.* The IDF 5.5 include list pushes compile commands past SCons' default `MAXLINELENGTH`,
+  into a response-file path that is broken in the bundled SCons 4.8.1
   (`AttributeError: 'CmdStringHolder' object has no attribute 'data'`). It surfaces as a
-  per-object-file failure, so it reads like a code error. Fixed by
-  `tools/p4_maxlinelength.py`, wired into the jukebox envs.
-- *LVGL.* With `lvgl` resolving to 9.5.0 this env fails to compile LVGL's generated
-  `widgets/property/lv_span_properties.c` — "#endif without #if" against
-  `lv_conf_internal.h`. **This is P4-specific, not an LVGL regression**: `nest` was
-  clean-rebuilt from scratch against the same 9.5.0 and succeeded (709 files, unchanged
-  size). The likely cause is `include/lv_conf.h` being an Xtensa/S3 file (it pins
-  `LV_USE_DRAW_SW_ASM=NONE` and its comments assume the S3) meeting 9.5.0's RISC-V paths.
-  Stage 1 sidesteps it by not depending on LVGL at all; **resolve it before stage 3** —
-  probably a board-specific `lv_conf`, or pinning lvgl.
+  per-object-file failure, so it reads like a code error. Fixed by `tools/p4_maxlinelength.py`.
+- *LVGL.* Vendored drivers must go in `lib/`, **not** as managed components — pioarduino builds
+  Arduino against prebuilt IDF libs and never compiles a newly added component into the link.
+  See `lib/esp_lcd_ek79007/VENDORING.md`.
 
-**5. Switching envs re-downloads the framework.** The P4 framework (3.3.11) and the S3
-framework (3.20017) install to the *same* `framework-arduinoespressif32` package directory,
-so alternating `pio run -e nest` and `pio run -e jukebox-bringup` re-fetches ~78 MB each way.
-Annoying, not dangerous. The 2.1 GB `framework-arduinoespressif32-libs` is P4-only and stays.
+**5. Elecrow's examples are LVGL 8.3.11**; this repo is on LVGL 9. Their `lvgl_v8_port.cpp` is not
+reusable as-is; we write our own DSI flush against `esp_lcd`.
 
-**6. Elecrow's examples are LVGL 8.3.11**; this repo is on LVGL 9. Their `lvgl_v8_port.cpp` is not
-reusable as-is. Keep LVGL 9 (the core and both existing units depend on it) and write our own
-DSI flush against `esp_lcd`.
+---
 
-### Physical controls — not on this board
+## Build / flash
 
-The CrowPanel Advance is a bare touchscreen: **there is no rotary encoder and there are no
-transport buttons.** The design's Ø36 push-select dial and 4× Ø13 caps have to be added as
-external hardware on the 11-pin GPIO header / Crowtail connectors. That is a hardware task with
-its own BOM, and it is why the UI work starts touch-only.
-
-Implication for `core/board.h`: when the controls do arrive, add a generic API rather than four
-bespoke functions, mirroring how wake-word phrases are handled (the board reports *which* input
-fired; the unit decides what it means):
-
-```c
-// --- Momentary buttons (optional; 0 on boards without any) ---
-int  buttonCount();
-int  buttonPoll();              // index of a press since the last call, else -1
-const char *buttonName(int i);  // "play" | "next" | "prev" | "rooms" — for logs/UI
+```bash
+export PATH="$PATH:$HOME/.platformio/penv/bin"
+pio run -e sonos-jukebox -j 1 -t upload --upload-port /dev/ttyUSB0   # then POWER CYCLE
+python3 tools/readser.py /dev/ttyUSB0 60                             # read serial
 ```
 
-Boards without buttons return 0/-1/nullptr, so nest and sleep-machine stay untouched.
+Build with `-j 1` or `-j 2` — this machine has a known hardware fault under load (random
+SIGKILL/ICE; BIOS update pending). A failed build is often just that; **retry before debugging**.
+The upload loop in this plan's history retries up to 3× for exactly this reason.
 
-### UI sound feedback (two onboard speakers)
+| env | what it is |
+|---|---|
+| **`sonos-jukebox`** | **the app** — board + unit + core |
+| `jukebox-bringup` | standalone panel/LVGL/GT911 probe (`display_test.cpp`) |
+| `jukebox-mcast` | SSDP-over-ESP-Hosted probe (`multicast_test.cpp`) |
+| `jukebox-core` | compiles `core/` alone against Arduino 3.x to catch regressions; not meant to link |
+| `jukebox-smoke` | runs real `core/` on hardware (`core_smoke_test.cpp`) |
 
-The board has an NS4168 amp driving two speakers. Use them for **UI feedback** — a click on
-touch, a tick per volume step, a confirmation on room change — and make it **configurable**
-(on/off + level, persisted in `core/settings`, exposed on the Settings screen).
+`app.cpp`, `board.h`, `settings.*` and `album_art.cpp` are **shared core** — after touching any of
+them, rebuild `nest` and `sleep-machine`. Both were verified green after this session's changes.
 
-Notes for whoever implements it:
-- `PIN_AUDIO_CTRL` (GPIO30) gates amp power. Drive it **low when idle** — leaving a class-D amp
-  enabled between clicks wastes current and hisses. Enable it a few ms before a sample and drop it
-  after a short idle timeout.
-- Feedback samples are tiny; keep them as PROGMEM PCM and push them straight to I2S. Do **not**
-  pull in the Helix MP3 decoder for this — the sleep-machine needs that, the jukebox doesn't.
-- This is UI feedback, not media playback. It should not touch `localAudio*` in the board HAL
-  (that contract means "play a file off local storage"); a separate small `uiSound()` is cleaner.
+---
 
-## Sequence
+## What is built and working
 
-1. **Screen — DONE, all three stages confirmed on hardware.**
-   `[env:jukebox-bringup]` + `src/boards/crowpanel_p4_7in/display_test.cpp`.
-   The EK79007 comes up at 1024x600, DSI 2 lanes @900 Mbps, DPI 52 MHz, and a hand-drawn
-   design-system frame renders with correct colours (`rgb_ele_order = RGB`) and no artefacts.
-   Headroom is excellent: **428 KB internal heap free**, and the 1200 KB frame buffer lands in
-   PSRAM, leaving internal RAM alone.
+### Board HAL — `src/boards/crowpanel_p4_7in/`
 
-   **Stage 3 (LVGL 9 + GT911) works.** LVGL renders in `LV_DISPLAY_RENDER_MODE_DIRECT` straight
-   into the DSI frame buffer — no second buffer, no blit; the flush callback only writes the
-   dirty rows back out of cache. Touch is a hand-written GT911 reader (~60 lines of I2C) rather
-   than another managed component.
+`display.{h,cpp}` · `touch.{h,cpp}` · `board.cpp` · `ui_sound.{h,cpp}` · `net_link.cpp` · `pins.h`,
+plus the three standalone probes. Implements `core/board.h`. Stubs return neutral values for
+everything this board lacks (encoder, knob, local audio, wake word, local files) so the shared
+core needs no conditionals.
 
-   Measured, with an animation running so the figures mean something:
+**Panel (stage 2).** EK79007 at 1024×600, DSI 2 lanes @ 900 Mbps, DPI 52 MHz,
+`rgb_ele_order = RGB`. Frame buffer in PSRAM, ~428 KB internal heap free at this stage.
 
-   | | |
-   |---|---|
-   | renders/sec | **~32 idle, ~50 under touch** — LVGL's default 33 ms `LV_DEF_REFR_PERIOD`, not a compute limit |
-   | dirty rows/sec | 3.5k–6k (~7–12 MB/s) |
-   | internal heap free | **328 KB** after panel + LVGL |
+Three things cost real time — see also `lib/esp_lcd_ek79007/VENDORING.md`:
 
-   Two measurement traps worth avoiding: a *static* screen idles around 480 loops/sec because
-   LVGL finds nothing dirty and never renders, and even with an animation the loop rate is
-   bounded by `delay()` and the refresh period. Count **flush callbacks**, not loop iterations.
+- **The frame buffer needs an explicit cache write-back.** It lives in PSRAM and the DSI DMA reads
+  it directly, bypassing the CPU data cache, so after any CPU drawing you must
+  `esp_cache_msync(fb, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M)`. Without it the panel shows only the
+  cache lines that happened to be evicted: the image comes out shredded into vertical stripes of
+  otherwise-correct colour. It looks exactly like a DSI timing or lane fault.
+  **Diagnostic shortcut:** `esp_lcd_dpi_panel_set_pattern()` draws its bars inside the DSI
+  peripheral with no frame buffer involved, so "hardware bars perfect, our drawing shredded"
+  identifies a missing cache sync rather than a broken panel.
+- **The MIPI D-PHY needs internal LDO channel 3 at 2500 mV** (`esp_ldo_acquire_channel`). Miss it
+  and the DSI bus initialises without complaint and the panel just stays dark.
+- The driver is **vendored into `lib/`** (see landmine 4 above).
 
-   **GT911 coordinate decode.** The widely-quoted register map puts a track-ID byte at 0x8150
-   with x_lo at p[1]. This controller does not — coordinates start at p[0]. Decoding with the
-   track-ID offset yields values like `0x5003`, an x-high byte sitting where the low byte was
-   expected. Raw bytes `C1 03 46 02 ...` decode as (961, 582) for a bottom-right press on a
-   1024x600 panel, which also confirms **no axis swap and no inversion** is needed: X runs
-   left→right over 1024, Y top→bottom over 600. `GT911_RAW_DUMP` in `display_test.cpp` prints
-   the raw block and both candidate decodings; it also *latches* the last touch and reprints it
-   every second, because otherwise reading touch over serial is a synchronisation game where an
-   empty capture window is indistinguishable from broken hardware.
+**LVGL 9 + touch (stage 3).** `LV_DISPLAY_RENDER_MODE_DIRECT` straight into the DSI frame buffer —
+no second buffer, no blit; the flush callback only writes the dirty rows back out of cache. Touch
+is a hand-written GT911 reader (~60 lines of I2C).
 
-   Three things cost real time here — see also `lib/esp_lcd_ek79007/VENDORING.md`:
+Measured with an animation running: **~32 renders/sec idle, ~50 under touch** (LVGL's 33 ms
+`LV_DEF_REFR_PERIOD`, not a compute limit), 3.5k–6k dirty rows/sec, **328 KB internal heap free**.
+Two measurement traps: a *static* screen idles ~480 loops/sec because LVGL finds nothing dirty and
+never renders, and the loop rate is bounded by `delay()` anyway. **Count flush callbacks, not loop
+iterations.**
 
-   - **The frame buffer needs an explicit cache write-back.** It lives in PSRAM and the DSI DMA
-     reads it directly, bypassing the CPU data cache, so after any CPU drawing you must
-     `esp_cache_msync(fb, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M)`. Without it the panel shows only
-     the cache lines that happened to be evicted: the image comes out shredded into vertical
-     stripes of otherwise-correct colour over an unwritten background. It looks exactly like a
-     DSI timing or lane fault. **Diagnostic shortcut:** `esp_lcd_dpi_panel_set_pattern()` draws
-     its bars inside the DSI peripheral with no frame buffer involved, so "hardware bars perfect,
-     our drawing shredded" identifies a missing cache sync rather than a broken panel.
-   - **The MIPI D-PHY needs internal LDO channel 3 at 2500 mV** (`esp_ldo_acquire_channel`).
-     Miss it and the DSI bus initialises without complaint and the panel just stays dark.
-   - **The driver is vendored into `lib/`, not pulled as a managed component**, because
-     pioarduino builds Arduino against prebuilt IDF libs and never compiles a newly added
-     component into the link.
-2. **Prove multicast over ESP-Hosted** (item 3 above) — **written and building**:
-   `[env:jukebox-mcast]` + `src/boards/crowpanel_p4_7in/multicast_test.cpp`. It replays the exact
-   request `core/sonos/ssdp.cpp` sends and reports PASS/FAIL per layer (association → DNS/TCP →
-   M-SEARCH from :1900 → M-SEARCH from an ephemeral port → multicast group join → HTTP to a
-   discovered speaker), then prints a verdict. The ephemeral-port case matters: `ssdp.cpp` does
-   `udp.begin(1900)`, and if only the fixed source port is broken over the SDIO bridge, the fix is
-   one line rather than an architecture change. **Not yet run on hardware.**
-3. **Port `core/` to Arduino 3.x** — **compiles clean.** All 3,127 lines of `src/core/` build
-   against Arduino 3.3.11 / IDF 5.5 with a single shim: Arduino 3.x renamed
-   `MDNSResponder::IP(idx)` to `address(idx)`, so `net/registrar.cpp` has a version-conditional
-   `mdnsResultIp()`. Nothing else — `WiFi`, `HTTPClient`, `Preferences`, `WiFiUDP`, `ArduinoOTA`
-   and `WebServer` all compiled unmodified, which was better than expected. `nest` and
-   `sleep-machine` were rebuilt afterwards and are green, so the shim is genuinely portable.
+**GT911 coordinate decode.** The widely-quoted register map puts a track-ID byte at 0x8150 with
+x_lo at p[1]. **This controller does not — coordinates start at p[0].** Decoding with the track-ID
+offset yields values like `0x5003`, an x-high byte sitting where the low byte was expected. Raw
+bytes `C1 03 46 02` decode as (961, 582) for a bottom-right press, which also confirms **no axis
+swap and no inversion**: X runs left→right over 1024, Y top→bottom over 600.
 
-   `[env:jukebox-core]` compiles `core/` with no board or unit purely to catch regressions
-   against 3.x; it is not meant to link.
+### Unit — `src/units/sonos_jukebox/`
 
-   **Compiling is not running.** Nothing in `core/` has executed on this board yet. Two areas to
-   distrust until they have:
-   - `WebServer`. The sleep-machine deliberately bypasses its multipart and raw body paths
-     because both are broken in 2.0.17 (see CLAUDE.md). Those workarounds may be unnecessary, or
-     actively wrong, on 3.x. That code is board-side (es3c28p) so it does not affect the jukebox
-     directly, but the same reasoning applies to anything new we serve here.
-   - `HTTPClient` chunked reads, which album art depends on (`writeToStream()`).
+`screens.cpp` + `ui_scale.h`. Four pages behind a left nav rail: **Now Playing · Radio · Rooms ·
+Settings**. Rail targets were enlarged 1.5× after the first hardware test — the design's sizes are
+too small to hit reliably on glass.
 
-4. **Runtime-prove `core/` on the P4** — **done, `core/` runs unmodified.** `[env:jukebox-smoke]`
-   + `src/boards/crowpanel_p4_7in/core_smoke_test.cpp` drives the real shared code on hardware:
+Two LVGL behaviours that caused visible bugs here, both worth remembering:
 
-   ```
-   [PASS] NVS round-trip     Preferences ok
-   [PASS] wifiConnect()      ip=192.168.68.70  ssid=RB-West
-   [PASS] ssdpDiscover()     9 zone(s) in 642 ms
-   [PASS] GetTransportInfo   [PASS] GetVolume vol=38   [PASS] GetPositionInfo
-   ```
+- **LVGL paints in creation order.** Page containers created *after* the status bar covered it.
+  There is no z-index to fall back on; create in the order you want painted.
+- **Refresh gating must key on something that actually changes.** The room chips were gated on
+  `g_zonesGen`, which does not move on a zone *switch*, so switching looked broken. Separately,
+  calling `lv_label_set_text()` unconditionally every frame caused visible **title flicker** —
+  gate per-field on an actual change.
 
-   With music playing, **all 8 checks pass**, including the two risky ones:
+### UI sound feedback — `ui_sound.cpp`
 
-   ```
-   [PASS] DIDL parse           fields populated   (title/artist/album, artUri single-escaped)
-   [PASS] album art (chunked)  222 KB, JPEG SOI ok   — 228,077 bytes in 1353 ms
-   ```
+NS4168 amp → two onboard speakers over I2S. Three cues (`Tick` / `Confirm` / `Error`), volume
+persisted in `core/settings` (`settingsUiSound()`, default 40, 0 = off) and exposed on Settings.
 
-   So `core/sonos/ssdp.cpp`, `soap_client.cpp`, `didl.cpp` and the `HTTPClient::writeToStream()`
-   de-chunking all work on this silicon, **with `core/` byte-identical to what the S3 units run**.
+- **They are clicks, not beeps.** A tone says "a computer noticed"; a click says "a control
+  moved", which is what the physical caps will eventually give you. Synthesised as a noise burst
+  with a fast exponential decay and a one-pole lowpass — a pitched sine always reads as a beep
+  however short it is. A deterministic LCG (not `random()`) makes every press sound identical.
+- **`PIN_AUDIO_CTRL` (GPIO30) is ACTIVE LOW.** Elecrow's docs say "setting LOW enables audio power
+  and HIGH disables it". Naming it from the pin label got this backwards in both directions at
+  once — amp powered down when playing, powered up when idle. The amp is gated on just before a
+  cue and dropped after a 1.5 s idle timeout, because leaving a class-D amp enabled hisses.
+- Deliberately **not** routed through the `localAudio*` HAL contract, which means "play a file off
+  local storage" — a thing this unit has no concept of.
 
-   ### ⚠️ Latent bug found in shared code: album art >220 KB is silently truncated
+### Shared core, unchanged
 
-   `core/album_art.cpp` has `JPEG_MAX = 220 * 1024` (225,280 B). The very first real cover tested
-   here was **228,077 B** — over the buffer. `BufSink` stops appending at the cap and
-   `albumArtFetch()` only rejects `got < 100`, so an oversized cover is truncated with no error
-   and then fails (or garbles) in TJpg. **This affects nest and sleep-machine equally** — it is
-   not P4-specific and predates this work. Fix is one constant plus a truncation check; PSRAM is
-   nowhere near the constraint (~7 MB free on the S3, 31 MB here).
+All 3,127 lines of `src/core/` build and run against Arduino 3.3.11 / IDF 5.5 with **a single
+shim**: Arduino 3.x renamed `MDNSResponder::IP(idx)` to `address(idx)`, so `net/registrar.cpp` has
+a version-conditional `mdnsResultIp()`. `WiFi`, `HTTPClient`, `Preferences`, `WiFiUDP`,
+`ArduinoOTA` and `WebServer` all compiled unmodified.
 
-5. **Board HAL — DONE.** `boards/crowpanel_p4_7in/{display,touch,board}.{h,cpp}` implements
-   `core/board.h`; `units/sonos_jukebox/` implements `core/unit.h`; `[env:sonos-jukebox]` is the
-   app. Boots end to end on hardware: panel + touch + Wi-Fi + zone pick + OTA + portal
-   registration. The unit's screens are a **scaffold** — real state on the glass, but not the
-   designed UI.
-6. `src/units/sonos_jukebox/` — Now Playing → Rooms → Radio, translating the design tokens into
-   an LVGL style header that mirrors the `--token` names.
-7. UI sound feedback + settings toggle.
-8. External dial + 4 buttons: hardware, then the `buttonCount/buttonPoll/buttonName` HAL.
-9. OTA + portal registration — **already working**, board-agnostic as designed.
-
-## ✅ SOLVED: the C6 wedged on a warm reset — Arduino used the wrong reset pin
-
-**This shapes the whole development loop, so read it before debugging anything network-related.**
-
-Wi-Fi works only on the first boot after a **full power cycle** (USB-C unplugged and replugged).
-After any P4-only reset — flashing, an EN pulse, or a panic reboot — the next boot does this, and
-every boot after it, until power is removed:
+Runtime-proven on hardware via `jukebox-smoke`, all 8 checks including the two risky ones:
 
 ```
-[   47][I][esp32-hal-hosted.c:290] hostedInit(): Initializing ESP-Hosted
+[PASS] NVS round-trip   [PASS] wifiConnect()   [PASS] ssdpDiscover()  9 zone(s) in 642 ms
+[PASS] GetTransportInfo [PASS] GetVolume       [PASS] GetPositionInfo
+[PASS] DIDL parse           fields populated (artUri single-escaped)
+[PASS] album art (chunked)  222 KB, JPEG SOI ok — 228,077 bytes in 1353 ms
+```
+
+SSDP over ESP-Hosted was proven separately (`jukebox-mcast`, 6/6) **including `udp.begin(1900)`'s
+fixed source port**, which was the case most likely to have needed an architecture change.
+
+Two small fixes to shared core came out of this: `registrar.cpp` fell back to `queryHost()` and
+refused to cache `0.0.0.0` (the portal was registering as `0.0.0.0:8000` when mDNS returned no A
+record), and `selectZoneByIp()` now logs a miss.
+
+---
+
+## Known faults
+
+### 🔴 UNRESOLVED — the ESP-Hosted link dies under load
+
+The device runs fine, then `rssi` drops to 0 while `wifi` still reads 3 with a live IP. Sockets
+fail, discovery returns nothing, the room list empties. Observed repeatedly, and it correlates
+with **load** — the user's description was that room switching "gets slower and slower in
+responding as I change rooms, and then I get the searching for rooms".
+
+Matches open, unresolved upstream reports (**espressif/esp-hosted-mcu #167, #121**: random mid-run
+transport failures under load).
+
+**Current mitigation — reboot, and it works.** `netLinkRecover()` in `net_link.cpp`. Detection
+requires the symptom **twice** so a transient RSSI 0 around a roam or scan never costs a reboot.
+Confirmed catching a real failure:
+
+```
+[net] RSSI 0 while 'connected' twice — the radio link is dead
+[netlink] link is dead and cannot be repaired in place — restarting
+rst:0xc (SW_CPU_RESET)
+```
+
+> **Do NOT "fix" this by re-initialising the transport.** The first version did the
+> apparently-correct thing — `esp_hosted_deinit()` → C6 reset → `esp_hosted_init()` — and it
+> **hard-froze the whole device**: no heartbeat, no panic, no watchdog, physical reset required.
+> Tearing the transport out from under live lwIP users (artTask mid-download, the registrar, OTA)
+> wedges every task. A reboot is safe and deterministic, and since the variant fix it genuinely
+> resets the C6 on the way back up.
+
+**Next thing to try: the SDIO bus.** It is currently **1-bit at 10 MHz**, and every album-art
+fetch pushes up to 220 KB through it — the failures cluster around exactly that load. Lowering
+`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ` is a one-line experiment and signal-integrity faults under
+load often improve when you slow the bus. Widening to 4-bit would need D2/D3, which Elecrow does
+not document for this board.
+
+**Also still open:** the C6 slave firmware is **2.3.0**; the host stack is 2.12.x and warns that a
+version gap can cause RPC timeouts. An SDIO OTA transferred successfully but `Activate` failed
+with `ESP_ERR_NOT_SUPPORTED` — 2.3.0 is too old to support the activate RPC, so the image was
+written but never marked bootable. Next avenue is flashing the C6 directly over its own UART
+(`docs/crowpanel-advance-p4-7in/c6-upgrade/`). **This is a plausible contributor to the fault
+above and is the other lead worth pulling.**
+
+### 🟡 Album art occasionally fails to decode
+
+```
+[art] drawJpg failed jr=2  hdr=FFD8  544x544  107950 bytes
+```
+
+`jr=2` is TJpg's `JDR_INP` — the decoder ran out of input. Valid `FFD8` SOI and well under the
+220 KB cap, so neither corrupt nor truncated-by-buffer; the download was cut short, most likely by
+a room switch mid-fetch. Cosmetic. The `fix/album-art-truncation` branch adds the short-read
+detection that would name this instead of leaving a bare `jr=2`.
+
+Art fetches are now **debounced 700 ms** (`kArtSettleMs` in `album_art.cpp`) so rapid room
+switching doesn't start a download per switch — that storm was the real cost of switching rooms,
+*not* topology fetches (a switch doesn't call `coordinatorIpFor()` and actually defers the
+periodic refresh; an early assumption to the contrary was wrong).
+
+`ART_MAX` is now `#ifndef ART_MAX_PX / 180`, so this unit decodes to a smaller target.
+
+### ✅ SOLVED — the Radio page froze the whole UI
+
+Tapping Radio froze the device: stuck on "Loading favourites", no rail response, **total serial
+silence**. It looked like a whole-system hang and was reported twice. It is the **LVGL memory
+pool**, exactly as CLAUDE.md warns. Measured:
+
+```
+[ui] radio: 70 favourite(s), rendering 40, lvgl_free=73KB
+[ui] radio: rendered, lvgl_free=33KB (used 40KB for the list)
+```
+
+Each row is 4 objects (button + art tile + glyph + label) at **~1 KB of pool**, so this system's
+**70 favourites need ~70 KB of the 73 KB free**. LVGL's response to exhaustion is a **layer-alloc
+retry loop**, not a failure — so the UI task spins forever. The serial silence is the tell that it
+is the UI task specifically.
+
+Capped at 40 rows **with an on-screen "showing 40 of 70"** — silently truncating would be a worse
+bug than the freeze it prevents. A recycling/virtualised list would lift the cap; not needed until
+a system has enough favourites for 40 to feel short.
+
+**Budget to keep in mind: ~1 KB of LVGL pool per list row, out of ~73 KB free.** `LV_MEM_SIZE` is
+96 KB. Any new full-screen list needs this arithmetic done before it is written.
+
+### ✅ SOLVED — the C6 wedged on a warm reset (Arduino used the wrong reset pin)
+
+Wi-Fi used to work only on the first boot after a full power cycle. After any P4-only reset the
+next boot did this, and every boot after it, until power was removed:
+
+```
 E (13050) sdmmc_io: sdmmc_io_rw_extended: sdmmc_send_cmd returned 0x107   (ESP_ERR_TIMEOUT)
-E (13050) H_SDIO_DRV: failed to read registers
 rst:0xc (SW_CPU_RESET)   ... loops forever
 ```
 
@@ -326,64 +370,79 @@ Kconfig values before calling `esp_hosted_sdio_set_config()`:
 conf.pin_reset.pin = sdio_pin_config.pin_reset;   // clobbers CONFIG_..._RESET_SLAVE=32
 ```
 
-Our board JSON uses `"variant": "esp32p4"`, i.e. Espressif's Function EV Board, whose macros are
+The board JSON used `"variant": "esp32p4"` (Espressif's Function EV Board), whose macros are
 CLK/CMD/D0/D1 = **18/19/14/15 — identical to the CrowPanel, which is why Wi-Fi worked at all** —
-but `BOARD_SDIO_ESP_HOSTED_RESET 54`, not 32. So the C6 was never reset. A warm P4 reset left it
-running a stale session: the card re-enumerates, the first register read times out, and
-`H_TRANSPORT_RESTART_ON_FAILURE` makes esp_hosted reboot the host on purpose — forever, since the
-reboot cannot reset the C6.
+but `BOARD_SDIO_ESP_HOSTED_RESET 54`, not 32. So the C6 was never reset; a warm P4 reset left it
+running a stale session, and `H_TRANSPORT_RESTART_ON_FAILURE` rebooted the host forever.
 
-GPIO32 is confirmed as net **C6_EN** (IC1.EN, 10k pull-up, active high) in Elecrow's own Eagle
-schematic, and their ESPHome example uses `reset_pin: GPIO32, active_high: true`. Not a hardware
-limitation.
+GPIO32 is confirmed as net **C6_EN** (IC1.EN, 10k pull-up, active high) in Elecrow's Eagle
+schematic.
 
-**Fix:** call `WiFi.setPins(18, 19, 14, 15, 16, 17, 32)` before *any* Wi-Fi call (it is refused
-once ESP-Hosted has initialised; all seven pins must be >= 0). **Verified on hardware: a warm
-reset now recovers and Wi-Fi comes straight back up.**
+**Fix, and it is durable:** `variants/crowpanel_p4_7in/pins_arduino.h` — a copy of the stock
+`esp32p4` variant with that one line changed — plus `board_build.variants_dir = variants`. No app
+code calls `WiFi.setPins()`. Verified: two consecutive host resets, Wi-Fi up both times.
 
-**The durable fix is now in place:** `variants/crowpanel_p4_7in/pins_arduino.h` (a copy of the
-stock `esp32p4` variant with that one line changed) plus `board_build.variants_dir = variants`.
-No app code calls `setPins` any more. Verified with `setPins` removed: two consecutive host
-resets, Wi-Fi up both times, no SDIO errors.
-
-Caveat worth knowing: setting `variants_dir` makes PlatformIO look for variants **only** in the
-project folder, so any variant named by a board json here must exist under `variants/`.
+> Caveat: setting `variants_dir` makes PlatformIO look for variants **only** in the project
+> folder, so any variant named by a board json here must exist under `variants/`.
 
 Two traps for later:
-- **Data lines differ by PCB revision.** 7" V1.0: d0=14,d1=15,d2=16,d3=17. **V1.1/V1.2 reverse
-  them** (d0=17,d1=16,d2=15,d3=14). Reset stays 32 on all. Ours is V1.0; the revision is printed
-  on the top silkscreen.
-- **GPIO54 is the swappable radio header's NRST** per Elecrow's wiki — ESP-Hosted was pulsing it
-  every boot. Harmless with the C6 fitted, but not a no-op if a LoRa module is ever installed.
-
-Consequences, all of which cost time here:
-- **Every `-t upload` must be followed by a power cycle** before Wi-Fi will work.
-- **Do not reset the board to "see the output properly".** That re-wedges the C6 and destroys the
-  run you were trying to observe. Have the firmware reprint its result on a timer instead
-  (`core_smoke_test.cpp` reprints the whole table every 5 s) and read at leisure.
-- **Any experiment run after a failure is measuring a wedged C6, not your change.** Four separate
-  hypotheses were "falsified" here against a board that could not have passed regardless. Always
-  re-establish a known-good control on a freshly power-cycled board first.
+- **Data lines differ by PCB revision.** 7" **V1.0** (ours): d0=14, d1=15, d2=16, d3=17.
+  **V1.1/V1.2 reverse them** (d0=17, d1=16, d2=15, d3=14). Reset stays 32 on all. The revision is
+  printed on the top silkscreen.
+- **GPIO54 is the swappable radio header's NRST** — ESP-Hosted was pulsing it every boot. Harmless
+  with the C6 fitted, not a no-op if a LoRa module is ever installed.
 
 Optional hardening, not the fix: `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n` turns the
 unrecoverable boot loop into an `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` event the app can handle.
 Worth considering for a wall-mounted unit as a safety net.
 
+---
+
+## Open items, in the order I would take them
+
+1. **Soak it.** Both freezes found so far were found by *using* the device, not by reasoning about
+   it, and the link fault only appears under real load. Live with it before building more.
+2. **The link fault** (above): try a lower SDIO clock; then the C6 firmware upgrade over UART.
+   This is the one thing standing between "works" and "finished" — a device that reboots itself is
+   not shippable.
+3. **Verify free PSRAM on the live nest**, then merge `fix/album-art-truncation`
+   (**GitHub issue #3**). The branch raises `JPEG_MAX` 220 KB → 512 KB and adds short-read
+   detection. The concern to settle is whether the nest has the PSRAM headroom: the audit says
+   album art is already correctly in PSRAM (~7 MB free) and the cap is not an SRAM constraint, but
+   that was read from a memory audit, **not measured on the live device**. Measure it.
+4. **Favourites rows have no artwork.** Deferred; needs a per-row art fetch strategy that doesn't
+   reintroduce the download storm.
+5. **External dial + 4 transport buttons.** Hardware first (11-pin GPIO header / Crowtail), then a
+   generic HAL — mirroring how wake-word phrases work, where the board reports *which* input fired
+   and the unit decides what it means:
+
+   ```c
+   // --- Momentary buttons (optional; 0 on boards without any) ---
+   int  buttonCount();
+   int  buttonPoll();              // index of a press since the last call, else -1
+   const char *buttonName(int i);  // "play" | "next" | "prev" | "rooms" — for logs/UI
+   ```
+
+   Boards without buttons return 0/-1/nullptr, so nest and sleep-machine stay untouched.
+6. **The case.** See below.
+7. **Hardware JPEG decode + PPA blits** — available on this silicon, unused. Pure upside, no
+   urgency.
+
 ## Case notes
 
-`hardware/jukebox-7/`, generated with the existing Python CSG toolchain (trimesh + manifold3d)
-off `tokens/hardware.css`. Hardware commits stay separate from firmware.
+`hardware/jukebox-7/`, generated with the existing Python CSG toolchain (trimesh + manifold3d) off
+`tokens/hardware.css`. Hardware commits stay separate from firmware.
 
-The design's screen cutout is essentially already right — it specifies 154×86 mm and the real
-active area is **155×87 mm**. The face, however, needs rework: the design assumes a 210 mm face
-with a 46 mm control column beside the screen, but the **PCB alone is 180 × 105 mm**, so the
-column cannot overlap it. Either widen the face to roughly 180 + column, or mount the dial and
-buttons on a separate sub-panel. Re-derive from the real PCB outline (Elecrow ships a `.stp`
-model and Eagle files in their GitHub repo) before printing anything.
+The screen cutout is essentially already right — the design specifies 154×86 mm and the real active
+area is **155×87 mm**. **The face is not:** the design assumes a 210 mm face with a 46 mm control
+column beside the screen, but the **PCB alone is 180 × 105 mm**, so the column cannot overlap it.
+Either widen the face to roughly 180 + column, or mount the dial and buttons on a separate
+sub-panel. Re-derive from the real PCB outline (Elecrow ships a `.stp` model and Eagle files) before
+printing anything.
 
 ## Open questions
 
-- Does the dial's RGB light-ring ship in v1? It would be the first software-controllable LED in
-  the project (`PIN_LED` GPIO48 exists on this board, but the ring is external).
+- Does the dial's RGB light-ring ship in v1? It would be the first software-controllable LED in the
+  project (`PIN_LED` GPIO48 exists on this board, but the ring is external).
 - Camera header is present and unused. Out of scope unless you want presence-wake.
 - Accent locked to amber unless you say otherwise.
