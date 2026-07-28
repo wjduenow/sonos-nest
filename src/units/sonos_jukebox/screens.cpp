@@ -395,11 +395,28 @@ static void favouriteCb(lv_event_t *e) {
 // One row per favourite, following the design's ListRow: art tile, title, subtitle, trailing
 // badge. There is no per-item artwork from a Favourites browse (only labels), so the tile carries
 // a glyph rather than a fake image.
+// Hard cap on rendered rows. Each row is 4 LVGL objects (button + art tile + glyph + label), and
+// LV_MEM_SIZE is 96 KB shared with everything else on screen. A large Favourites list will exhaust
+// it, and LVGL's response to exhaustion is a layer-alloc RETRY LOOP, not a failure — the UI task
+// spins forever, the screen freezes mid-build, and because the health heartbeat is printed from
+// uiTick the device goes silent on serial too. It looks exactly like a total system hang; netTask
+// is in fact still running. CLAUDE.md warns about precisely this.
+//
+// 40 rows is ~160 objects, which fits comfortably. Anything beyond is reported rather than
+// silently dropped — a truncated list that claims to be complete is its own bug.
+static const size_t kMaxRadioRows = 40;
+
 static void buildRadioRows(const std::vector<String> &labels) {
   lv_obj_clean(s_radioList);
   const lv_coord_t rowH = 72, rowW = lv_obj_get_width(s_radioList) - 8;
 
-  for (size_t i = 0; i < labels.size(); ++i) {
+  const size_t shown = labels.size() > kMaxRadioRows ? kMaxRadioRows : labels.size();
+  lv_mem_monitor_t before;
+  lv_mem_monitor(&before);
+  Serial.printf("[ui    ] radio: %u favourite(s), rendering %u, lvgl_free=%uKB\n",
+                (unsigned)labels.size(), (unsigned)shown, (unsigned)(before.free_size / 1024));
+
+  for (size_t i = 0; i < shown; ++i) {
     lv_obj_t *row = lv_button_create(s_radioList);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, rowW, rowH);
@@ -420,7 +437,21 @@ static void buildRadioRows(const std::vector<String> &labels) {
     lv_obj_set_width(t, rowW - 80);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 72, 0);
   }
-  lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_mem_monitor_t after;
+  lv_mem_monitor(&after);
+  Serial.printf("[ui    ] radio: rendered, lvgl_free=%uKB (used %uKB for the list)\n",
+                (unsigned)(after.free_size / 1024),
+                (unsigned)((before.free_size - after.free_size) / 1024));
+
+  if (labels.size() > shown) {
+    // Say so on screen. Silently showing 40 of 120 would be worse than the freeze it prevents.
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text_fmt(s_radioStatus, "Showing first %u of %u favourites",
+                          (unsigned)shown, (unsigned)labels.size());
+    lv_obj_align(s_radioStatus, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
+  } else {
+    lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 static void buildRadio() {
