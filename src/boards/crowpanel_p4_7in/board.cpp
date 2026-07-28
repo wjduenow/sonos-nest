@@ -18,6 +18,7 @@
 #include "display.h"
 #include "pins.h"
 #include "touch.h"
+#include "ui_sound.h"
 
 bool boardInit() {
   Serial.printf("[board ] CrowPanel Advance 7\" ESP32-P4 — %s, %lu KB internal heap free\n",
@@ -35,6 +36,9 @@ bool boardInit() {
   // booting (it shows what is playing, and the physical controls are the eventual primary input).
   if (!touchInit()) Serial.println("[board ] continuing without touch");
 
+  // Nor is audio: silent feedback is a downgrade, not a failure.
+  if (!uiSoundInit()) Serial.println("[board ] continuing without UI tones");
+
   return true;
 }
 
@@ -49,7 +53,7 @@ bool      knobDown()     { return false; }
 // --- Local audio: no SD-backed media playback on this unit --------------------
 // The board DOES have speakers, but this contract means "play a file off local storage", which
 // this unit has no concept of. UI feedback tones are a separate, smaller thing — see the
-// UI-sound-feedback section of plans/07-sonos-jukebox.md — and deliberately do not go here.
+// UI-sound-feedback section of plans/07-sonos-jukebox.md — and live in ui_sound.cpp instead.
 bool localAudioPlay(const char *)   { return false; }
 void localAudioStop()               {}
 bool localAudioActive()             { return false; }

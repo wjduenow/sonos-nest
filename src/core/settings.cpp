@@ -15,6 +15,14 @@ void settingsSetRoom(const String &name) {
   if (settingsRoom() != name) s_prefs.putString("room", name);
 }
 
+// UI feedback tone level. Defaults to a modest 40: audible confirmation without being a novelty
+// the owner immediately wants to switch off. 0 disables it entirely.
+uint8_t settingsUiSound() { return s_prefs.getUChar("uisnd", 40); }
+void settingsSetUiSound(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  s_prefs.putUChar("uisnd", pct);
+}
+
 uint8_t settingsBrightness() {
   uint8_t b = s_prefs.getUChar("bright", 100);
   return b < 10 ? 10 : b;

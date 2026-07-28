@@ -13,6 +13,10 @@ void    settingsSetBrightness(uint8_t pct);
 // Button-ring level % (0..100), default 100. Deliberately NOT settingsBrightness(): that one
 // floors at 10 so nobody can blank an LCD and lose the UI needed to un-blank it. A ring has no
 // such trap and 0 (fully off) is a legitimate, wanted state on a bedside device.
+// UI feedback tone level, 0..100. 0 = off. Boards without a speaker ignore it.
+uint8_t settingsUiSound();
+void    settingsSetUiSound(uint8_t pct);
+
 uint8_t settingsRing();
 void    settingsSetRing(uint8_t pct);
 
