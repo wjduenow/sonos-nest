@@ -282,7 +282,15 @@ static void netTask(void *) {
           }
           deadLinkStreak = 0;
         } else {
-          Serial.println("[net] RSSI 0 while 'connected' — watching (needs 2 in a row to act)");
+          // Confirm the second sighting in SECONDS, not minutes. Falling through to the discovery
+          // below would burn ~90 s on multicast that cannot possibly be answered over a dead
+          // radio, and re-entering this branch would then cost another 3 failed polls — which is
+          // why an obviously-dead link used to take ~3 minutes of empty room list to recover.
+          // Skip the doomed discovery, re-arm the recovery flag, and look again shortly.
+          Serial.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
+          s_coordStale = true;
+          vTaskDelay(pdMS_TO_TICKS(3000));
+          continue;
         }
       } else if (WiFi.RSSI() != 0) {
         deadLinkStreak = 0;
