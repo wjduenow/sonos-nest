@@ -53,3 +53,10 @@ bool wakeWordInit() { return false; }
 int  wakeWordPoll() { return -1; }
 const char *wakeWordPhrase(int) { return nullptr; }
 int  wakeWordCount() { return 0; }
+
+// No speaker on this board (or none wired for UI feedback) — see core/board.h.
+void uiSoundPlay(UiSound) {}
+
+// On-die radio: a dead link is a Wi-Fi problem, not a transport one, so the normal reconnect
+// path is the right and only recovery. See core/board.h.
+bool netLinkRecover() { return false; }

@@ -104,3 +104,10 @@ void        localTracksRefresh()       {}
 int         localTrackCount()          { return 0; }
 const char *localTrackName(int)        { return nullptr; }
 const char *localTrackPath(int)        { return nullptr; }
+
+// No speaker on this board (or none wired for UI feedback) — see core/board.h.
+void uiSoundPlay(UiSound) {}
+
+// On-die radio: a dead link is a Wi-Fi problem, not a transport one, so the normal reconnect
+// path is the right and only recovery. See core/board.h.
+bool netLinkRecover() { return false; }

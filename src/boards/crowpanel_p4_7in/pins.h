@@ -43,17 +43,28 @@
 #define GT911_ADDR_HIGH 0x14
 
 // --- Audio: NS4168 amp -> 2 speakers, I2S TX. Used for UI feedback (clicks/ticks). ---
-// AUDIO_CTRL gates amp power: drive it low when idle or the amp hisses and wastes current.
-#define PIN_AUDIO_CTRL  30   // amp power enable (active high)
+// AUDIO_CTRL gates amp power. *** ACTIVE LOW *** — Elecrow's Arduino course is explicit:
+// "setting LOW enables audio power and HIGH disables it". This was originally written as active
+// high on the assumption that an "enable" line is active high; the result was silence (every
+// "enable" powered the amp down) AND an amp left permanently on at boot, since the idle state
+// drove the pin the wrong way. Verify polarity from the vendor docs, never from the pin's name.
+#define PIN_AUDIO_CTRL  30   // amp power enable (ACTIVE LOW)
 #define PIN_AUDIO_LRCLK 21   // WS
 #define PIN_AUDIO_BCLK  22
 #define PIN_AUDIO_SDATA 23
-#define AUDIO_POWER_ENABLE   HIGH
-#define AUDIO_POWER_DISABLE  LOW
+#define AUDIO_POWER_ENABLE   LOW
+#define AUDIO_POWER_DISABLE  HIGH
 
 // --- PDM microphone (present; not used by this unit yet) ---
 #define PIN_MIC_CLK     24
 #define PIN_MIC_SDIN    26
+
+// --- ESP32-C6 co-processor (Wi-Fi over SDIO / ESP-Hosted) ---
+// C6_EN on Elecrow's schematic: IC1.EN with a 10k pull-up, ACTIVE HIGH enable — so a LOW pulse
+// resets the C6. The SDIO pins themselves are NOT here: Arduino takes them from the board variant
+// (variants/crowpanel_p4_7in/pins_arduino.h), which is also where this same pin is declared to
+// esp_hosted. This define exists only for the recovery path in net_link.cpp.
+#define PIN_C6_EN       32
 
 // --- Onboard LED ---
 // The first unit in this project with a software-controllable LED (the nest has none).
