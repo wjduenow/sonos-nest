@@ -22,13 +22,22 @@
 #include "core/album_art.h"
 #include "core/board.h"
 #include "core/library.h"
+#include "core/settings.h"
 #include "core/player_state.h"
 #include "core/sonos/ssdp.h"
+#include <WiFi.h>
 #include "core/unit.h"
+#include "../../boards/crowpanel_p4_7in/ui_sound.h"   // uiSoundIdleTick()
 #include "ui_scale.h"
 
 // --- Geometry, from the design's device shell -------------------------------------------------
-static const lv_coord_t RAIL_W    = 66;    // left nav rail (App.jsx)
+// Rail widened from the design's 66 px and its 48 px items scaled 1.5x to 72 px. A DELIBERATE
+// deviation: 48 px is under the design system's own --hit-min of 44 px only on paper — in the hand
+// it is too small to hit reliably on a wall-mounted panel, which is the whole point of this unit.
+// Physical accuracy to the mock loses to being usable.
+static const lv_coord_t RAIL_W    = 96;    // left nav rail (design: 66)
+static const lv_coord_t RAIL_BTN  = 72;    // rail item (design: 48)
+static const lv_coord_t RAIL_STEP = 86;    // item pitch
 static const lv_coord_t PAD_X     = 30;    // content gutter (NowPlaying.jsx padding 22px 30px 18px)
 static const lv_coord_t PAD_TOP   = 22;
 static const lv_coord_t PAD_BOT   = 18;
@@ -41,20 +50,25 @@ static lv_obj_t *s_provisioning = nullptr;
 // Pages live inside the content area and are shown/hidden rather than rebuilt: the design's rail
 // is instant navigation, and tearing down LVGL trees on every switch would both stutter and churn
 // the LV_MEM_SIZE pool.
-enum Page { PAGE_NOW = 0, PAGE_RADIO = 1, PAGE_ROOMS = 2, PAGE_COUNT = 3 };
-static lv_obj_t *s_page[PAGE_COUNT] = {nullptr, nullptr, nullptr};
-static lv_obj_t *s_railBtn[PAGE_COUNT] = {nullptr, nullptr, nullptr};
-static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr, nullptr, nullptr};
+enum Page { PAGE_NOW = 0, PAGE_RADIO = 1, PAGE_ROOMS = 2, PAGE_SETTINGS = 3, PAGE_COUNT = 4 };
+static lv_obj_t *s_page[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
+static lv_obj_t *s_railBtn[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
+static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
 static int s_cur = PAGE_NOW;
 
 // Radio (Sonos Favourites, FV:2)
 static lv_obj_t *s_radioList = nullptr, *s_radioStatus = nullptr;
 static bool s_radioRequested = false;    // a browse has been asked for since entering the page
 
+// Settings
+static lv_obj_t *s_nameTa = nullptr, *s_kb = nullptr, *s_soundSlider = nullptr,
+                *s_soundVal = nullptr, *s_saveHint = nullptr;
+
 // Rooms
 static lv_obj_t *s_roomsWrap = nullptr;
 static std::vector<String> s_roomIps;      // parallel to the chips
 static uint32_t s_roomsGen = UINT32_MAX;   // last-rendered g_zonesGen
+static String   s_roomsActive;             // last-rendered active zone (the amber outline)
 
 // Status bar
 static lv_obj_t *s_dot = nullptr, *s_room = nullptr, *s_group = nullptr, *s_clock = nullptr;
@@ -88,11 +102,18 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
 }
 
 // --- Commands ---------------------------------------------------------------------------------
-static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.prev = true; stateUnlock(); } }
-static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; stateUnlock(); } }
+static void prevCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Tick);
+  if (stateLock()) { g_pending.prev = true; stateUnlock(); }
+}
+static void nextCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Tick);
+  if (stateLock()) { g_pending.next = true; stateUnlock(); }
+}
 static void playCb(lv_event_t *) {
   // Decide from the last rendered state, exactly as the nest does: the UI owns the intent, the
   // net task owns the SOAP call.
+  uiSoundPlay(UiSound::Tick);
   if (stateLock()) { g_pending.setPlay = s_wasPlaying ? 0 : 1; stateUnlock(); }
 }
 
@@ -155,17 +176,18 @@ static void buildRail(lv_obj_t *scr) {
   // Only Now Playing exists so far; Radio and Rooms are placeholders so the rail reads as the
   // designed 3-item nav rather than appearing broken.
   // Now / Radio / Rooms, matching the design's rail order.
-  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, LV_SYMBOL_LIST, LV_SYMBOL_VOLUME_MAX};
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, LV_SYMBOL_LIST, LV_SYMBOL_VOLUME_MAX,
+                                   LV_SYMBOL_SETTINGS};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, 48, 48);
-    lv_obj_set_style_radius(b, JB_R_MD, 0);
+    lv_obj_set_size(b, RAIL_BTN, RAIL_BTN);
+    lv_obj_set_style_radius(b, JB_R_LG, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_BG), 0);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, (RAIL_W - 48) / 2, PAD_TOP + i * 58);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, (RAIL_W - RAIL_BTN) / 2, PAD_TOP + i * RAIL_STEP);
     lv_obj_add_event_cb(b, railCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_t *l = label(b, icons[i], &lv_font_montserrat_20, JB_TEXT_DIM);
+    lv_obj_t *l = label(b, icons[i], &lv_font_montserrat_28, JB_TEXT_DIM);
     lv_obj_center(l);
     s_railBtn[i] = b;
     s_railIcon[i] = l;
@@ -289,6 +311,7 @@ static void showPage(int page) {
 }
 
 static void railCb(lv_event_t *e) {
+  uiSoundPlay(UiSound::Tick);
   showPage((int)(intptr_t)lv_event_get_user_data(e));
 }
 
@@ -297,6 +320,8 @@ static void railCb(lv_event_t *e) {
 static void roomCb(lv_event_t *e) {
   int idx = (int)(intptr_t)lv_event_get_user_data(e);
   if (idx < 0 || idx >= (int)s_roomIps.size()) return;
+  uiSoundPlay(UiSound::Confirm);
+  Serial.printf("[ui    ] room chip %d -> %s\n", idx, s_roomIps[idx].c_str());
   if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
   showPage(PAGE_NOW);      // the design treats picking a room as "now show me that room"
 }
@@ -309,6 +334,8 @@ static void rebuildRooms() {
 
   String cur;
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
+
+  s_roomsActive = cur;
 
   const std::vector<sonos::Zone> &zs = sonos::zones();
   if (zs.empty()) {
@@ -351,7 +378,7 @@ static void rebuildRooms() {
 static void buildRooms() {
   lv_obj_t *pg = s_page[PAGE_ROOMS];
   lv_obj_t *h = label(pg, "Rooms", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 34);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);   // clear of the status bar
 
   s_roomsWrap = panel(pg, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - 150, JB_SCREEN_BG, 0);
   lv_obj_align(s_roomsWrap, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
@@ -360,6 +387,7 @@ static void buildRooms() {
 // Play the tapped favourite. library:: was told PLAY_FAVORITE at browse time, so this becomes a
 // SetAVTransportURI + Play on the coordinator — the net task does the SOAP, as always.
 static void favouriteCb(lv_event_t *e) {
+  uiSoundPlay(UiSound::Confirm);
   library::requestPlay((int)(intptr_t)lv_event_get_user_data(e));
   showPage(PAGE_NOW);
 }
@@ -398,7 +426,7 @@ static void buildRadioRows(const std::vector<String> &labels) {
 static void buildRadio() {
   lv_obj_t *pg = s_page[PAGE_RADIO];
   lv_obj_t *h = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 34);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);   // clear of the status bar
 
   s_radioStatus = label(pg, "Loading favourites" LV_SYMBOL_REFRESH, &lv_font_montserrat_22,
                         JB_TEXT_DIM);
@@ -414,6 +442,105 @@ static void buildRadio() {
   lv_obj_set_scrollbar_mode(s_radioList, LV_SCROLLBAR_MODE_AUTO);
 }
 
+// --- Settings -----------------------------------------------------------------------------------
+static void soundCb(lv_event_t *e) {
+  const int v = lv_slider_get_value((lv_obj_t *)lv_event_get_target(e));
+  settingsSetUiSound((uint8_t)v);
+  lv_label_set_text_fmt(s_soundVal, "%d", v);
+  // Preview at the new level on release, so the slider is judged by ear rather than by number.
+  if (lv_event_get_code(e) == LV_EVENT_RELEASED) uiSoundPlay(UiSound::Tick);
+}
+
+// Device name drives the DHCP hostname, the mDNS name and the OTA name, and all three are derived
+// once at boot (wifiHostname()/otaHostname()). A reboot is therefore the honest way to apply it —
+// which is exactly what g_pending.reboot exists for.
+static void saveNameCb(lv_event_t *) {
+  String n = String(lv_textarea_get_text(s_nameTa));
+  n.trim();
+  if (n.length() == 0) {
+    uiSoundPlay(UiSound::Error);
+    lv_label_set_text(s_saveHint, "Name cannot be empty");
+    return;
+  }
+  uiSoundPlay(UiSound::Confirm);
+  settingsSetDeviceName(n);
+  lv_label_set_text(s_saveHint, "Saved — restarting to apply…");
+  if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
+}
+
+static void kbShowCb(lv_event_t *e) {
+  lv_obj_remove_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+  lv_keyboard_set_textarea(s_kb, (lv_obj_t *)lv_event_get_target(e));
+}
+static void kbDoneCb(lv_event_t *) { lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN); }
+
+static void buildSettings() {
+  lv_obj_t *pg = s_page[PAGE_SETTINGS];
+  lv_obj_t *h = label(pg, "Settings", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
+
+  // --- Device name ---
+  lv_obj_t *nl = label(pg, "Device name", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_align(nl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 112);
+
+  s_nameTa = lv_textarea_create(pg);
+  lv_textarea_set_one_line(s_nameTa, true);
+  lv_textarea_set_max_length(s_nameTa, 31);   // DHCP hostnames are not unbounded
+  lv_obj_set_size(s_nameTa, 420, 58);
+  lv_obj_align(s_nameTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 140);
+  lv_obj_set_style_bg_color(s_nameTa, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_set_style_border_color(s_nameTa, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_text_color(s_nameTa, lv_color_hex(JB_TEXT), 0);
+  lv_obj_set_style_text_font(s_nameTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_radius(s_nameTa, JB_R_MD, 0);
+  lv_obj_add_event_cb(s_nameTa, kbShowCb, LV_EVENT_FOCUSED, nullptr);
+
+  lv_obj_t *save = lv_button_create(pg);
+  lv_obj_remove_style_all(save);
+  lv_obj_set_size(save, 140, 58);
+  lv_obj_align(save, LV_ALIGN_TOP_LEFT, 440, PAD_TOP + 140);
+  lv_obj_set_style_radius(save, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(save, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(save, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_add_event_cb(save, saveNameCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *sl = label(save, "Save", &lv_font_montserrat_22, JB_ACCENT_INK);
+  lv_obj_center(sl);
+
+  s_saveHint = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_obj_align(s_saveHint, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 204);
+
+  // --- On-device sound level ---
+  lv_obj_t *vl = label(pg, "Sound feedback (this device's speakers)", &lv_font_montserrat_16,
+                       JB_TEXT_MUTED);
+  lv_obj_align(vl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 250);
+
+  s_soundSlider = lv_slider_create(pg);
+  lv_obj_set_size(s_soundSlider, 480, 14);
+  lv_obj_align(s_soundSlider, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 292);
+  lv_slider_set_range(s_soundSlider, 0, 100);
+  lv_slider_set_value(s_soundSlider, settingsUiSound(), LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(s_soundSlider, lv_color_hex(JB_SCREEN_ELEV_2), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_soundSlider, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(s_soundSlider, lv_color_hex(JB_ACCENT), LV_PART_KNOB);
+  lv_obj_add_event_cb(s_soundSlider, soundCb, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_add_event_cb(s_soundSlider, soundCb, LV_EVENT_RELEASED, nullptr);
+
+  s_soundVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+  lv_obj_align(s_soundVal, LV_ALIGN_TOP_LEFT, 500, PAD_TOP + 284);
+  lv_label_set_text_fmt(s_soundVal, "%d", settingsUiSound());
+
+  lv_obj_t *hint = label(pg, "0 turns feedback off.", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 318);
+
+  // Keyboard last so it draws above everything, hidden until the field is focused.
+  s_kb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_kb, SCREEN_W - RAIL_W - PAD_X * 2, 240);
+  lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_kb, kbDoneCb, LV_EVENT_READY, nullptr);
+  lv_obj_add_event_cb(s_kb, kbDoneCb, LV_EVENT_CANCEL, nullptr);
+}
+
 void uiInit() {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(JB_SCREEN_BG), 0);
@@ -427,18 +554,22 @@ void uiInit() {
   s_content = panel(scr, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H, JB_SCREEN_BG, 0);
   lv_obj_align(s_content, LV_ALIGN_TOP_LEFT, RAIL_W + PAD_X, 0);
 
-  buildStatusBar();     // shared chrome: visible on every page
-
+  // Pages FIRST, status bar SECOND. LVGL paints siblings in creation order, so the shared chrome
+  // has to be created after the pages or the pages' opaque backgrounds cover it — which is
+  // exactly what hid the room name and left room switching with no visible feedback.
   const lv_coord_t pw = SCREEN_W - RAIL_W - PAD_X * 2;
   for (int i = 0; i < PAGE_COUNT; i++) {
     s_page[i] = panel(s_content, pw, SCREEN_H, JB_SCREEN_BG, 0);
     lv_obj_align(s_page[i], LV_ALIGN_TOP_LEFT, 0, 0);
   }
 
+  buildStatusBar();     // shared chrome: on top of every page
+
   buildNowPlaying();
   buildTransport();
   buildRadio();
   buildRooms();
+  buildSettings();
 
   showPage(PAGE_NOW);
   backlightSet(100);
@@ -453,6 +584,15 @@ void uiTick() {
   if (s_provisioning) {
     lv_obj_del(s_provisioning);
     s_provisioning = nullptr;
+  }
+
+  // Fill the name field from NVS once, on the first tick — uiInit() runs before appBoot(), so the
+  // stored value is not necessarily readable yet.
+  static bool nameLoaded = false;
+  if (!nameLoaded && s_nameTa) {
+    nameLoaded = true;
+    String n = settingsDeviceName();
+    lv_textarea_set_text(s_nameTa, n.length() ? n.c_str() : DEVICE_HOSTNAME);
   }
 
   // Snapshot under the mutex, render from the copy — never hold the lock across LVGL work.
@@ -535,7 +675,9 @@ void uiTick() {
 
   // Rooms: rebuild only when discovery actually changed (g_zonesGen), and only while the page is
   // visible — rebuilding a hidden tree is pure churn on the LVGL pool.
-  if (s_cur == PAGE_ROOMS && s_roomsGen != g_zonesGen) {
+  // g_zonesGen covers discovery changes; the active-room compare covers a zone SWITCH, which does
+  // not bump that generation and would otherwise leave the amber outline on the previous room.
+  if (s_cur == PAGE_ROOMS && (s_roomsGen != g_zonesGen || s_roomsActive != p.zoneName)) {
     s_roomsGen = g_zonesGen;
     rebuildRooms();
   }
@@ -553,6 +695,29 @@ void uiTick() {
       else                buildRadioRows(labels);
     }
   }
+
+  // Health heartbeat. This unit lost the network after a few minutes and the failure looked like
+  // "connection refused" from Sonos — which on the S3 units means internal SRAM exhaustion, but
+  // here could equally be the ESP-Hosted/C6 link degrading (a known, unresolved upstream issue on
+  // P4 boards). Logging heap AND link state together is what distinguishes the two.
+  {
+    static uint32_t lastHealth = 0;
+    if (millis() - lastHealth >= 10000) {
+      lastHealth = millis();
+      lv_mem_monitor_t mon;
+      lv_mem_monitor(&mon);   // LVGL pool: exhaustion here freezes the UI, not the network
+      Serial.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d ip=%s "
+                    "zones=%u lvgl_free=%uKB\n",
+                    (unsigned long)(millis() / 1000),
+                    (unsigned long)(ESP.getFreeHeap() / 1024),
+                    (unsigned long)(ESP.getMinFreeHeap() / 1024),
+                    (unsigned long)(ESP.getFreePsram() / 1024),
+                    (int)WiFi.status(), (int)WiFi.RSSI(), WiFi.localIP().toString().c_str(),
+                    (unsigned)sonos::zones().size(), (unsigned)(mon.free_size / 1024));
+    }
+  }
+
+  uiSoundIdleTick();   // drop amp power once the taps stop
 
   lv_timer_handler();
 }
