@@ -3,6 +3,7 @@
 #include "app.h"
 
 #include <Arduino.h>
+#include <WiFi.h>          // link-health check in the recovery path (see netTask)
 
 #include "player_state.h"
 #include "unit.h"                 // uiTick() — provided by whichever unit the build links
@@ -72,6 +73,10 @@ static bool selectZoneByIp(const String &ip) {
                   s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
     return true;
   }
+  // Silent failure here is a trap: the UI has already given the user feedback (a tone, a screen
+  // change) and nothing happens. Say which IP was asked for and what was actually known.
+  Serial.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
+                (unsigned)sonos::zones().size());
   return false;
 }
 
@@ -256,6 +261,32 @@ static void netTask(void *) {
       const bool recovering = s_coordStale;
       s_coordStale = false;
       if (recovering) Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
+
+      // Before blaming Sonos, check whether OUR link is the thing that died. A board whose radio
+      // is a separate co-processor can report WL_CONNECTED with a live IP while the transport to
+      // that co-processor is gone — RSSI comes from the co-processor, so 0 while "connected" means
+      // the RPC is dead, not that the signal is weak. Re-discovery cannot succeed in that state,
+      // and reconnecting Wi-Fi cannot fix it either: the reconnect path talks over the same dead
+      // transport. Ask the board to rebuild the link, then re-associate.
+      // Require the symptom TWICE before acting. Recovery on this board is a reboot, and a
+      // single transient must never cost the user a reboot — RSSI can read 0 momentarily around
+      // a roam or a scan without the transport being dead.
+      static int deadLinkStreak = 0;
+      if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
+        if (++deadLinkStreak >= 2) {
+          Serial.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
+          if (netLinkRecover()) {   // may not return: see the board implementation
+            wifiConnect();
+            Serial.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
+                          (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
+          }
+          deadLinkStreak = 0;
+        } else {
+          Serial.println("[net] RSSI 0 while 'connected' — watching (needs 2 in a row to act)");
+        }
+      } else if (WiFi.RSSI() != 0) {
+        deadLinkStreak = 0;
+      }
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
       if (recovering) { processPending(); s_lastPoll = 0; continue; }
@@ -329,17 +360,35 @@ static void netTask(void *) {
 }
 
 #ifndef HEADLESS
+// Wait for the art URI to stop changing before downloading it. A cover is a real HTTP transfer —
+// 228 KB was measured on a live system — so every track change costs one. Anything that walks
+// through tracks or rooms quickly (skipping, or tapping down a room list) would otherwise queue a
+// full download per step and push megabytes in a few seconds. On the ESP32-P4 that traffic goes
+// over the SDIO bridge to the Wi-Fi co-processor, where sustained load is what provokes the
+// transport failure netLinkRecover() exists to recover from; on the S3 units it is simply wasted
+// bandwidth and heap churn. Settling first means a burst of N changes costs ONE fetch, of the
+// track you actually landed on.
+static const uint32_t kArtSettleMs = 700;
+
 static void artTask(void *) {
-  String last;
+  String last, pending;
+  uint32_t pendingSince = 0;
   int    fails = 0;
   for (;;) {
     if (otaActive() || updaterActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
 
     String cur;
     if (stateLock()) { cur = g_player.artUri; stateUnlock(); }
+
+    // Restart the settle timer every time the target moves.
+    if (cur != pending) { pending = cur; pendingSince = millis(); }
+
     if (cur != last) {
       if (cur.length() == 0) {
+        // Clearing is free and must be immediate, or the previous room's cover lingers.
         albumArtClear();  last = cur;  fails = 0;
+      } else if (millis() - pendingSince < kArtSettleMs) {
+        // Still moving — do not start a download we are about to throw away.
       } else if (albumArtFetch(cur)) {  // GET + TJpg decode + cache (never on UI task)
         last = cur;  fails = 0;
       } else if (++fails >= 4) {
