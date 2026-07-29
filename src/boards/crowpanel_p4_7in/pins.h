@@ -66,6 +66,37 @@
 // esp_hosted. This define exists only for the recovery path in net_link.cpp.
 #define PIN_C6_EN       32
 
+// --- microSD (TF) slot: SDMMC *slot 0*, separate controller from the C6 -------------------------
+// From Elecrow's board_config.h (Arduino_Code/Lesson08-SD_Card_File_Reading). The P4 has two SDMMC
+// slots (CONFIG_SOC_SDMMC_NUM_SLOTS=2): the card is on slot 0, ESP-Hosted's link to the C6 is on
+// slot 1. Independent controllers, so card traffic does NOT share a bus with the radio — which is
+// the fact that makes an on-card cache worth having on a board whose link already fails under load.
+//
+// Elecrow runs it 1-bit at 10 MHz ("reduce the clock frequency to 10MHz to improve stability" —
+// Arduino lessons p.103) with internal pull-ups and no D1-D3. Match that until measurement says
+// otherwise; 4-bit would need D1-D3, which their example does not wire up.
+// VERIFIED ON HARDWARE (jukebox-sd): with these pins sdmmc_card_init() succeeds — the card
+// enumerates and answers. No power-control handle is needed; the slot's I/O rail is powered by the
+// board, not by an on-chip LDO. Do NOT add one: esp_ldo_acquire_channel(4) fails here with "already
+// in use by others or not adjustable", so the stock variant's BOARD_SDMMC_POWER_CHANNEL 4 is as
+// wrong for this board as its power PIN is.
+#define PIN_SD_CLK      43
+#define PIN_SD_CMD      44
+#define PIN_SD_D0       39
+#define SD_SLOT         0
+#define SD_FREQ_KHZ     10000
+//
+// *** DO NOT USE Arduino's SD_MMC LIBRARY ON THIS BOARD AS THE VARIANT STANDS. ***
+// SD_MMC.cpp takes its slot-0 pins, LDO channel and power pin from the board VARIANT's
+// BOARD_SDMMC_* macros, and ours (variants/crowpanel_p4_7in/pins_arduino.h) is a copy of stock
+// esp32p4 — Espressif's Function EV Board — which declares:
+//     BOARD_SDMMC_POWER_PIN 45   +   BOARD_SDMMC_POWER_ON_LEVEL LOW
+// GPIO45 is PIN_I2C_SDA on the CrowPanel. SD_MMC.begin() would drive the GT911's I2C data line low
+// and kill touch, while mounting the card on the EV board's pins rather than 43/44/39. This is the
+// exact same trap as the C6 reset pin (that variant's BOARD_SDIO_ESP_HOSTED_RESET was 54, not 32) —
+// stock variant macros describe Espressif's board, not this one. Use the IDF sdmmc API directly
+// with the pins above, as Elecrow's own example does. See sd_test.cpp.
+
 // --- Onboard LED ---
 // The first unit in this project with a software-controllable LED (the nest has none).
 #define PIN_LED         48
