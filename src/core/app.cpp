@@ -120,6 +120,13 @@ static bool selectZone() {
 
 static uint32_t s_lastPoll = 0, s_lastVolCmd = 0, s_lastCoordRefresh = 0;
 
+// Dead-link detection state (see netTask). File scope rather than a function-local static because
+// the Wi-Fi supervisor at the top of the loop has to be able to clear it: an AP that actually goes
+// away must not leave a half-armed streak behind that turns the NEXT sighting into a reboot.
+static int      s_deadLinkStreak  = 0;
+static uint32_t s_deadLinkFirstMs = 0;
+static const uint32_t kDeadLinkWindowMs = 10000;
+
 // Drain + execute queued input commands. Kept cheap and called frequently (including
 // between the poll's SOAP calls) so a twist/press reaches the speaker with minimal lag.
 static void processPending() {
@@ -230,9 +237,31 @@ static void uiTask(void *) {
   }
 }
 
+// Link snapshot for the UI. See the contract in app.h: these exist so uiTick() never has to make
+// a blocking radio RPC to log link health. Refreshed on a timer rather than every loop iteration
+// because on ESP-Hosted boards each read is an SDIO round-trip to the C6, and this is diagnostics,
+// not control.
+volatile int      g_linkStatus = 0;
+volatile int      g_linkRssi   = 0;
+volatile uint32_t g_linkIp     = 0;
+volatile uint32_t g_linkZones  = 0;
+
+static void publishLinkStats() {
+  static uint32_t s_last = 0;
+  if (s_last && millis() - s_last < 2000) return;
+  s_last = millis();
+  g_linkStatus = (int)WiFi.status();
+  g_linkRssi   = (int)WiFi.RSSI();
+  const IPAddress ip = WiFi.localIP();
+  g_linkIp = (uint32_t)ip[0] | ((uint32_t)ip[1] << 8) | ((uint32_t)ip[2] << 16) |
+             ((uint32_t)ip[3] << 24);
+  g_linkZones = (uint32_t)sonos::zones().size();
+}
+
 static void netTask(void *) {
   for (;;) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
+    publishLinkStats();
 
     // Wi-Fi supervisor: a transient outage (router reboot, DHCP renewal, AP roam) is near-certain
     // over a multi-day uptime and must self-heal, or the unit sits alive-but-wedged until a power
@@ -246,6 +275,13 @@ static void netTask(void *) {
         s_lastWifiKick = now;
         Serial.println("[net] wifi down — reconnecting");
         wifiReconnect();
+      }
+      // A genuine disconnect is NOT the fault netLinkRecover() exists for, and the RSSI-0 readings
+      // around a reconnect are normal. Disarm, or an ordinary router reboot ends in a device
+      // reboot — exactly what the "requires the symptom twice" rule was written to prevent.
+      if (s_deadLinkStreak) {
+        Serial.println("[net] wifi genuinely down — clearing the dead-link streak");
+        s_deadLinkStreak = 0;
       }
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
@@ -271,16 +307,23 @@ static void netTask(void *) {
       // Require the symptom TWICE before acting. Recovery on this board is a reboot, and a
       // single transient must never cost the user a reboot — RSSI can read 0 momentarily around
       // a roam or a scan without the transport being dead.
-      static int deadLinkStreak = 0;
+      // Both sightings must fall inside kDeadLinkWindowMs. Without a window the counter is
+      // effectively permanent: one transient RSSI 0 now and another an hour later would add up to
+      // a reboot, and the two would have nothing to do with each other.
+      if (s_deadLinkStreak && millis() - s_deadLinkFirstMs > kDeadLinkWindowMs) {
+        Serial.println("[net] dead-link streak expired — starting over");
+        s_deadLinkStreak = 0;
+      }
       if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
-        if (++deadLinkStreak >= 2) {
+        if (s_deadLinkStreak == 0) s_deadLinkFirstMs = millis();
+        if (++s_deadLinkStreak >= 2) {
           Serial.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
           if (netLinkRecover()) {   // may not return: see the board implementation
             wifiConnect();
             Serial.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
                           (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
           }
-          deadLinkStreak = 0;
+          s_deadLinkStreak = 0;
         } else {
           // Confirm the second sighting in SECONDS, not minutes. Falling through to the discovery
           // below would burn ~90 s on multicast that cannot possibly be answered over a dead
@@ -293,7 +336,7 @@ static void netTask(void *) {
           continue;
         }
       } else if (WiFi.RSSI() != 0) {
-        deadLinkStreak = 0;
+        s_deadLinkStreak = 0;
       }
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }

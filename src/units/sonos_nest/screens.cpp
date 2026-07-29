@@ -352,7 +352,8 @@ static void populateRooms() {
   s_roomIps.clear();
   String cur;
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
-  const std::vector<sonos::Zone> &zs = sonos::zones();
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
   for (size_t i = 0; i < zs.size(); ++i) {
     labels.push_back(zs[i].name);
     s_roomIps.push_back(zs[i].ip);
@@ -396,7 +397,8 @@ static void populateGroup() {
   s_groupIps.clear(); s_groupInGroup.clear(); s_groupIsActive.clear();
   String activeCoord, activeName;
   if (stateLock()) { activeCoord = g_player.coordinatorUuid; activeName = g_player.zoneName; stateUnlock(); }
-  const std::vector<sonos::Zone> &zs = sonos::zones();
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
   for (const auto &z : zs) {
     bool inGroup  = (z.coordinatorUuid == activeCoord);
     bool isActive = (z.name == activeName);

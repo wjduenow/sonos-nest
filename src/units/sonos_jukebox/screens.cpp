@@ -24,10 +24,11 @@
 #include "core/library.h"
 #include "core/settings.h"
 #include "core/player_state.h"
+#include "core/app.h"          // g_link* — netTask's link snapshot. NEVER call WiFi.* from here:
+                              // on this board the radio is a co-processor and those are blocking
+                              // RPCs, so a UI-task caller freezes rendering when the link dies.
 #include "core/sonos/ssdp.h"
-#include <WiFi.h>
 #include "core/unit.h"
-#include "../../boards/crowpanel_p4_7in/ui_sound.h"   // uiSoundIdleTick()
 #include "ui_scale.h"
 
 // --- Geometry, from the design's device shell -------------------------------------------------
@@ -59,6 +60,20 @@ static int s_cur = PAGE_NOW;
 // Radio (Sonos Favourites, FV:2)
 static lv_obj_t *s_radioList = nullptr, *s_radioStatus = nullptr;
 static bool s_radioRequested = false;    // a browse has been asked for since entering the page
+static bool s_radioRendered  = false;    // the rows on screen are current (cleared on page exit)
+
+// Favourites cache. Browsing FV:2 is not cheap — library::collectRows() paginates PAGE=16 up to
+// MAX_ROWS=200, i.e. up to 13 SOAP round-trips — and without this, every single tap of the Radio
+// rail icon re-ran the whole browse, because leaving the page resets s_radioRequested. Radio ->
+// Now Playing -> Radio three times was ~40 requests in a couple of seconds, over the same
+// ESP-Hosted SDIO bridge that is documented as failing under sustained load. Same reasoning as
+// kArtSettleMs in album_art.cpp: on this board, traffic we can avoid is traffic we should avoid.
+//
+// The labels live on the heap, NOT in the LVGL pool — caching them costs a few KB and is unrelated
+// to the row-count budget below. Favourites change rarely; a minute of staleness is invisible.
+static std::vector<String> s_radioLabels;
+static uint32_t s_radioFetchedMs = 0;
+static const uint32_t kRadioCacheMs = 60000;
 
 // Settings
 static lv_obj_t *s_nameTa = nullptr, *s_kb = nullptr, *s_soundSlider = nullptr,
@@ -286,13 +301,19 @@ static void showPage(int page) {
 
   // Leaving Radio: free the rows AND the cached browse results. CLAUDE.md is explicit that a long
   // browse list can fill LV_MEM_SIZE and freeze the UI on a layer-alloc retry loop, so this is not
-  // optional tidiness.
+  // optional tidiness. s_radioLabels is deliberately NOT cleared — it is plain heap, and keeping
+  // it is what stops the next visit from re-issuing the browse (see kRadioCacheMs).
   if (s_cur == PAGE_RADIO && page != PAGE_RADIO) {
     lv_obj_clean(s_radioList);
     library::clearResults();
     s_radioRequested = false;
+    s_radioRendered  = false;
     lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_radioStatus, "Loading favourites" LV_SYMBOL_REFRESH);
+    // Restore the alignment too: a truncated list moves this label to the bottom of the page
+    // (see buildRadioRows), and restoring only the text left the next visit's "Loading…" pinned
+    // down there instead of under the header.
+    lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
   }
 
   s_cur = page;
@@ -337,7 +358,8 @@ static void rebuildRooms() {
 
   s_roomsActive = cur;
 
-  const std::vector<sonos::Zone> &zs = sonos::zones();
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
   if (zs.empty()) {
     lv_obj_t *l = label(s_roomsWrap, "Searching for speakers" LV_SYMBOL_REFRESH,
                         &lv_font_montserrat_22, JB_TEXT_MUTED);
@@ -360,8 +382,10 @@ static void rebuildRooms() {
     lv_obj_set_style_border_width(chip, 1, 0);
     lv_obj_set_style_border_color(chip, lv_color_hex(active ? JB_ACCENT : JB_SCREEN_LINE), 0);
     lv_obj_set_style_bg_color(chip, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
-    lv_obj_align(chip, LV_ALIGN_TOP_LEFT, (lv_coord_t)((i % cols) * (chipW + gapX)),
-                 (lv_coord_t)((i / cols) * (chipH + gapY)));
+    // set_pos, not align: aligned children are positioned relative to the parent but do not
+    // extend its scrollable content area, so the rows past the fold would still be unreachable.
+    lv_obj_set_pos(chip, (lv_coord_t)((i % cols) * (chipW + gapX)),
+                   (lv_coord_t)((i / cols) * (chipH + gapY)));
     lv_obj_add_event_cb(chip, roomCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
     lv_obj_t *dot = panel(chip, 8, 8, active ? JB_ACCENT : JB_TEXT_DIM, LV_RADIUS_CIRCLE);
@@ -382,6 +406,13 @@ static void buildRooms() {
 
   s_roomsWrap = panel(pg, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - 150, JB_SCREEN_BG, 0);
   lv_obj_align(s_roomsWrap, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
+  // Scrollable, like the Radio list. panel() clears SCROLLABLE, and with a fixed 3-column grid at
+  // a 68 px row pitch this container shows exactly 6 rows = 18 chips. Zone 19 onward was drawn
+  // outside the clip area with no scroll and no notice — a house with more than 18 rooms simply
+  // could not reach the later ones. Silent, and worse than the Radio list's honest "showing N of M".
+  lv_obj_add_flag(s_roomsWrap, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(s_roomsWrap, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(s_roomsWrap, LV_SCROLLBAR_MODE_AUTO);
 }
 
 // Play the tapped favourite. library:: was told PLAY_FAVORITE at browse time, so this becomes a
@@ -395,16 +426,19 @@ static void favouriteCb(lv_event_t *e) {
 // One row per favourite, following the design's ListRow: art tile, title, subtitle, trailing
 // badge. There is no per-item artwork from a Favourites browse (only labels), so the tile carries
 // a glyph rather than a fake image.
-// Hard cap on rendered rows. Each row is 4 LVGL objects (button + art tile + glyph + label), and
-// LV_MEM_SIZE is 96 KB shared with everything else on screen. A large Favourites list will exhaust
-// it, and LVGL's response to exhaustion is a layer-alloc RETRY LOOP, not a failure — the UI task
-// spins forever, the screen freezes mid-build, and because the health heartbeat is printed from
-// uiTick the device goes silent on serial too. It looks exactly like a total system hang; netTask
-// is in fact still running. CLAUDE.md warns about precisely this.
+// Backstop cap on rendered rows. Each row is 4 LVGL objects (button + art tile + glyph + label) at
+// roughly 1 KB of the LVGL pool. Exhausting that pool is not a failure in LVGL — it is a layer-
+// alloc RETRY LOOP, so the UI task spins forever, the screen freezes mid-build, and because the
+// health heartbeat prints from uiTick the device goes silent on serial too. It looks exactly like
+// a total system hang while netTask is in fact still running. CLAUDE.md warns about precisely this.
 //
-// 40 rows is ~160 objects, which fits comfortably. Anything beyond is reported rather than
-// silently dropped — a truncated list that claims to be complete is its own bug.
-static const size_t kMaxRadioRows = 40;
+// This was 40 because the pool was the nest's 96 KB, which meant a real 70-favourite system had
+// most of its list hidden behind a notice. The jukebox pool is now 512 KB in PSRAM (lv_conf.h), so
+// the cap is a safety net rather than the binding constraint: 120 rows is ~120 KB, comfortably
+// clear of the four full-screen pages and the keyboard. Anything beyond is still reported rather
+// than silently dropped — a truncated list that claims to be complete is its own bug. The
+// before/after pool numbers are logged on every build; watch them if rows get more expensive.
+static const size_t kMaxRadioRows = 120;
 
 static void buildRadioRows(const std::vector<String> &labels) {
   lv_obj_clean(s_radioList);
@@ -713,15 +747,27 @@ void uiTick() {
     rebuildRooms();
   }
 
-  // Radio: ask once on arrival, then poll for the async result. The browse runs on the net task;
-  // takeResults() returns true exactly once when a new set lands.
+  // Radio: render from the cache if it is fresh, otherwise ask once on arrival and poll for the
+  // async result. The browse runs on the net task; takeResults() returns true exactly once when a
+  // new set lands. An empty result is cached too, so a system with no favourites doesn't re-browse
+  // on every visit either.
   if (s_cur == PAGE_RADIO) {
-    if (!s_radioRequested) {
-      s_radioRequested = true;
-      library::requestBrowse("FV:2", library::PLAY_FAVORITE);
+    if (!s_radioRendered) {
+      const bool fresh = s_radioFetchedMs && (millis() - s_radioFetchedMs) < kRadioCacheMs;
+      if (fresh) {
+        if (s_radioLabels.empty()) lv_label_set_text(s_radioStatus, "No favourites on this system");
+        else                       buildRadioRows(s_radioLabels);
+        s_radioRendered = true;
+      } else if (!s_radioRequested) {
+        s_radioRequested = true;
+        library::requestBrowse("FV:2", library::PLAY_FAVORITE);
+      }
     }
     std::vector<String> labels;
     if (library::takeResults(labels)) {
+      s_radioLabels    = labels;
+      s_radioFetchedMs = millis();
+      s_radioRendered  = true;
       if (labels.empty()) lv_label_set_text(s_radioStatus, "No favourites on this system");
       else                buildRadioRows(labels);
     }
@@ -737,18 +783,23 @@ void uiTick() {
       lastHealth = millis();
       lv_mem_monitor_t mon;
       lv_mem_monitor(&mon);   // LVGL pool: exhaustion here freezes the UI, not the network
-      Serial.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d ip=%s "
-                    "zones=%u lvgl_free=%uKB\n",
+      // Every link field is netTask's published snapshot (g_link*, core/app.h) — reading them
+      // here is a plain memory load. Calling WiFi.RSSI()/localIP()/sonos::zones() directly would
+      // be a blocking co-processor RPC and an unlocked read of a vector netTask rewrites, i.e.
+      // this log would stall or crash the UI task in exactly the fault it exists to report.
+      const uint32_t ip = g_linkIp;
+      Serial.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
+                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB\n",
                     (unsigned long)(millis() / 1000),
                     (unsigned long)(ESP.getFreeHeap() / 1024),
                     (unsigned long)(ESP.getMinFreeHeap() / 1024),
                     (unsigned long)(ESP.getFreePsram() / 1024),
-                    (int)WiFi.status(), (int)WiFi.RSSI(), WiFi.localIP().toString().c_str(),
-                    (unsigned)sonos::zones().size(), (unsigned)(mon.free_size / 1024));
+                    g_linkStatus, g_linkRssi,
+                    (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
+                    (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
+                    (unsigned)g_linkZones, (unsigned)(mon.free_size / 1024));
     }
   }
-
-  uiSoundIdleTick();   // drop amp power once the taps stop
 
   lv_timer_handler();
 }

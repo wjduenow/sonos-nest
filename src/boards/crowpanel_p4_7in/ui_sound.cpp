@@ -7,6 +7,13 @@
 //
 // Two behaviours that are not obvious and are easy to get wrong:
 //
+//  0. TONES ARE SYNTHESISED ON A BOARD-OWNED TASK, NOT IN THE CALLER. uiSoundPlay() is called from
+//     LVGL event callbacks, i.e. from inside lv_timer_handler() on the UI task. Synthesising there
+//     meant the render task sat inside a blocking s_i2s.write() for the whole cue — 75 ms for
+//     Confirm, 180 ms for Error, plus the amp's 5 ms settle — and on a panel that renders DIRECT
+//     into the live scan-out buffer that is a visible stall in rendering and touch sampling. Now
+//     uiSoundPlay() just posts to a queue and returns. The task also owns the idle power-down, so
+//     the unit no longer has to call a board function to keep the amp honest.
 //  1. THE AMP IS POWERED DOWN WHEN IDLE. PIN_AUDIO_CTRL gates the NS4168; leaving a class-D amp
 //     enabled between tones draws current and audibly hisses through the speakers on a quiet
 //     wall unit. It is raised just before a tone and dropped again after a short idle delay,
@@ -28,7 +35,10 @@ static I2SClass  s_i2s;
 static bool      s_ready   = false;
 static bool      s_ampOn   = false;
 static uint32_t  s_lastMs  = 0;
-static SemaphoreHandle_t s_lock = nullptr;   // tones can be requested from the UI task at any time
+static QueueHandle_t s_q = nullptr;   // UiSound cues, posted by any task, drained by soundTask
+
+static void soundTask(void *);
+static void render(UiSound s, uint8_t vol);
 
 static void ampPower(bool on) {
   if (on == s_ampOn) return;
@@ -41,17 +51,32 @@ bool uiSoundInit() {
   pinMode(PIN_AUDIO_CTRL, OUTPUT);
   digitalWrite(PIN_AUDIO_CTRL, AUDIO_POWER_DISABLE);
 
-  s_lock = xSemaphoreCreateMutex();
   s_i2s.setPins(PIN_AUDIO_BCLK, PIN_AUDIO_LRCLK, PIN_AUDIO_SDATA);
   if (!s_i2s.begin(I2S_MODE_STD, kSampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
     Serial.println("[uisnd ] I2S begin failed — UI tones disabled");
     return false;
   }
+  // Queue depth 4: a burst of taps should not block the caller, and cues older than a few are
+  // worthless anyway — a late click is worse than no click.
+  s_q = xQueueCreate(4, sizeof(UiSound));
+  if (!s_q) { Serial.println("[uisnd ] no queue — UI tones disabled"); return false; }
+
+  // Core 1 (with the UI), priority BELOW the UI task: the render loop must always win, and the
+  // sound task only needs to top up the I2S DMA between frames. Core 0 is left to the network.
+  if (xTaskCreatePinnedToCore(soundTask, "uisnd", 3072, nullptr, 2, nullptr, 1) != pdPASS) {
+    Serial.println("[uisnd ] no task — UI tones disabled");
+    return false;
+  }
+
   s_ready = true;
   Serial.println("[uisnd ] NS4168 ready (amp gated ACTIVE LOW, powers down when idle)");
 
   // Startup chime. Doubles as proof the whole path works — amp enable, I2S, speakers — without
-  // needing someone to tap the screen and guess whether silence means "off" or "broken".
+  // needing someone to tap the screen and guess whether silence means "off" or "broken". It goes
+  // through the queue like everything else, so the amp is powered down by the task's own idle
+  // timeout a moment later. It used to be synthesised inline here, which left s_ampOn true for the
+  // whole of appBoot() — through the Wi-Fi connect, and indefinitely on a first boot that sits in
+  // the captive portal — hissing the entire time.
   uiSoundPlay(UiSound::Confirm);
   return true;
 }
@@ -106,14 +131,32 @@ static void gap(uint16_t ms) {
   }
 }
 
+// Runs on the board's own task. Blocking here is free; blocking in uiSoundPlay() was not.
+static void soundTask(void *) {
+  for (;;) {
+    UiSound s;
+    // The 250 ms timeout doubles as the idle-power-down tick, so nothing outside this file has to
+    // remember to call anything periodically.
+    if (xQueueReceive(s_q, &s, pdMS_TO_TICKS(250)) != pdTRUE) {
+      if (s_ampOn && millis() - s_lastMs >= kAmpIdleMs) ampPower(false);
+      continue;
+    }
+    const uint8_t vol = settingsUiSound();
+    if (vol == 0) continue;                          // user switched feedback off after queueing
+    ampPower(true);
+    render(s, vol);
+    s_lastMs = millis();
+  }
+}
+
+// Post and return. Never synthesises, never blocks, never touches the amp — see note 0 at the top.
 void uiSoundPlay(UiSound s) {
-  if (!s_ready) return;
-  const uint8_t vol = settingsUiSound();
-  if (vol == 0) return;                              // user has switched feedback off
+  if (!s_ready || !s_q) return;
+  if (settingsUiSound() == 0) return;                // cheap early out; the task re-checks
+  xQueueSend(s_q, &s, 0);                            // drop if full — a late click is worse
+}
 
-  if (!s_lock || xSemaphoreTake(s_lock, 0) != pdTRUE) return;   // drop, never queue or block
-  ampPower(true);
-
+static void render(UiSound s, uint8_t vol) {
   switch (s) {
     // Crisp single click — a control moved.
     case UiSound::Tick:    click(14, 9.0f, 0.55f, vol); break;
@@ -124,16 +167,4 @@ void uiSoundPlay(UiSound s) {
                            click(22, 6.0f, 0.18f, vol); gap(55);
                            click(26, 5.0f, 0.15f, vol); break;
   }
-
-  s_lastMs = millis();
-  xSemaphoreGive(s_lock);
-}
-
-// Call periodically (uiTick) to drop amp power once things have gone quiet.
-void uiSoundIdleTick() {
-  if (!s_ready || !s_ampOn) return;
-  if (millis() - s_lastMs < kAmpIdleMs) return;
-  if (!s_lock || xSemaphoreTake(s_lock, 0) != pdTRUE) return;
-  ampPower(false);
-  xSemaphoreGive(s_lock);
 }

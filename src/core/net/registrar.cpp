@@ -55,6 +55,15 @@ static const uint32_t kHeartbeatMs = 45000;   // ~45 s: 2-3 misses (~2 min) flip
 static String   s_host;      // resolved portal IP ("" until we've found one)
 static uint16_t s_port = 0;
 
+// Backoff for portal resolution. resolvePortal() runs a blocking mDNS service query and, when the
+// responder answers without an A record, a second blocking queryHost() on top (see mdnsResultIp).
+// Both run on netTask, which is also draining g_pending and polling Sonos — so on a LAN with no
+// portal at all, retrying every heartbeat stalls playback control for seconds, every 45 s, forever.
+// The portal is optional; failing to find one must stay cheap. Doubles 45 s -> ~12 min and holds.
+static uint8_t  s_resolveFails = 0;
+static uint32_t s_nextResolveMs = 0;
+static const uint32_t kResolveBackoffMaxMs = 720000;
+
 static const char *serviceName() {
   const char *s = PORTAL_SERVICE;
   return (s[0] == '_') ? s + 1 : s;   // queryService() adds the underscore itself
@@ -151,7 +160,19 @@ void registrarTick() {
 
   // Never resolved (portal started after us): resolve + full register, not a heartbeat.
   if (s_host.length() == 0 || s_port == 0) {
-    if (resolvePortal()) postRegister();
+    if (s_nextResolveMs && (int32_t)(millis() - s_nextResolveMs) < 0) return;   // backing off
+    if (resolvePortal()) {
+      s_resolveFails = 0;
+      s_nextResolveMs = 0;
+      postRegister();
+    } else {
+      if (s_resolveFails < 8) s_resolveFails++;
+      uint32_t wait = kHeartbeatMs << s_resolveFails;
+      if (wait > kResolveBackoffMaxMs) wait = kResolveBackoffMaxMs;
+      s_nextResolveMs = millis() + wait;
+      Serial.printf("[registrar] portal not found (%u) — next mDNS attempt in %lus\n",
+                    (unsigned)s_resolveFails, (unsigned long)(wait / 1000));
+    }
     return;
   }
   // A failed heartbeat means the portal restarted, moved, or forgot us — drop the cached host so
@@ -160,6 +181,9 @@ void registrarTick() {
   if (!httpPostJson("/api/heartbeat", heartbeatJson(), &resp)) {
     Serial.println("[registrar] heartbeat failed — will re-resolve portal");
     s_host = ""; s_port = 0;
+    // We were talking to a portal a moment ago, so it is worth one prompt re-resolve; don't
+    // inherit a long backoff from whenever this device last booted with no portal on the LAN.
+    s_resolveFails = 0; s_nextResolveMs = 0;
     return;
   }
   // The portal sets "recheck" when a firmware update has been approved for us from the dashboard.

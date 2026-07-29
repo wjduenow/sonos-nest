@@ -18,9 +18,27 @@
 #define LV_USE_STDLIB_MALLOC  LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING  LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
+#ifdef UNIT_JUKEBOX
+// The jukebox draws four full-screen 1024x600 pages plus a keyboard, then lists favourites into
+// whatever is left — 96 KB is the 480x480 nest's budget and it does not stretch that far. It is
+// why a 70-row Favourites list froze the device (LVGL answers pool exhaustion with a layer-alloc
+// RETRY LOOP, not a failure) and why the row cap in screens.cpp exists at all.
+//
+// The pool goes in PSRAM, not internal RAM. With LV_MEM_ADR 0 and no allocator, LVGL declares a
+// static LV_MEM_SIZE array — internal SRAM, which this board idles at only ~70-100 KB free. Via
+// LV_MEM_POOL_ALLOC it calls us instead (lv_mem_core_builtin.c), so 512 KB costs 1.6% of the 32 MB
+// PSRAM and nothing internal. The frame buffer is already PSRAM and renders DIRECT into it, so the
+// pool living there is consistent with how this panel already draws.
+//   NB: these are macro DEFINITIONS only — lv_conf.h is also fed to LVGL's assembler, so it must
+//   not #include anything. LVGL does the #include itself, in the C file that needs it.
+#define LV_MEM_SIZE (512U * 1024U)
+#define LV_MEM_POOL_INCLUDE     "esp_heap_caps.h"
+#define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM)
+#else
 #define LV_MEM_SIZE (96U * 1024U)   // pool for LVGL objects + draw layers (clock scale,
                                     // browse lists). 64K overflowed: queue buttons + the
                                     // scaled clock's ~35K layer didn't both fit.
+#endif
 
 // --- Tick: provided at runtime via lv_tick_set_cb(millis) in displayInit(). ---
 

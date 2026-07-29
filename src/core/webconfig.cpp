@@ -142,7 +142,9 @@ String webConfigJson() {
 
   // Zones are whatever discovery has found so far — possibly none, if it hasn't run yet.
   JsonArray zones = doc["zones"].to<JsonArray>();
-  for (const sonos::Zone &z : sonos::zones()) {
+  std::vector<sonos::Zone> zsnap;
+  sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+  for (const sonos::Zone &z : zsnap) {
     JsonObject o = zones.add<JsonObject>();
     o["name"] = z.name;
     o["ip"]   = z.ip;
@@ -183,7 +185,9 @@ String registrationJson() {
   else     doc["configUrl"] = (const char *)nullptr;
 
   JsonArray zones = doc["zones"].to<JsonArray>();
-  for (const sonos::Zone &z : sonos::zones()) {
+  std::vector<sonos::Zone> zsnap;
+  sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+  for (const sonos::Zone &z : zsnap) {
     JsonObject o = zones.add<JsonObject>();
     o["name"] = z.name;
     o["ip"]   = z.ip;
@@ -203,7 +207,9 @@ bool webConfigApply(const String &field, const String &value, String &err) {
   }
 
   if (field == "room") {
-    for (const sonos::Zone &z : sonos::zones()) {
+    std::vector<sonos::Zone> zsnap;
+    sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+    for (const sonos::Zone &z : zsnap) {
       if (z.name != value) continue;
       settingsSetRoom(z.name);                                 // persist the choice...
       if (stateLock()) {                                       // ...and let netTask switch to it

@@ -659,7 +659,8 @@ static void openRooms() {
   s_roomNames.clear();
   String cur;
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
-  const std::vector<sonos::Zone> &zs = sonos::zones();
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
   if (zs.empty()) makeLabel(s_roomsList, "Searching...", &lv_font_montserrat_20, COL_SUBTLE);
   for (size_t i = 0; i < zs.size(); ++i) {
     lv_obj_t *b = makeButton(s_roomsList, zs[i].name.c_str(),
