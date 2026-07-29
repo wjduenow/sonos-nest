@@ -3,9 +3,15 @@
 **The question:** the household has YouTube Music linked, and YouTube Music has its own radio
 stations. Can a unit enumerate them and put them on a Radio page?
 
-**The answer: no, and not through any route.** Verified three independent ways (below). This is a
-closed question, not an unexplored one — **do not re-open it without new evidence**, because it cost
-three research agents and a lot of tokens to close properly.
+**For YouTube Music specifically: no, and not through any route.** Verified three independent ways
+(below). That is a closed question — **do not re-open it without new evidence**, because it cost
+three research agents to close properly.
+
+**But the broader goal — a real Radio page with browsable station catalogues — IS achievable.**
+32 of this household's 106 services need no credentials at all, and anonymous SMAPI browsing has been
+**verified end to end by running it**: browse the catalogue, resolve a station to a stream URL, with
+no token, no cloud, no Pi and no Sonos app. See *Anonymous SMAPI browsing WORKS*. One playback test
+with the owner present is all that remains before this can be built.
 
 **What works instead:** Sonos favourites (`FV:2`). A station favourited once in the Sonos app appears
 there as a playable `sid=284` container, which `core/library.cpp` already plays. That is how the 28
@@ -29,6 +35,8 @@ offers, but you CAN read the id of anything that has played — locally, read-on
 | ytmusicapi + stream proxy on the Pi | ⚠️ | Technically works; requires yt-dlp treadmill, breaks the no-cloud premise, and cannot reproduce station semantics |
 | **Favourites (`FV:2`)** | ✅ | **Already implemented.** Zero infra, fully local |
 | **Capture what's playing** | ✅ | Verified read-only on hardware; replay untested (see below) |
+| **Anonymous SMAPI browse (32 services)** | ✅ | **Run-verified**: empty `<credentials/>` is the whole requirement. Browse + `getMediaURI` both work. Playback leg untested |
+| Spotify URI construction | ❓ | Its Sonos id IS a transparent wrapper — under investigation, see below |
 
 ---
 
@@ -166,6 +174,11 @@ favourite it in the Sonos app first.
    reading `GetMediaInfo`'s `CurrentURI` while a station plays. Nothing was playing one during this
    research, so this is unobserved.
 
+**Note on the no-`sid` favourites:** these were initially assumed to be Sonos Radio. They are not —
+6 are dead Google Play Music (see the cleanup note above) and only 2 (`Discover Sonos Radio`,
+`Sonos Presents`) are genuinely Sonos Radio, whose `<desc>` is account-keyed
+(`SA_RINCON77575_X_#Svc77575-668459c3-Token` — note `-668459c3-`, not `-0-`).
+
 **Also available and unexplored:** services whose descriptor says `Auth="Anonymous"` can be browsed
 directly over SMAPI with no token at all — on-device, no Pi, no cloud. That covers a large slice of
 this household's service list (SomaFM, Radio Paradise, AccuRadio…). It does nothing for YouTube Music,
@@ -174,6 +187,202 @@ but "browse real radio catalogues on the device" is achievable within the projec
 `sessionId`); trust the WSDL.
 
 ---
+
+---
+
+## ✅ Anonymous SMAPI browsing WORKS — verified first-hand
+
+This is the constructive result of the whole investigation, and it fits the project's premise
+exactly: **real station catalogues, browsable on-device, with no token, no cloud, no Pi, and no
+Sonos app.** Everything in this section was run, not read about — the exchanges below were executed
+from a laptop on the LAN, against the services' own endpoints, with the household uninvolved.
+
+### 32 of this household's 106 services need no credentials
+
+`ListAvailableServices` → filter `Policy Auth="Anonymous"`. Notable entries:
+
+| sid | service | SMAPI endpoint |
+|---|---|---|
+| 254 | TuneIn | `https://legato.radiotime.com/Radio.asmx` |
+| 516 | SomaFM Radio | `https://sonos.somafm.com/` |
+| 230 | NTS Radio | `https://www.nts.live/smapi` |
+| 270 | Relisten | `https://sonos.relisten.net/mp3` |
+| 585 | Radio France | `https://api.radiofrance.fr/voiceapi/sonos/smapi` |
+| 280 | Audacy | `https://sonos.audacy.com/` |
+| 44 | Hype Machine | `https://api.hypem.com/api/sonos` |
+| 277 | NRK Radio | `https://psapi.nrk.no/sonos/sonos.svc` |
+
+…plus 24 more (regional broadcasters, Sveriges Radio, myTuner, Virgin Radio UK, Relisten's 227
+artists, etc.). All 32 were probed with `getMetadata(id=root)` and **32/32 returned a parseable
+catalogue**. **17 of 32 also expose a `search` root**, and — significant for an ESP32 — **19 of 32
+answer over plain HTTP with no TLS at all, TuneIn among them.**
+
+Three traps here:
+
+- **TuneIn (New), sid 333, is `Auth="AppLink"` and is NOT browsable.** The *legacy* TuneIn, **sid 254,
+  is Anonymous**, and it is the one with the global catalogue. Both share the same `sNNNNN` id space
+  (proven below), so the household's existing sid=333 favourite is still a useful reference.
+- **Sonos Radio, sid 303, is `Auth="DeviceLink"`** here, and its endpoint answers
+  `getMetadata(root)` with `<getMetadataResponse xsi:nil="true"/>` — an empty stub. Not third-party
+  browsable; not worth pursuing.
+- **TuneIn's service type 65031 is the single entry present in `AvailableServiceDescriptorList` but
+  ABSENT from `AvailableServiceTypeList`** (106 descriptors, 105 types — TuneIn is the only gap).
+  It may resolve anyway as the classic built-in, but that gap is exactly the shape of thing that makes
+  Route A fail.
+
+### The minimum viable request
+
+```
+POST <service SecureUri>
+Content-Type: text/xml; charset="utf-8"
+SOAPAction: "http://www.sonos.com/Services/1.1#getMetadata"
+
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Header><credentials xmlns="http://www.sonos.com/Services/1.1"/></s:Header>
+  <s:Body><getMetadata xmlns="http://www.sonos.com/Services/1.1">
+    <id>root</id><index>0</index><count>8</count>
+  </getMetadata></s:Body>
+</s:Envelope>
+```
+
+**An EMPTY `<credentials/>` element is the whole requirement.** Measured against TuneIn:
+
+| header | result |
+|---|---|
+| `<credentials/>` empty | **200** |
+| + `deviceId` + `deviceProvider` | 200 (TuneIn merely appends a `serial=` analytics param) |
+| + `<context><timeZone>` | 200 — **not required**, despite node-sonos-ts always sending it |
+| no `<s:Header>` at all | **500** (WCF parse fault) |
+
+`deviceId` is NOT required, which matters: a standalone unit has no `R_TrialZPSerial` of its own and
+would otherwise have to borrow one from a speaker.
+
+### The verified chain, end to end
+
+```
+getMetadata id=root        -> 200, 6,133 B, total=9
+   containers: iHeartRadio / Holiday Stations / TuneIn Recommends / Music /
+               News & Talk / Sports / Talk / Trending / Location
+getMetadata id=y1--33ecb...  ("Music")   -> 200, 36,174 B
+   containers: Top Music Stations / Adult Hits / Apple Music Radio / Blues / ...
+...descend to itemType=stream ->  id=s105741  "Praise and Worship"
+getMediaURI id=s105741       -> 200, 451 B
+   http://opml.radiotime.com/Tune.ashx?id=s105741&listenId=1785350179&partnerId=Sonos&version=84.1.0
+```
+
+`getMediaURI` is callable anonymously too — verified on **12/12** anonymous services. Samples:
+
+```
+TuneIn  s28808      -> http://opml.radiotime.com/Tune.ashx?id=s28808&listenId=...&partnerId=Sonos
+SomaFM  groovesalad -> http://api.somafm.com/groovesalad130.pls  -> ice6.somafm.com/groovesalad-128-aac
+NTS     nts1        -> https://streams.radiomast.io/nts1
+```
+
+TuneIn's `listenId` increments on **every** call (three consecutive calls a second apart returned
+three different values). SomaFM and NTS return byte-identical URLs.
+
+On the docs' *"result must not change mid-session"*: that is a promise the **service** makes the
+**player** — once playback of an item starts, the backing URL stays valid for its duration. It is
+**not** a claim that the value is stable across calls, and TuneIn's demonstrably is not.
+**Rule: call `getMediaURI` once per playback, treat the result as single-use, never persist it.**
+One extra round-trip on a user-initiated action is free at human timescales.
+
+Format note for the playback test: SomaFM returns a `.pls` playlist
+(`groovesalad130.pls` → `File1=http://ice6.somafm.com/groovesalad-128-aac`), and CBC / NRK /
+Sveriges Radio return HLS `.m3u8`. Sonos handles both natively, but both should be covered.
+
+### The open question: does a constructed URI actually play?
+
+**This is the one thing still unresolved, and it needs a real playback command.** Two candidate routes:
+
+- **Route A — native.** Construct `x-sonosapi-stream:s105741?sid=254&flags=8224&sn=0` with DIDL
+  `item id="F00092020s105741"`, class `object.item.audioItem.audioBroadcast`, desc `SA_RINCON65031_`.
+- **Route B — resolve first.** Call `getMediaURI`, then play the returned URL, e.g.
+  `x-rincon-mp3radio://opml.radiotime.com/Tune.ashx?id=s105741&...` with minimal `audioBroadcast`
+  DIDL. **No service provisioning dependency at all**, so most likely to work.
+
+A third-party SMAPI client's implementation notes claim current firmware rejects a hand-built
+`x-sonosapi-stream:` URI with **UPnP 402**, requiring the `getMediaURI` hop. **That claim is
+contradicted by this repository's own shipping code:** `core/library.cpp` hands
+`x-sonosapi-stream:s34231?sid=333&flags=32&sn=16` (the KNBR favourite) straight to
+`SetAVTransportURI` on every Radio-page tap today, on firmware 86.8-78270.
+
+The likely real distinction is **metadata correctness, not URI scheme** — a favourite carries a
+firmware-authored `<r:resMD>` with the right `item id=` prefix, `parentID` and `desc` token, while a
+hand-built one with the wrong 8-hex prefix or the wrong `SA_RINCON<type>` suffix is exactly what would
+produce a 402. That reading reconciles both observations, and is consistent with SoCo and sonoscli
+openly shipping a placeholder `0fffffff` prefix they admit they don't understand.
+
+**Test order when the owner is present (one idle speaker, `SetAVTransportURI` + `Play`):**
+B1 the resolved TuneIn URL → B2 SomaFM/NTS (confirms `.pls` and bare-stream forms) → A the native
+construction. Nothing else in this investigation requires a mutation.
+
+### Construction rules worth not rediscovering
+
+- **`flags` is per-service folklore, not derivable from SMAPI data.** No library computes it. The
+  `flags=32` on our KNBR favourite is **firmware-generated**; every library uses `8224` for TuneIn
+  streams, and SoCo omits `flags` entirely and works. Prefer omitting it.
+- **Look the sid up by NAME** from `ListAvailableServices` at runtime (as node-sonos-http-api does)
+  rather than hardcoding 254/333 — we already fetch that list at boot.
+- **`sn=0` is the anonymous convention.** TuneIn has no account record, so noson special-cases type
+  65031 with a synthetic serial of "0"; firmware sometimes omits `sn=` entirely.
+- **desc token for Anonymous is `SA_RINCON<type>_` with nothing appended** (`type = sid*256+7`).
+  UserId appends the username; DeviceLink/AppLink append `X_#Svc<type>-0-Token`.
+- **`x-rincon-cpcontainer` puts the 8-hex prefix INSIDE the URI**; stream/track/program forms put it
+  only in the DIDL `item id=` and carry the bare id in the URI.
+- **Shortcut worth knowing:** `http://opml.radiotime.com/Tune.ashx?id=s<NNNNN>` *is* the resolved
+  TuneIn URL. A known station id needs no SMAPI at all.
+- **Anomaly:** TuneIn's type 65031 appears in this household's `AvailableServiceDescriptorList` but is
+  **absent from its `AvailableServiceTypeList`** (106 descriptors, 105 types). Unexplained; may or may
+  not affect Route A.
+
+### ESP32 feasibility: viable on-device, no Pi
+
+The resolution hop is one extra SOAP POST (~500 B request, ~250 B response) on the same keep-alive
+connection, **at play time, not at list-render time** — so browse latency and memory are unchanged.
+
+**Measured response sizes** — the number that governs everything:
+
+| request | bytes |
+|---|---|
+| request envelope (any) | ~510 wire / ~325 body |
+| SomaFM `root` | 2,302 |
+| SomaFM `by_genre` (25 items) | 6,025 |
+| TuneIn `root` | 6,133 |
+| NTS `root` (18 streams) | 9,193 |
+| SomaFM `alphabetical` (all stations) | 13,515 |
+| TuneIn station page, `count=20` | 21,143 |
+| **TuneIn per-station cost** | **~1,050 bytes/item** |
+
+Nothing approaches the hundreds of KB that would have killed this. Worst realistic page is ~21 KB and
+`count`-paging is ours to control, exactly as `sonos::browse` already does for `FV:2`. All comfortably
+PSRAM-resident; prefer a streaming tag scrape over a DOM.
+
+Two caveats already familiar to this codebase: **TuneIn ignores `count` at root** (returns all 9
+regardless) so treat `count` as a hint and size off `total`; and responses are **chunked**
+(`Transfer-Encoding: chunked` behind Cloudflare) — CLAUDE.md already flags this for album art, and
+`HTTPClient::writeToStream()` handles it where a raw stream read does not.
+
+Ranked by value/effort:
+1. **TuneIn via OPML (`opml.radiotime.com`) — do this first.** Fully public: plain HTTP, no key, no
+   auth, no SOAP, no namespaces, flat attributes on `<outline>` elements. All verified live:
+   `Browse.ashx?c=local` (local-by-IP stations), `Search.ashx?query=`, `Describe.ashx?id=`,
+   `Tune.ashx?id=` (the resolved stream). `guide_id` **is** the `sNNNNN`. A ~100-line scraper on the
+   existing `HTTPClient` yields a global catalogue with search, logos and now-playing.
+2. **TuneIn SMAPI anonymous (sid 254)** — the same catalogue plus Sonos's own category tree plus
+   `getMediaURI`. **Plain HTTP works, no TLS needed.** One envelope shape; `didl.cpp`-style tag
+   scraping suffices.
+3. **Curated anonymous services** (SomaFM, NTS, Relisten, Radio France, myTuner) — catalogues TuneIn
+   carries poorly. Needs `WiFiClientSecure::setInsecure()` (already in-tree, used by
+   `core/net/updater.cpp`). A hand-picked shortlist beats presenting 32 undifferentiated entries.
+
+### Run-verified vs read-verified
+
+- **Run:** the anonymous service enumeration (32/106), the header-sensitivity table, the full
+  `getMetadata` walk and the `getMediaURI` resolution above — executed directly, output pasted.
+- **Read:** the UPnP 402 claim, the per-itemType URI table (from noson's source), the `flags` values
+  observed in other libraries.
+- **Untested by anyone:** whether either route actually plays. That is the single blocking question.
 
 ## Durability risks (unrelated to YouTube Music, more important than it)
 
@@ -205,7 +414,19 @@ Play Music** (shut down 2020, migrated into YouTube Music).
 
 They were removed with `ContentDirectory::DestroyObject`, one at a time, re-browsing between each and
 verifying the count dropped by exactly one and that only a `sid=151` item disappeared. **Favourite ids
-did not renumber** during the operation. 70 → 48. A backup of all 70 originals (full DIDL) is at
+did not renumber** during the operation. 70 → 48.
+
+> ⚠️ **The `sid=` filter has a blind spot, and it left 6 dead favourites behind.**
+> `x-rincon-cpcontainer:` items carry **no `?sid=` query param**, so a filter that reads the service
+> from the `res` URI silently skips every container favourite. Six more Google Play Music entries
+> survived on that basis — FV:2/10, 11, 13, 14, 17, 30 — identifiable only from the DIDL `<desc>`
+> token `SA_RINCON38663_X_#Svc38663-0-Token` (38663 = 151*256+7).
+>
+> **The correct service test is the `<desc>` token, not the `res` query string.** Parse
+> `SA_RINCON<type>_`, then `serviceId = (type - 7) / 256`, and compare against
+> `AvailableServiceTypeList`. That works for every favourite regardless of URI scheme. Any firmware
+> feature that greys out orphaned favourites must use this test, or it will under-report exactly the
+> way this cleanup did. A backup of all 70 originals (full DIDL) is at
 `~/sonos-favourites-backup-2026-07-29.json` — a record, not an undo: a favourite pointing at a
 departed service cannot be recreated.
 
