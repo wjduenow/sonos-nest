@@ -27,6 +27,14 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
   > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
   > different faults, identical on screen.
+  > ⚠️ **microSD (slot 0; the C6 is slot 1, so they don't share a bus).** Pins CLK 43 / CMD 44 /
+  > D0 39, 1-bit @ 10 MHz, no LDO power handle. **Never use Arduino's `SD_MMC`** — it takes its pins
+  > and a power-enable pin from the board variant, whose stock `BOARD_SDMMC_POWER_PIN 45` is this
+  > board's **I2C SDA** (it would kill touch). Use the IDF `sdmmc` API. And FATFS **must** be
+  > `CONFIG_FATFS_SECTOR_512` — the inherited default was `SECTOR_4096` (a SPI-flash option), which
+  > makes every FatFs LBA 8x wrong and shows up as `sdmmc_write_blocks failed (0x107)` **timeouts**
+  > that look exactly like bad hardware. Symptom to recognise: **raw sector I/O flawless, everything
+  > through `fopen`/`fwrite` timing out.**
   The screen UI + case design system is in-tree as the **`/sonos-jukebox-design`** skill.
   **Read `plans/07-sonos-jukebox.md` before touching this** — it is different silicon (RISC-V) on a
   different toolchain, and several failure modes here are silent.

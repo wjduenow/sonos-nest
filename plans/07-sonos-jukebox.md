@@ -47,6 +47,12 @@ Three things will waste your time if you don't know them, in order of how much t
 [health] up=81s heap=70KB min=49KB psram=31025KB wifi=3 rssi=-54 ip=192.168.68.59 zones=9 lvgl_free=67KB
 ```
 
+Every link field (`wifi`, `rssi`, `ip`, `zones`) is a **snapshot published by netTask** (`g_link*`
+in `core/app.h`), not a live call. That is deliberate and not cosmetic: `WiFi.RSSI()` and
+`WiFi.localIP()` are blocking RPCs to the C6 on this board, and `sonos::zones()` is a vector
+netTask rewrites — so the original version of this heartbeat *stalled or crashed the UI task in
+exactly the fault it exists to report*. If you add a field here, publish it from netTask too.
+
 Because it is printed **from the UI task**, its presence or absence separates two faults that look
 identical on the glass — a frozen screen that ignores touch:
 
@@ -269,6 +275,43 @@ record), and `selectZoneByIp()` now logs a miss.
 
 ---
 
+### Code-review pass (concurrency + network use)
+
+A review of the whole branch for leaks and network over-use found **no heap leak** — every LVGL tree
+is cleaned on exit and the art buffers are one-shot. What it did find was concurrency and traffic,
+and these are fixed:
+
+- **The health heartbeat was calling `WiFi.RSSI()` / `WiFi.localIP()` / `sonos::zones()` from the UI
+  task.** All three are blocking co-processor RPCs or unlocked reads of a vector netTask rewrites.
+  netTask now publishes `g_link*` (`core/app.h`) and the heartbeat prints the copy. See the
+  heartbeat section above — the diagnostic was inducing the freeze it exists to report.
+- **`sonos::zones()` was read from three UI tasks and a board HTTP task with no lock**, while
+  discovery did `clear()` + `push_back()` on it. Fixed at the source in `core/sonos/ssdp.cpp`:
+  discovery now **builds into a local vector and swaps under a mutex** (the lock is never held
+  across network I/O), and `zonesSnapshot()` / `zoneCount()` give other tasks a safe copy.
+  `zones()` survives for netTask and is now documented as netTask-only. This was a shared-core bug
+  affecting **all three units**, not a jukebox one.
+- **Entering Radio re-ran the entire FV:2 browse every single time** — up to 13 SOAP round-trips
+  fetching 200 rows to render 40, because leaving the page reset the request flag. Radio → Now
+  Playing → Radio three times was ~40 requests in seconds, on the bus that fails under load. Now
+  cached for 60 s in plain heap (not the LVGL pool).
+- **UI click tones were synthesised on the UI task**, inside `lv_timer_handler()` — up to 180 ms of
+  blocking `i2s.write()` on a panel that renders DIRECT into the live scan-out buffer. `uiSoundPlay()`
+  now posts to a queue and returns; a board-owned task synthesises and also owns the amp idle
+  power-down. That removed the unit's `#include` of a board header (a layering violation) *and* fixed
+  the amp being left powered from `boardInit()` through the whole Wi-Fi connect.
+- **The dead-link streak had no time window** and was not cleared when Wi-Fi genuinely dropped, so
+  two unrelated transient RSSI-0 sightings could add up to a reboot — the exact outcome the
+  "requires the symptom twice" rule exists to prevent. Now a 10 s window, cleared on a real
+  disconnect.
+- **The Rooms grid silently clipped past 18 zones** — fixed 3-column grid in a non-scrollable
+  container, no scroll and no notice, unlike the Radio list. Now scrollable (and the chips use
+  `lv_obj_set_pos`, since aligned children do not extend a scrollable content area).
+- **`registrarTick()` retried two blocking mDNS queries every 45 s forever** when no portal answers,
+  stalling netTask's command dispatch each time. Now backs off 45 s → ~12 min, reset on a heartbeat
+  failure (where a prompt re-resolve is warranted).
+
+
 ## Known faults
 
 ### 🔴 UNRESOLVED — the ESP-Hosted link dies under load
@@ -327,7 +370,11 @@ switching doesn't start a download per switch — that storm was the real cost o
 *not* topology fetches (a switch doesn't call `coordinatorIpFor()` and actually defers the
 periodic refresh; an early assumption to the contrary was wrong).
 
-`ART_MAX` is now `#ifndef ART_MAX_PX / 180`, so this unit decodes to a smaller target.
+`ART_MAX` is now `#ifndef ART_MAX_PX / 180`, and the `sonos-jukebox` env sets **`ART_MAX_PX=280`** —
+a **larger** target than the 180 default, because the design's Now Playing tile is 280 px and 180
+is visibly soft at that size. Costs ~313 KB of PSRAM double-buffered (vs ~130 KB at 180), which is
+nothing on this board. (An earlier revision of this plan said this unit decoded to a *smaller*
+target — wrong in the direction that matters if you are chasing art memory.)
 
 ### ✅ SOLVED — the Radio page froze the whole UI
 
@@ -345,12 +392,20 @@ Each row is 4 objects (button + art tile + glyph + label) at **~1 KB of pool**, 
 retry loop**, not a failure — so the UI task spins forever. The serial silence is the tell that it
 is the UI task specifically.
 
-Capped at 40 rows **with an on-screen "showing 40 of 70"** — silently truncating would be a worse
-bug than the freeze it prevents. A recycling/virtualised list would lift the cap; not needed until
-a system has enough favourites for 40 to feel short.
+First fix was a cap at 40 rows **with an on-screen "showing 40 of 70"** — silently truncating would
+be a worse bug than the freeze it prevents.
 
-**Budget to keep in mind: ~1 KB of LVGL pool per list row, out of ~73 KB free.** `LV_MEM_SIZE` is
-96 KB. Any new full-screen list needs this arithmetic done before it is written.
+**The cap was treating the symptom.** `LV_MEM_SIZE` was still the 96 KB sized for the 480x480 nest,
+on a board with 32 MB of PSRAM. It is now **512 KB in PSRAM for `UNIT_JUKEBOX` only**
+(`include/lv_conf.h`), via LVGL's `LV_MEM_POOL_ALLOC` hook — with `LV_MEM_ADR 0` and no allocator
+LVGL declares a *static* array, which would have come out of internal SRAM. Verified in the link
+map: `lv_mem_core_builtin.c.o` has zero `.bss` and an undefined reference to `heap_caps_malloc`.
+The row cap survives as a backstop at **120** rows, so a real 70-favourite system now renders in
+full.
+
+**Budget to keep in mind: ~1 KB of LVGL pool per list row.** Any new full-screen list needs this
+arithmetic done before it is written — the pool is bigger now, not infinite, and the S3 units are
+still on 96 KB.
 
 ### ✅ SOLVED — the C6 wedged on a warm reset (Arduino used the wrong reset pin)
 
@@ -398,21 +453,137 @@ Worth considering for a wall-mounted unit as a safety net.
 
 ---
 
+---
+
+## microSD + on-card caching (in progress)
+
+**Why.** Every track change re-downloads the cover over the ESP-Hosted link — **228 KB in 1353 ms,
+measured** — and that link is the one unresolved fault on this board. Caching covers on the card
+removes the single largest repeated transfer from the bus that keeps dying. The card is also the
+enabler for several other things (boot-state cache, soak logging on a wall-mounted unit with no
+serial cable, real design fonts via `lv_binfont_create()` at zero flash cost).
+
+**The enabling hardware fact: the card is on SDMMC *slot 0*, the C6 is on SDIO *slot 1*.**
+`CONFIG_SOC_SDMMC_NUM_SLOTS=2` — independent controllers, so card traffic does not share a bus with
+the radio. Also `CONFIG_SOC_SDMMC_PSRAM_DMA_CAPABLE=y`, so reads can DMA straight into a PSRAM
+buffer (i.e. into the LVGL image buffer, with no bounce through internal RAM).
+
+### Verified on hardware (`jukebox-sd` env, `boards/crowpanel_p4_7in/sd_test.cpp`)
+
+| | |
+|---|---|
+| Pins | **CLK 43 · CMD 44 · D0 39**, slot 0, 1-bit, **10 MHz** — enumerates first try, no fallback needed |
+| Power | **No power-control handle needed.** Do NOT add one — `esp_ldo_acquire_channel(4)` fails here ("already in use by others or not adjustable") |
+| Raw writes | `sdmmc_write_sectors` verifies **byte-exact at LBA 2048, 65536, 1 000 000, mid-card and end-of-card** |
+| Raw multi-block | 1 → 128 blocks (64 KB) all OK, **~1.2 MB/s** |
+| Through FATFS | 156,800 B (one 280x280 RGB565 cover) — **write 950 KB/s, read 722 KB/s** (provisional, see below) |
+
+Against the network path's ~168 KB/s effective, the card is roughly **4x faster per byte**: a cached
+cover reads in ~217 ms versus ~900-1350 ms over the C6 link. **The caching direction is justified on
+these numbers.**
+
+### 🔴 THE TRAP THAT COST THIS WHOLE SESSION — `CONFIG_FATFS_SECTOR_4096`
+
+The inherited `sdkconfig.defaults` carried `CONFIG_FATFS_SECTOR_4096=y`. That option exists for
+**wear-levelled SPI flash**. SD cards have **512-byte sectors** (this one reports
+`CSD: ver=2, sector_size=512`), and with the 4096 option FatFs fixes `FF_MIN_SS=FF_MAX_SS=4096` and
+**never asks the disk** — so every LBA and transfer length it computes is 8x wrong.
+
+**It does not fail cleanly.** 4 KB writes succeed (exactly one FatFs "sector"); anything larger
+becomes a multi-sector transfer that asks the card for 8x the data and dies as
+`sdmmc_write_blocks failed (0x107)` — a **TIMEOUT**, which reads exactly like bad hardware. Before
+finding it, this session had "eliminated" the card (twice), the pins, the bus clock, the LDO, the
+buffer's memory (PSRAM vs internal), the command timeout, and the chunk size.
+
+> **Symptom to recognise: raw `sdmmc_read/write_sectors` flawless across the whole card at every
+> size, while everything through `fopen`/`fwrite` times out. That is a sector-size mismatch, not a
+> card, a bus or a driver fault.**
+
+Fixed in `platformio.ini`'s `custom_sdkconfig`: `CONFIG_FATFS_SECTOR_512=y`,
+`CONFIG_FATFS_SECTOR_4096=n`, plus `CONFIG_FATFS_ALLOC_PREFER_EXTRAM=n` (FatFs hands its own window
+buffers straight to SDMMC DMA; internal RAM is not tight here and it removes a class of DMA
+alignment questions from the SD path). The fix visibly worked: `f_mkfs` went from dying in 21 ms to
+running 1441 ms of real I/O.
+
+### A second trap, not yet stepped in: Arduino's `SD_MMC` library
+
+**Do not use `SD_MMC` on this board as the variant stands.** `SD_MMC.cpp` takes its slot-0 pins,
+LDO channel and power pin from the board VARIANT's `BOARD_SDMMC_*` macros, and
+`variants/crowpanel_p4_7in/pins_arduino.h` is a copy of stock `esp32p4` — Espressif's EV board —
+which declares `BOARD_SDMMC_POWER_PIN 45` / `ON_LEVEL LOW`. **GPIO45 is `PIN_I2C_SDA` here**, the
+GT911 touch bus. `SD_MMC.begin()` would pull the touch bus low *and* mount on the wrong pins. Same
+class as the C6 reset trap (that variant said reset 54, the board is 32): **stock variant macros
+describe Espressif's board, not this one.** Use the IDF `sdmmc` API directly, as Elecrow's own
+example does. All of this is documented at the SD block in `boards/crowpanel_p4_7in/pins.h`.
+
+### Where it is blocked
+
+The card in the unit is a 64 GB "ASTC". The block layer is perfect, but IDF's on-device
+`esp_vfs_fat_sdcard_format` will not lay down FAT32 on it, and the earlier failed attempts have left
+the existing filesystem damaged — so **filesystem-level numbers cannot be trusted until a clean
+FAT32 exists**. IDF's FATFS is **FAT32 only**; exFAT support does not exist in IDF at all, and 64 GB
+cards ship exFAT by default.
+
+**Next step: format the card FAT32 from a PC** (`mkfs.vfat -F 32`, `format /FS:FAT32`, or Rufus —
+Windows will not offer FAT32 above 32 GB from the normal dialog), or drop in a ≤32 GB card, which
+formats FAT32 natively everywhere. Then reflash `jukebox-sd` and take the real numbers. Note the
+first card tried was **counterfeit** — reported `Name: NCard`, 30 GB, and a write at high LBA
+returned `ESP_OK` then read back different bytes (fake capacity). Worth running `f3`/`h2testw` on any
+card before trusting it with a cache.
+
+### Design sketch for the cache itself (not yet written)
+
+- **Layering, per CLAUDE.md:** boards own hardware, core owns policy. Add a small blob-store contract
+  to `core/board.h` (`blobRead` / `blobWrite` / `blobEvict`) that returns false on boards without
+  storage, then have `core/album_art.cpp` consume it. nest and sleep-machine compile against a no-op.
+- **Cache the decoded RGB565, not the JPEG** — 280x280x2 = 156,800 B reads straight into the LVGL
+  image buffer with no TJpg pass at all.
+- **Key on `artist` + `album`, not the art URI.** Sonos's `/getaa?...u=<track uri>` is per-track, so
+  hashing it gives a hit only on an exact replay; both fields are already parsed from DIDL, so an
+  album key means one fetch per album ever. Store the key string in a header so hash collisions are
+  detected rather than rendered.
+- **All reads on artTask, never the UI task** — an SD stall on the render task is the same bug as the
+  `WiFi.RSSI()` heartbeat above.
+- **Eviction** on a counter, not per-write: cap the directory and delete oldest by mtime.
+
 ## Open items, in the order I would take them
 
-1. **Soak it.** Both freezes found so far were found by *using* the device, not by reasoning about
-   it, and the link fault only appears under real load. Live with it before building more.
-2. **The link fault** (above): try a lower SDIO clock; then the C6 firmware upgrade over UART.
+1. **Soak it — and to a written protocol.** Both freezes found so far were found by *using* the
+   device, not by reasoning about it, and the link fault only appears under real load. "Soak it" as
+   one sentence is not enough: without a fixed procedure the next session improvises one and the
+   results are not comparable to today's baseline or to each other. Concretely: scripted room
+   switch + track change on a timer (the album-art path is where the failures cluster),
+   `readser.py` teed to a file, **pass = N hours with no `netLinkRecover()` line**. Run it once
+   before changing anything, so there is a control.
+2. **The link fault** (above). Two leads, and I would now take them in this order:
+   - **The C6 firmware gap first.** Slave 2.3.0 against a 2.12.x host, with the host stack itself
+     warning that the gap causes RPC timeouts. That is a better fit for "RPC dies while the cached
+     association survives" than signal integrity is.
+   - **Then the SDIO clock.** But confirm what it actually is before spending a board cycle:
+     `custom_sdkconfig` sets `CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000` while
+     `sdkconfig.defaults` carries `CONFIG_ESP_SDIO_CLOCK_FREQ_KHZ=40000`. The generated per-env
+     sdkconfigs resolve both to 10000, but that has only been checked for the probe envs — dump the
+     effective value for `sonos-jukebox` first. Lowering a number that is not the one in force is
+     lesson 1 of this plan wearing a different hat. Note also that 10 MHz is already conservative
+     and the album-art path is exactly what a slower bus makes slower.
+
    This is the one thing standing between "works" and "finished" — a device that reboots itself is
    not shippable.
-3. **Verify free PSRAM on the live nest**, then merge `fix/album-art-truncation`
+3. **Detection latency is structural, not a constant to tune.** The RSSI check lives *inside* the
+   `recovering` branch, so it only runs after `s_coordStale` (3 failed polls) and then needs a
+   second sighting. Meanwhile the heartbeat shows `rssi=0 zones=0` immediately — the user sees the
+   dead link before the firmware acts on it. If the soak says that wait is annoying, the fix is to
+   check RSSI in the poll path, **not** to lower the streak threshold: the streak (now with a 10 s
+   window and a reset when Wi-Fi genuinely drops) is what stops a router reboot from costing a
+   device reboot.
+4. **Verify free PSRAM on the live nest**, then merge `fix/album-art-truncation`
    (**GitHub issue #3**). The branch raises `JPEG_MAX` 220 KB → 512 KB and adds short-read
    detection. The concern to settle is whether the nest has the PSRAM headroom: the audit says
    album art is already correctly in PSRAM (~7 MB free) and the cap is not an SRAM constraint, but
    that was read from a memory audit, **not measured on the live device**. Measure it.
-4. **Favourites rows have no artwork.** Deferred; needs a per-row art fetch strategy that doesn't
+5. **Favourites rows have no artwork.** Deferred; needs a per-row art fetch strategy that doesn't
    reintroduce the download storm.
-5. **External dial + 4 transport buttons.** Hardware first (11-pin GPIO header / Crowtail), then a
+6. **External dial + 4 transport buttons.** Hardware first (11-pin GPIO header / Crowtail), then a
    generic HAL — mirroring how wake-word phrases work, where the board reports *which* input fired
    and the unit decides what it means:
 
@@ -424,8 +595,8 @@ Worth considering for a wall-mounted unit as a safety net.
    ```
 
    Boards without buttons return 0/-1/nullptr, so nest and sleep-machine stay untouched.
-6. **The case.** See below.
-7. **Hardware JPEG decode + PPA blits** — available on this silicon, unused. Pure upside, no
+7. **The case.** See below.
+8. **Hardware JPEG decode + PPA blits** — available on this silicon, unused. Pure upside, no
    urgency.
 
 ## Case notes
