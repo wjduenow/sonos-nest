@@ -36,7 +36,8 @@ offers, but you CAN read the id of anything that has played — locally, read-on
 | **Favourites (`FV:2`)** | ✅ | **Already implemented.** Zero infra, fully local |
 | **Capture what's playing** | ✅ | Verified read-only on hardware; replay untested (see below) |
 | **Anonymous SMAPI browse (32 services)** | ✅ | **Run-verified**: empty `<credentials/>` is the whole requirement. Browse + `getMediaURI` both work. Playback leg untested |
-| Spotify URI construction | ❓ | Its Sonos id IS a transparent wrapper — under investigation, see below |
+| **Spotify: track / album / playlist by id** | ✅ | Transparent wrapper; URI validity **proven read-only** via the `/getaa` oracle. Needs a helper for the Spotify API |
+| Spotify stations / Daily Mix / Discover Weekly | ❌ | Spotify's own API removed the radio generator and filters Spotify-owned playlists below extended quota (unreachable: needs 250k MAU) |
 
 ---
 
@@ -383,6 +384,161 @@ Ranked by value/effort:
 - **Read:** the UPnP 402 claim, the per-itemType URI table (from noson's source), the `flags` values
   observed in other libraries.
 - **Untested by anyone:** whether either route actually plays. That is the single blocking question.
+
+---
+
+## Spotify: buildable for anything you can NAME — the wall is Spotify's API, not Sonos
+
+**Verdict: yes for tracks, albums and playlists whose id you already have. No for stations and mixes.**
+And unlike YouTube Music, the Sonos half is *solved* — the blocker moved to Spotify's Web API, which
+was cut twice (Nov 2024 and again **Feb 2026**) in ways that remove exactly the station/mix surface.
+
+### The `/getaa` oracle — a read-only way to test URI validity
+
+This is the most useful technique to come out of the whole investigation:
+
+```
+http://<speaker>:1400/getaa?s=1&u=<urlencoded Sonos URI>
+```
+
+The player resolves the URI against the service's SMAPI **using the household's own linked token** and
+returns the cover art. **A 200 means the URI is real; a 404 means it isn't.** No playback, no
+mutation, no credentials of our own. Verified independently twice (byte-identical responses, md5
+`88ea9e53`):
+
+| probe | result |
+|---|---|
+| `x-sonos-spotify:spotify%3atrack%3a4LI1ykYGFCcXPWkrpcU7hn?sid=12&flags=8224&sn=10` | **200**, 100,325 B JPEG |
+| same, `sn` omitted | **200**, byte-identical |
+| same, `flags=99999` | **200**, byte-identical |
+| same, `sid=9` (EU Spotify) | **404** |
+| syntactically valid but nonexistent track id, `sid=12` | **404** |
+
+The 404 on a well-formed-but-nonexistent id is what proves the 200 is real resolution rather than a
+placeholder. The test id is not among the 341 Spotify track ids this household has ever stored.
+
+**Therefore, empirically: `sn` and `flags` are NOT load-bearing — the player ignores them. `sid` IS,
+and must be the household's own (12 here, not the `9` several libraries hardcode).** Caveat: this
+proves the *metadata/art* path. The audio path could be stricter, though SoCo omits `sid`/`flags`/`sn`
+entirely and Sonos's own internal test code uses a bare container URI with no query string.
+
+### Construction table
+
+`<desc>` for every row here: `SA_RINCON3079_X_#Svc3079-0-Token`. Colons percent-encoded as `%3a`
+(raw colons also accepted).
+
+| type | transport / enqueue URI | DIDL item id | flags | `upnp:class` | command |
+|---|---|---|---|---|---|
+| track | `x-sonos-spotify:spotify%3atrack%3a<id>?sid=12&flags=8224&sn=10` | `00032020spotify%3atrack%3a<id>` | 8224 | `…musicTrack` | AddURIToQueue **or** SetAVTransportURI |
+| album | `x-rincon-cpcontainer:1004206cspotify%3aalbum%3a<id>?…` | `0004206c…` | 8300 | `…musicAlbum` | AddURIToQueue |
+| playlist | `x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a<id>?…` | `1006206c…` | 8300 | `…playlistContainer` | AddURIToQueue |
+| user playlist (legacy) | `x-rincon-cpcontainer:10062a6cspotify%3auser%3a<u>%3aplaylist%3a<id>?…` | `10062a6c…` | 10860 | `…playlistContainer` | AddURIToQueue |
+| artist top tracks | `x-rincon-cpcontainer:100e206cspotify%3aartistTopTracks%3a<id>?…` | `100e206c…` | 8300 | `…playlistContainer` | AddURIToQueue |
+| **artist radio (station)** | `x-sonosapi-radio:spotify%3aartistRadio%3a<id>?…` | `100c206c…` | 8300 | `…audioBroadcast.#artistRadio` | **SetAVTransportURI only — 804 on AddURIToQueue** |
+| show / episode | `x-rincon-cpcontainer:1006206cspotify%3ashow%3a<id>` / `x-sonos-spotify:spotify%3aepisode%3a<id>` | `1006206c…` / `00032020…` | 8300 / 8224 | container / musicTrack | AddURIToQueue |
+
+There is **no playable `spotify:artist:` URI** — artist appears only as a `parentID`.
+
+### Two corrections to the rules recorded earlier in this document
+
+- **The `<desc>` account key is NOT always `-0-`.** The real form is
+  `SA_RINCON<type>_X_#Svc<type>-<accountKey>-Token`, where `0` applies only to the *first* account of
+  that service. This household proves it: YouTube Music has **two** linked accounts —
+  `…#Svc72711-0-Token` (sn=7) and `…#Svc72711-8423f6aa-Token` (sn=11). Also Pandora `-70692a0c-`,
+  Sonos Radio `-668459c3-`. **No library models this.** Read the key off an existing favourite of the
+  same service rather than hardcoding it.
+- **The favourite form differs from the playable form.** This household's Spotify *favourites* use
+  `flags=8232` / prefix `10032028`, while all 340 Spotify tracks in its Sonos *playlists* use
+  `flags=8224` / `00032020`. Use 8224 — and per the oracle above it doesn't actually matter.
+
+### Spotify's Web API in 2026 — this is the actual blocker
+
+Two rounds of cuts:
+
+**Nov 27 2024:** Related Artists, Recommendations, Audio Features, Audio Analysis, Featured Playlists,
+Category's Playlists, 30-second previews, and *"Algorithmic and Spotify-owned editorial playlists."*
+`/v1/recommendations` was **the only seed-based radio generator, and nothing replaced it.**
+
+**Feb 11 / Mar 9 2026** (the migration guide) — worse:
+
+- **`GET /artists/{id}/top-tracks` removed** — deleting the API source for Sonos's `artistTopTracks`.
+- `/browse/new-releases`, `/browse/categories`, `/users/{id}/playlists`, `/markets` removed.
+- **Batch fetches removed** (`GET /tracks?ids=…`) — one HTTP request per item.
+- **Search capped at `limit=10`** (was 50).
+- **1 client id per developer, 5 users per app, owner must hold Premium.**
+- Playlist `items` returned only for playlists the user owns or collaborates on.
+
+**Extended quota mode is unreachable.** Since 2025-05-15 Spotify accepts applications only from
+organizations with a launched service and **≥250k MAU**. A household appliance is permanently in
+Development Mode.
+
+**Mixes are therefore impossible.** Discover Weekly, Daily Mix 1-6, Release Radar, On Repeat and every
+`37i9dQZ…` editorial playlist are Spotify-owned: filtered out of `/me/playlists` even when followed,
+and 404 on direct fetch. Spotify staff confirm this is intended behaviour for non-extended-quota
+clients. Client Credentials vs user token makes no difference — the gate is the quota tier.
+
+**What a new app CAN still enumerate:** `/search` (≤10 results) · `/artists/{id}` ·
+`/artists/{id}/albums` · `/albums/{id}` · `/albums/{id}/tracks` · `/playlists/{id}` metadata ·
+`/me/playlists` (non-Spotify-owned only) · contents of playlists the user **owns** · `/me/top/artists`
+· `/me/top/tracks` · `/me/player/recently-played` · `/me/library`.
+
+That is a usable browse tree — search, artist → albums → tracks, your own playlists, your top
+artists. **It is not a station tree.**
+
+### What runs where
+
+**On-device (no new infrastructure):** URI/DIDL construction, `sid` discovery via
+`ListAvailableServices`, `sn` scrape from `FV:2` if wanted, and playback — `soap_client.cpp` already
+has `setAVTransportURI`/`addURIToQueue` and `didl.cpp` already extracts `<r:resMD>`. This is a
+string-formatting change.
+
+**On-device bonus: album art needs no Spotify API.** `/getaa?s=1&u=<encoded track URI>` serves a
+plain-HTTP JPEG for any constructible track — exactly what `core/album_art.cpp` already consumes. A
+browse UI gets artwork for free from a speaker we already talk to.
+
+**Off-device (the Pi at .99):** the Spotify Web API itself. Not because of TLS — `updater.cpp` already
+ships `WiFiClientSecure` — but because Client Credentials needs a **client secret that cannot live in
+distributed firmware**, PKCE's refresh token has a **6-month lifetime that refreshing does not
+extend** (a twice-yearly browser ceremony on an appliance), and post-Feb-2026 the loss of batch
+fetches makes one browse page N sequential HTTPS round-trips over an already-fragile ESP-Hosted link.
+The Pi holds the credential and hands the device a flat `{title, artist, spotify_uri}` list; the device
+constructs the Sonos URI and plays it directly. No Sonos cloud, no vendor middleman for playback.
+
+**One credential-free path worth knowing:** ListenBrainz Labs
+(`labs.api.listenbrainz.org/spotify-id-from-metadata`) resolves artist/album/track → Spotify track ids
+with **no Spotify account at all**. Verified: it returned an id byte-identical to one already in this
+household's `SQ:13`. Tracks only — no album, playlist or station lookup.
+
+### Unverified
+
+- **No playback command was sent.** Everything above is read-only probing plus published source.
+- Container URIs are unproven end-to-end — `/getaa` 404s on `x-rincon-cpcontainer:` and
+  `x-sonosapi-radio:`, but that is *expected* (containers carry absolute `i.scdn.co` art in their
+  DIDL; `getaa` is a track-art proxy), so the oracle simply doesn't cover them.
+- Whether `flags`/`sn` are ignored on the **audio** path as well as the art path.
+- Whether Client Credentials still reaches catalogue endpoints after Feb 2026.
+- **Local `ContentDirectory` cannot browse Spotify either** — `SP:`, `S:12`, `SV:12`, container ids
+  and parent ids all return **UPnP 701**. Enumeration must come from outside. Now doubly confirmed.
+
+### Artist radio is the risky one — and there is a free test for it
+
+Sonos's artist-radio path has **two independent reports of being broken**: it returns 804 on
+`AddURIToQueue` (must use `SetAVTransportURI`), and Sonos's own app broke artist radio on 2024-05-07
+with no confirmed fix. If the `audioBroadcast`/402 concern is real, it lands **exactly and only** on
+this Spotify type.
+
+**The cheapest possible test costs nothing new:** this household already has 4 Amazon Music *station*
+favourites in `FV:2` whose `res` is a raw `x-sonosapi-radio:…?sid=201&flags=8300&sn=6`, and
+`core/library.cpp` already plays favourites by handing that straight to `SetAVTransportURI`.
+**Just play one.** If it plays, un-resolved `x-sonosapi-radio:` is accepted and the 402 concern dies —
+for Spotify stations and for the anonymous-SMAPI Radio page alike.
+
+### Recommendation
+
+Build **search → artist → albums → tracks, plus the user's own playlists**. Both halves are proven,
+and the art comes free from the speaker. **Skip stations and mixes**: Spotify will not give a new app
+the ids, and even with an id the Sonos station path is the one form with independent reports of being
+broken.
 
 ## Durability risks (unrelated to YouTube Music, more important than it)
 

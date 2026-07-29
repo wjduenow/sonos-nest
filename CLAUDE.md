@@ -57,7 +57,10 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
   **But `Auth="Anonymous"` services CAN be browsed on-device** — 32 of 106 here (TuneIn, SomaFM, NTS,
   Radio France…). Verified by running it: an empty `<credentials/>` SOAP header is the entire
   requirement, and `getMediaURI` resolves a station to a stream URL anonymously too. One playback
-  test remains. Also records two durability risks to this project's premise (`customsd.htm` now 403s
+  test remains. **Spotify tracks/albums/playlists are constructible too** (its Sonos id is a
+  transparent wrapper) — but its *stations and mixes* are gone at the Spotify end, not the Sonos end.
+  Handy trick recorded there: `http://<speaker>:1400/getaa?s=1&u=<encoded URI>` is a **read-only
+  oracle for URI validity** — 200 = real, 404 = not — and it also gives album art for free. Also records two durability risks to this project's premise (`customsd.htm` now 403s
   on S2; a Connection Security toggle can now require auth on the **LAN** APIs).
 - Flashing from WSL (USB): **`docs/flashing-wsl.md`**
 - Wireless flashing: the **`/ota` skill** (`.claude/skills/ota`)
