@@ -49,6 +49,12 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
+- Music services (why we can't browse YouTube Music): **`plans/08-music-service-integration.md`** —
+  a **closed** question. Third-party service catalogues are NOT reachable: the favourite id is an
+  opaque account-scoped token, the household's OAuth token is on the player but write-only, and the
+  cloud Control API has no browse path. Favourites (`FV:2`) are the only route, and are already
+  implemented. Also records two durability risks to this project's whole premise (`customsd.htm` now
+  403s on S2; a Connection Security toggle can now require auth on the **LAN** APIs).
 - Flashing from WSL (USB): **`docs/flashing-wsl.md`**
 - Wireless flashing: the **`/ota` skill** (`.claude/skills/ota`)
 
