@@ -38,6 +38,9 @@ offers, but you CAN read the id of anything that has played — locally, read-on
 | **Anonymous SMAPI browse (32 services)** | ✅ | **Run-verified**: empty `<credentials/>` is the whole requirement. Browse + `getMediaURI` both work. Playback leg untested |
 | **Spotify: track / album / playlist by id** | ✅ | Transparent wrapper; URI validity **proven read-only** via the `/getaa` oracle. Needs a helper for the Spotify API |
 | Spotify stations / Daily Mix / Discover Weekly | ❌ | Spotify's own API removed the radio generator and filters Spotify-owned playlists below extended quota (unreachable: needs 250k MAU) |
+| **Amazon `prime/stations/`** | ❌ | **Legacy namespace** — absent from the current presentation map; nothing new is minted there |
+| Amazon `catalog/stations/` | ⚠️ | Keys enumerable (14 public, or full tree via DeviceLink); construction probably works but needs one playback test |
+| **DeviceLink services (15 of 106)** | ✅ | `getDeviceLinkCode` answers anonymously — a client CAN link its own account and browse. Untested past the handshake |
 
 ---
 
@@ -539,6 +542,166 @@ Build **search → artist → albums → tracks, plus the user's own playlists**
 and the art comes free from the speaker. **Skip stations and mixes**: Spotify will not give a new app
 the ids, and even with an id the Sonos station path is the one form with independent reports of being
 broken.
+
+---
+
+## Amazon Music (sid 201): `prime/` is legacy — and DeviceLink is an open door
+
+**Asked because the household's stations are here and `prime/` was the interest. Short answers:
+`prime/` is a dead namespace, its keys are the same id space as `catalog/`, station keys ARE
+enumerable (three ways), and construction is probably possible but cannot be proven without one
+playback test.**
+
+### `prime/` is legacy. This is the answer to the question that was asked.
+
+**RUN-VERIFIED.** The current Sonos↔Amazon presentation map was fetched live
+(`cf.ws.sonos.com/p/p/c7eb6975-…`, **version 258**, matching this household's
+`Manifest Version="258"`), and **it contains no `prime` path anywhere**. Its entire vocabulary is
+`library_*` and `catalog_*`; the only station entry is
+`flat_search/?type=catalog_station&count=50#catalog_stations_search_desc`.
+
+`prime` survives only as **view names underneath `catalog/`** — and this household shows exactly that
+hybrid: two `catalog/` stations have parentID
+`catalog/stations/refinements/genres/<uuid>/#prime_stations`. **Amazon renamed the path and kept the
+view id.**
+
+Two consistent dating signals: the `prime/` favourite is `FV:2/28`, the **lowest surviving Amazon
+object id** (the others are 31/34/36/38/39), and it is the only Amazon favourite whose artwork uses
+the **legacy** `images-na.ssl-images-amazon.com` host while newer ones use `m.media-amazon.com`.
+
+**Consequence: there is nothing to enumerate under `prime/` because nothing new is minted there.**
+Constructing `prime/` URIs would replay exactly the one station this household already has. Build
+against `catalog/stations/`.
+
+**The two namespaces share one id space — RUN-VERIFIED at Amazon's end.** The sole `prime/` key
+`A1MXE9T8PKB8ZJ` resolves on the modern public route `music.amazon.com/stations/A1MXE9T8PKB8ZJ` →
+*"First Aid Kit Station"*, exactly as the `catalog/` keys do. (Whether **Sonos** accepts that key under
+`catalog/stations/` is untested — see T5.)
+
+**Tier is the underlying distinction** (supported, not proven): Sonos's Amazon strings file carries
+distinct *"Amazon Prime membership is required"* and Music Unlimited upsell families, and field
+reports describe Prime-only accounts failing on Stations until upgrading to Unlimited.
+
+**Correction to the brief that produced this work:** these are not ASINs. They are 13–14 character
+Amazon **`STATION_KEY`s**. The 10-char `B0…` ASINs appear only under `catalog/tracks/`.
+
+### What `#chunk-<token>` is
+
+**RUN-VERIFIED:** all four tokens are unpadded base64url encodings of 16-byte **RFC 4122 v4 UUIDs**
+(version nibble `4`, variant bits `10`, in 4/4 samples). E.g. the `prime/` one,
+`pZgbW2WDQaSwNUWawbJv5A` → `a5981b5b-6583-41a4-b035-459ac1b26fe4`.
+
+**READ-VERIFIED:** Sonos's Amazon item ids *are* Amazon Music Device API URIs, and the `#fragment` is
+a documented `LocalReference<T>` — fetch the URI without the fragment, then use the fragment as a key
+into that document's `trackContainerChunkDescriptions` map. Static albums use the bare key `"chunk"`;
+stations get `chunk-<random>` because stations are "potentially infinite… generated dynamically". So
+the token is **server-minted in origin**.
+
+Three pieces of evidence that its *value* is nevertheless not validated:
+
+1. **RUN-VERIFIED.** While a station was loaded on one speaker, `GetPositionInfo` exposed the resolved
+   track URI:
+   `x-sonosapi-hls-static:catalog/tracks/B00137G8MS/<uuid1>/<uuid2>/A3E8KCX2260OJM/n/PRIME/<sessionUuid>/PRIME_STATION/?sid=201&flags=8&sn=17`
+   Probing each field through `/getaa` (which *does* resolve this scheme): the two content UUIDs are
+   validated (random → 404, zeros → 404, swapped → 404), but the **session UUID is ignored**
+   (random → 200, all-zeros → 200), as are the station key, the tier and the content type. Amazon's
+   resolver passes session-scope UUIDs straight through.
+2. **RUN-VERIFIED persistence.** The `#chunk-` in the favourite is byte-identical to the live
+   `CurrentURI`, and the player was on track 4 of a 4-track chunk with the URI unchanged — so it is a
+   *station-instance* id fixed for the life of the URI, not a per-chunk cursor. It still resolves
+   years after the favourite was created; a genuine session token would have expired.
+3. **READ-VERIFIED.** Denon HEOS's content explorer plays Amazon stations with a **bare `#chunk`, no
+   UUID at all** (`mid=catalog/stations/A1ESXGJW9GSMCX/#chunk`). Different client, same id space, no
+   token.
+
+**Nobody has publicly documented the `#chunk-<uuid>` form** — GitHub code search returns zero hits for
+`"catalog%2fstations"`, `"prime%2fstations"`, or `"chunk-" "x-sonosapi-radio"`. **This cannot be
+settled read-only.**
+
+### The `/getaa` oracle does NOT cover stations
+
+**RUN-VERIFIED, properly controlled.** It resolves Amazon *tracks*
+(`x-sonosapi-hls-static:catalog%2ftracks%2fB071CQ75R8%2f?sid=201` → 200, 39,313 B; nonexistent ASIN →
+404; `sid` load-bearing, `flags`/`sn` not). But **both known-real station favourites return 404**, as
+do all 48 combinations of the two station ids × 6 URI schemes × 4 `s=` values, and so do the two real
+Pandora `x-sonosapi-radio:` favourites.
+
+The oracle is a **track-metadata** proxy and Amazon's `getMediaMetadata` rejects a container id. **For
+stations a 404 carries zero information** — it cannot test `#chunk-` presence, swapping, namespace, or
+a bogus key. Do not read those 404s as negative results.
+
+### Enumeration: three routes, and one of them is a genuine correction to this document
+
+**(a) DeviceLink is an OPEN DOOR — and this corrects the blanket claim made earlier here.**
+`ListAvailableServices` reports **`Auth="DeviceLink"` for Amazon Music**, not AppLink
+(RUN-VERIFIED; this household splits **59 AppLink · 32 Anonymous · 15 DeviceLink**).
+
+With empty credentials `getMetadata` returns `Client.AuthTokenExpired` for every id — no anonymous
+browse. **But `getDeviceLinkCode` answers anonymously with a live Login-with-Amazon URL**, and
+`getDeviceAuthToken` polls correctly with `Client.NOT_LINKED_RETRY`.
+
+So a third-party client **can link its own Amazon account** over the standard SMAPI DeviceLink
+handshake — one browser ceremony by the user — and then browse Amazon's full station tree with no
+Sonos app and no Sonos cloud. **This is the door YouTube Music's AppLink slams shut and Amazon's
+DeviceLink leaves open**, and it applies to 15 of this household's services, not just Amazon.
+The earlier statement here that "a LAN client must become its own registered account" remains true —
+what is new is that for DeviceLink services *that is actually achievable*. Untested past the
+handshake (needs real credentials); durability risk is `refreshAuthToken` lifetime, unknown.
+
+**(b) A public web index — free, no auth, but against Amazon's crawler policy.**
+`GET https://music.amazon.com/stations` with a **Googlebot** User-Agent returns ~156 KB of HTML
+containing **14 station keys with titles in cleartext** (Classic Rock Radio, Smooth Jazz, '90s
+Country, Relaxing Piano Radio…). A normal browser UA redirects to `/browserWarning`. A companion
+oracle: `GET music.amazon.com/stations/<KEY>` with a `facebookexternalhit` UA returns Open Graph tags,
+so `og:title` = the station name confirms a key is real, and the generic `Amazon Music` fallback means
+it is not.
+
+> ⚠️ **Amazon's `robots.txt` explicitly `Disallow: /stations/`, and both techniques depend on sending a
+> User-Agent we are not.** They work, but they are outside Amazon's stated policy, they are exactly
+> the kind of thing that gets fingerprinted and broken, and 14 stations is a thin prize. **Prefer (a).**
+> Recorded here for completeness, not as a recommendation.
+
+**(c) What does NOT work** (READ-VERIFIED): Music Assistant has no Amazon provider; node-sonos-http-api's
+`amazonMusic.js` handles songs and albums only (no stations); Amazon's Web API is closed beta with no
+station-listing route; the Alexa Music Skill API is provider-side. Amazon's own docs state *"URIs
+obtained from Device API responses should be considered semantically opaque. Do not attempt to parse
+URIs."* Local `ContentDirectory::Browse` returns **UPnP 701** for every Amazon container form, and
+`MusicServices::GetSessionId(201)` returns **UPnP 806**.
+
+### Construction table
+
+`<desc>` for every row: `SA_RINCON51463_X_#Svc51463-0-Token` (type 51463 = 201×256+7).
+
+| type | transport URI | DIDL `item id` | command |
+|---|---|---|---|
+| station (current) | `x-sonosapi-radio:catalog%2fstations%2f<KEY>%2f%23chunk-<b64url uuid>?sid=201&flags=8300&sn=6` | `100c206ccatalog%2fstations%2f…` | **SetAVTransportURI** (favourites are `<r:type>instantPlay</r:type>`) |
+| station (legacy) | same with `prime%2fstations%2f` | `100c206cprime%2f…` | SetAVTransportURI |
+| track | `x-sonosapi-hls-static:catalog%2ftracks%2f<ASIN>%2f?sid=201&flags=0&sn=6` | `10030000catalog%2ftracks%2f…` | AddURIToQueue |
+| album | `x-rincon-cpcontainer:1004206ccatalog%2falbums%2f<ASIN>%2f%23album_desc?sid=201&flags=8300` | `1004206c…` | AddURIToQueue |
+| locker track | `x-sonos-http:library%2ftracks%2f<uuid>%2f.mp3?sid=201&flags=0&sn=6` | `10030000library%2f…` | AddURIToQueue |
+
+### The playback tests — two of them settle it
+
+Read-only work is exhausted. On **one idle speaker**, `SetAVTransportURI` + `Play`, reusing a
+favourite's DIDL verbatim and changing only the id:
+
+- **T1 (control)** — the `prime/` favourite URI verbatim. *Also settles this document's separate
+  "is an un-resolved `x-sonosapi-radio:` accepted, is the UPnP 402 concern real" question.*
+- **T6 (the thesis)** — `catalog%2fstations%2fA3SP31LN235GV3%2f%23chunk-<freshly minted v4 uuid>`
+  ("Smooth Jazz", from the public index, never played here). **If T6 plays, construct + enumerate is
+  proven in one shot.**
+
+T2 (`prime/` + fresh UUID), T3 (bare `#chunk`), T4 (no fragment) and T5 (legacy key under `catalog/`)
+are diagnosis of a T6 failure, not needed if T6 works.
+
+### Unverified
+
+- **Whether a client-minted `#chunk-` UUID is accepted.** The crux. Untested by anyone publicly.
+- Whether Sonos accepts a `prime/`-era key under `catalog/stations/` (proven only at Amazon's web end).
+- Anything `prime/`-specific about `#chunk-` — **one sample; all reasoning is namespace-agnostic**.
+- Whether DeviceLink browse actually returns the station tree (handshake live, browse untested).
+- Whether `flags`/`sn` matter on the audio path (proven irrelevant on the art path only).
+- Why one household `catalog/` key ("Moby") does not resolve publicly while the other three do.
 
 ## Durability risks (unrelated to YouTube Music, more important than it)
 
