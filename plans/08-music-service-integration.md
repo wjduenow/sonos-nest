@@ -74,15 +74,26 @@ adopt.
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Roller left (~40%), detail panel right.** This layout is what makes the artwork question stop
-mattering: `lv_roller` options are plain text, so no per-row art is possible *or needed* — art belongs
-in the detail panel for the **one** selected station. That is a single lazily-fetched image instead of
-1,300, which kills the bulk-fetch problem outright. If the artwork investigation comes back negative,
-the panel shows title, genre and Play, and the design is unchanged.
+**Roller left (~40%), detail panel right.** `lv_roller` options are plain text, so per-row art is not
+possible — art belongs to the **one** selected station, shown large in the detail panel. That is a
+single lazily-fetched image per selection instead of a viewport full, which is the cheapest possible
+answer on a board where every HTTPS fetch costs an mbedTLS session.
 
-**Alternative if per-row art is ever wanted:** a normal list with
-`lv_obj_set_scroll_snap_y(LV_SCROLL_SNAP_CENTER)` gives drum-like snapping with rich rows. More pool
-per row and more work; only worth it if art turns out to exist *and* looks better inline.
+> **Artwork exists after all** (see *Artwork* below — the earlier "no art" finding was a parser bug),
+> so there is now a genuine choice here, and it is worth making deliberately:
+>
+> | | **A. Roller + detail panel** *(as specced)* | **B. Snapping tile carousel** |
+> |---|---|---|
+> | widget | `lv_roller`, text | list + `LV_SCROLL_SNAP_CENTER`, art per row |
+> | art in flight | **1** image (~4.6 KB) | 6–8 images (~28–37 KB) |
+> | LVGL pool | minimal | ~1 KB+ per row plus decoded images |
+> | feel | drum you spin, one big card | flipping through title cards |
+>
+> **A is specced and recommended**, because the station name is rendered *into* the artwork and at
+> 96–128 px that text is decorative rather than legible — a column of busy tiles reads worse than a
+> clean text drum with one large card beside it. **B is arguably closer to a physical jukebox**, and is
+> now affordable (~2–5 KB per tile), so it is a real option rather than a theoretical one. Decide
+> before step 5; the cache and crawler are identical either way.
 
 ### Levels
 
@@ -117,6 +128,86 @@ entry beginning with it — the phone-contacts idiom, and much faster than dragg
 - Requires each genre's stations **sorted by title**, plus a 26-entry offset table (letter → first
   index). Both are produced at crawl time, not on device — see the cache section.
 - Letters with no entries render dimmed and ignore taps.
+
+## Artwork — every station has it, and the resize op is load-bearing
+
+**RUN-VERIFIED, and it overturns an earlier claim in this document.** 1044/1044 station rows across
+all 26 genres carry a populated `albumArtURI`. Zero without.
+
+> ### The false negative, recorded because it will bite the firmware parser too
+>
+> The element **never appears bare**. In one Jazz response: `<albumArtURI>` occurs **0** times,
+> `<albumArtURI requiresAuthentication="false">` occurs **50** times. A regex or literal match on
+> `<albumArtURI>` finds nothing and reports "no art". Stations are also `mediaCollection` with
+> `itemType=program` — **never** `mediaMetadata` — so a parser scoped to `mediaMetadata` sees no items
+> at all.
+>
+> **`didl.cpp`-style tag scraping must match the opening tag as `<name` followed by `>` or whitespace,
+> not `<name>`.** This is exactly how the research got it wrong.
+
+A complete station item — these five children are the *entire* record:
+
+```xml
+<mediaCollection>
+  <id>catalog/stations/A15MU3EQ4XZ3Y5/#chunk-kKRW16vjSke5rJmIh-L8rQ</id>
+  <itemType>program</itemType>
+  <title>Worship Now Radio</title>
+  <canPlay>true</canPlay><canEnumerate>true</canEnumerate>
+  <albumArtURI requiresAuthentication="false">https://m.media-amazon.com/images/G/01/MusicProgramming/2024_US_WorshipNowRadio_ST_TD_Tile_2400x2400.png</albumArtURI>
+</mediaCollection>
+```
+
+### The `._SL<N>_.jpg` rewrite is not optional
+
+Native art is **2400×2400, 250 KB – 6.7 MB, and ~40% of it is PNG — which TJpg cannot decode.**
+Unusable raw. Amazon's image server accepts a resize op appended to the filename, **and it transcodes
+PNG → baseline JPEG**:
+
+```
+re.sub(r'\.(jpg|jpeg|png)$', '._SL128_.jpg', url, flags=I)     # ops stack harmlessly
+```
+
+Measured on the item above: **1,422,804 B PNG → 1,988 B baseline JPEG.** Across 60 distinct URLs:
+60/60 HTTP 200, 60/60 baseline JPEG (SOF0), median latency 0.11 s.
+
+| `._SL<N>_` | median | max |
+|---|---|---|
+| 96 | 2.9 KB | 4.2 KB |
+| **128** | **4.6 KB** | 6.7 KB |
+| 200 | 9.7 KB | 15.9 KB |
+
+`._SL128_.jpg` is the recommendation: baseline JPEG, feeds the existing `core/album_art.cpp` TJpg path
+unchanged.
+
+### Facts that shape the cache
+
+- **HTTPS only.** Plain HTTP is **403** on both hosts, native or resized. That is a real cost here —
+  an mbedTLS session against a ~70–100 KB internal-SRAM idle budget. **One connection, keep-alive,
+  reused across the visible tiles**, and never concurrent with an album-art fetch.
+- **Two hosts:** `images-na.ssl-images-amazon.com` and `m.media-amazon.com`. Normalise everything to
+  `m.media-amazon.com`, which serves the `images-na` paths too — one host, one TLS session.
+- **The art URL is STABLE; the `#chunk-` is not.** Re-browsing Jazz minutes later returned
+  **50/50 identical `albumArtURI` and 0/50 identical `#chunk-`.** So art is a property of the station:
+  **key the SD image cache by STATION KEY**, normalising any `._AA500`-style op off first.
+- **The catalogue is smaller than assumed: 840 distinct stations** across 1044 rows (174 appear in
+  more than one genre). Genres are **not** uniformly 50 — Holiday 19, International 28, Soundtracks
+  32, K-Pop 1, Miscellaneous 2, Recently Played 3.
+- **Genre containers have art, but it is useless.** All 26 carry an `albumArtURI`, but there are only
+  **two distinct URLs** — generic 1.6 KB gray placeholders. **Level 1 stays text/icon**; spend the
+  artwork budget on level 2 where it is real. (This is the "genres don't, stations do" split — the
+  inverse of what was anticipated.)
+- **`/getaa` still cannot serve station art**, and now there is a mechanism: it is a
+  `getMediaMetadata` proxy, and Amazon rejects a container id — *"did not contain a TrackInstance"*.
+  Re-tested on freshly minted ids with a known-good track as a positive control (200, byte-identical
+  on two speakers) so the 404 is meaningful.
+- **`getExtendedMetadata` returns the same URL** — so it works, but it is a wasted round-trip.
+  `getMetadata` already carries the art during the crawl you are doing anyway.
+
+### Two constraints from the imagery itself
+
+1. **The station name is rendered into the artwork.** At 96–128 px that text is decorative, not
+   legible — **keep the text label in the row**; the tile is not a substitute for it.
+2. Tiles are busy and high-contrast. They need padding and corner rounding, not edge-to-edge.
 
 ## The SD cache
 
@@ -171,7 +262,9 @@ small file and never parses the whole catalogue.
 | One genre (Jazz / Rock / Country, all sampled) | **~19.2 KB**, exactly **50** stations, 0.60 s |
 | Per station, on the wire | **~382 B** |
 | **Full crawl** | **27 requests · ~499 KB · ~16 s** |
-| **SD index** | **~90–190 KB** for ~1,300 stations |
+| **SD index** | **~150–250 KB** for 1044 rows (adds an art-URL column: +56 KB with host prefixes stripped, +106 KB without) |
+| Art, lazy per tile | `._SL128_.jpg`, median **4.6 KB**, ~0.11 s |
+| Art cache if fully populated | 840 stations x ~4.6 KB = **~3.8 MB** on SD |
 
 A weekly refresh is ~500 KB/week. Peak RAM is a single response (~20 KB) if parsed streaming —
 the catalogue is never held in memory. Genres cap at exactly 50, so no paging is needed.
@@ -188,12 +281,9 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 
 ## Open questions
 
-- **Station artwork — now de-risked, not blocking.** `albumArtURI` was empty on all 150 stations
-  sampled, and an investigation is open into whether art lives elsewhere (`getExtendedMetadata`,
-  `getMediaMetadata`, or `streamMetadata/logo`). **The roller design means either answer works**: art
-  belongs to the single selected station in the detail panel, so it is one lazy fetch, not 1,300. If
-  art exists, cache it per station on SD alongside the index; if not, the panel is typographic. Do
-  **not** let this block the UI work.
+- ~~Station artwork~~ **RESOLVED: every station has artwork.** See *Artwork* below. The earlier
+  "empty on all 150 sampled" claim in this document was **a parser bug of mine, not a property of the
+  service**.
 - **Token lifetime and refresh.** `refreshAuthToken` exists in the WSDL; the lifetime is unknown.
   Needs a re-auth path when it lapses.
 - **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
