@@ -111,6 +111,57 @@ plays on tap and this matches it).
 > if the tile list proves too heavy on the pool or too slow to scroll, falling back is a UI-only
 > change. The crawler, the SD cache and the art pipeline are identical for both.
 
+### Scroll audio — a detent per row, not a tick per event
+
+A carousel that snaps needs to *sound* like a mechanism. The jukebox already has the hardware and the
+plumbing (`boards/crowpanel_p4_7in/ui_sound.cpp`, NS4168 → two onboard speakers, cues rendered on a
+board-owned task), so this is a small addition — but four details decide whether it feels like a
+detent or like a fault.
+
+**1. Fire on the snapped index changing, never on `LV_EVENT_SCROLL`.** The centred row is already
+computed for the accent outline; emit a cue when that index *changes*. Scroll events fire far more
+often than rows cross, and driving audio from them produces a smear rather than clicks.
+
+**2. Add `UiSound::Detent` — do not reuse `Tick`.** `Tick` is a control-moved click (14 ms, decay 9.0,
+lowpass 0.55) and a run of them reads as a burst of button presses. A detent wants to be shorter,
+tighter and quieter — roughly 8 ms with a faster decay at ~60% amplitude — so a fast scroll reads as
+one mechanism turning.
+
+> **Safe to add.** The enum lives in `core/board.h`, but `crowpanel_rotary`, `es3c28p` and
+> `esp32s3cam` all implement `void uiSoundPlay(UiSound) {}` — parameter unnamed, ignored — so no board
+> breaks. Only the jukebox's `render()` switch gains a case, and since that switch has no `default:`,
+> the compiler will point at anything that ever needs updating.
+
+**3. Rate-limit explicitly. Do not rely on the queue overflowing.** A fast flick crosses rows faster
+than the task can render 8 ms of audio, and the cue queue is depth 4 and drops when full. Dropping is
+the right behaviour — a late click is worse than a missing one — but *relying* on overflow to do it is
+accidental design. Put a floor of **~45–60 ms between detents** in the unit and drop the rest; past
+roughly 20/s the clicks blur into noise anyway, so thinning them out sounds better, not worse.
+
+**4. Arm the amp on touch-down, not on the first detent.** This is the subtle one. `ampPower(true)`
+carries a `delay(5)` settle and the amp drops after 1.5 s idle, so the **first** detent of a scroll —
+precisely the one that establishes the feel — arrives clipped. Arm on `LV_EVENT_PRESSED` on the list,
+before any row has crossed, and let the existing idle timeout power down when scrolling stops.
+
+That needs one new optional HAL entry point:
+
+```c
+// --- UI feedback (optional; no-op on boards without a speaker) ---
+void uiSoundArm();   // wake the amp ahead of imminent cues; safe to call repeatedly
+```
+
+No-op on the three boards without speakers, same as `uiSoundPlay`. If the extra API is not wanted, the
+fallback is to accept a soft first detent — but it is the one the user notices most.
+
+**Honouring the setting.** `settingsUiSound() == 0` must silence detents like everything else. Worth
+deciding separately whether scroll audio deserves **its own** toggle: wanting button feedback but not
+scroll noise is a reasonable preference, and a 50-row flick makes a lot more sound than a button does.
+Open question, not decided here.
+
+**Do not let audio gate the UI.** Already true by construction — `uiSoundPlay()` posts to a queue and
+returns — but it matters more here than anywhere else, because detents fire from the scroll handler
+on the UI task while `LV_DISPLAY_RENDER_MODE_DIRECT` is painting into the live scan-out buffer.
+
 ### Levels
 
 ```
@@ -327,6 +378,8 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
    **Do the bounded image cache first**, before the list looks right — it is the part that decides
    whether this design is viable at all.
 6. **Filtering** — A-Z jump strip first (cheap, no keyboard), then type-to-filter over `all.tsv`.
+   Scroll detents land with the carousel in step 5; they are ~20 lines once `UiSound::Detent` and
+   `uiSoundArm()` exist.
 7. **DeviceLink ceremony in Settings** + NVS token + `refreshAuthToken` handling.
 
 Steps 1–2 are prerequisites and both need someone at the device. Step 4 produces files that step 5
