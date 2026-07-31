@@ -56,51 +56,67 @@ fits with room to spare. No geometry change needed beyond `PAGE_COUNT`.
 The Radio list should read like a jukebox mechanism: a **rolling drum** you spin, with one entry
 selected at the centre, at every level.
 
-**Use `lv_roller`.** LVGL ships exactly this widget — a perspective drum that snaps to a centred
-option, driven by drag. It is the mechanic being described, it is built in, and it costs nothing to
-adopt.
+**DECIDED: a snapping tile carousel with artwork per row** (option B in the mockup). Reviewed against
+an interactive mock at the panel's true 1024x600 with real station names and real artwork; the tile
+carousel reads closer to a physical jukebox — title cards you flip through — and artwork turned out to
+be real, cheap and per-station.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ ‹ Jazz                                          [search] │
-│ ┌───────────────────────┐  ┌───────────────────────────┐ │
-│ │   Instrumental Jazz   │  │                           │ │
-│ │   Cool Jazz           │  │      (art, if any)        │ │
-│ │ ▸ SMOOTH JAZZ ◂       │  │                           │ │
-│ │   Ultimate Jazz Radio │  │   Smooth Jazz             │ │
-│ │   Vocal Jazz          │  │   Jazz · Prime Station    │ │
-│ └───────────────────────┘  │        [ ▶  Play ]        │ │
-│  A B C D E F G H … Z       └───────────────────────────┘ │
-└──────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+| < Jazz                                          [search]  |
+|  50 stations                                              |
+|  +------+  Smooth Jazz                                    |
+|  | art  |  Prime Station                                  |
+|  +------+                                                 |
+| ++------+ SMOOTH JAZZ  <- snapped, amber outline          |
+| || art  | Prime Station                                   |
+| ++------+                                                 |
+|  +------+  Cool Jazz                                      |
+|  | art  |  Prime Station                                  |
+|  +------+                                                 |
+|  A B C D E F G H ... Z                                    |
++----------------------------------------------------------+
 ```
 
-**Roller left (~40%), detail panel right.** `lv_roller` options are plain text, so per-row art is not
-possible — art belongs to the **one** selected station, shown large in the detail panel. That is a
-single lazily-fetched image per selection instead of a viewport full, which is the cheapest possible
-answer on a board where every HTTPS fetch costs an mbedTLS session.
+A normal LVGL list with `lv_obj_set_scroll_snap_y(LV_SCROLL_SNAP_CENTER)` — the centred row takes the
+accent outline, and a tap plays it directly (no intermediate detail panel; the favourites page already
+plays on tap and this matches it).
 
-> **Artwork exists after all** (see *Artwork* below — the earlier "no art" finding was a parser bug),
-> so there is now a genuine choice here, and it is worth making deliberately:
+> ### ⚠️ What B costs, and the one thing that will break it
 >
-> | | **A. Roller + detail panel** *(as specced)* | **B. Snapping tile carousel** |
-> |---|---|---|
-> | widget | `lv_roller`, text | list + `LV_SCROLL_SNAP_CENTER`, art per row |
-> | art in flight | **1** image (~4.6 KB) | 6–8 images (~28–37 KB) |
-> | LVGL pool | minimal | ~1 KB+ per row plus decoded images |
-> | feel | drum you spin, one big card | flipping through title cards |
+> **Decoded artwork does not fit in the LVGL pool if it is unbounded.** An 84x84 tile in RGB565 is
+> **14,112 B decoded**. Fifty rows would be **~705 KB** — larger than the entire 512 KB pool. The row
+> objects themselves are the small part (~1 KB each, ~50 KB total); **the images are the problem.**
 >
-> **A is specced and recommended**, because the station name is rendered *into* the artwork and at
-> 96–128 px that text is decorative rather than legible — a column of busy tiles reads worse than a
-> clean text drum with one large card beside it. **B is arguably closer to a physical jukebox**, and is
-> now affordable (~2–5 KB per tile), so it is a real option rather than a theoretical one. Decide
-> before step 5; the cache and crawler are identical either way.
+> **A bounded, recycling image cache is therefore mandatory, not an optimisation.** Two ways:
+>
+> - **Register a TJpg-backed LVGL image decoder** so tiles can be `lv_image` widgets pointing at SD
+>   paths, and let LVGL's own cache (`LV_CACHE_DEF_SIZE`) bound and evict. Cleanest, and it makes the
+>   cache budget a single tunable number.
+> - **Hand-rolled ring of reusable RGB565 buffers** — decode only rows intersecting the viewport plus
+>   a row or two of headroom, reuse buffers on scroll. More code, total control.
+>
+> Budget either way: a ~6-row viewport plus headroom is **~10 buffers = ~141 KB** of pool. That fits
+> the 512 KB comfortably. **Unbounded does not.** Whichever route, cap it explicitly and log the
+> high-water mark, exactly as the Radio row-count cap already does.
+>
+> **Scroll-driven fetching needs the same discipline.** Fetch art as rows approach the viewport, but
+> debounce so a fast flick does not queue fifty HTTPS requests, and drop requests for rows that have
+> already scrolled past. After the first visit the art is on SD, so this is a one-time cost per
+> station — but the first browse of a genre is 50 fetches if unthrottled, which is exactly the
+> sustained-load profile that kills the ESP-Hosted link.
+>
+> **This is meaningfully more work than option A.** A (a text `lv_roller` plus one large card, one
+> image in flight, no recycling) remains fully specced in the mockup and in this document's history —
+> if the tile list proves too heavy on the pool or too slow to scroll, falling back is a UI-only
+> change. The crawler, the SD cache and the art pipeline are identical for both.
 
 ### Levels
 
 ```
 L1  genres        26 entries, rolls        ‹ back = Radio root is top
-L2  stations      50 entries, rolls        ‹ back to genres
-    select        detail panel -> Play
+L2  stations      up to 50 tiles, snap-scrolls   ‹ back to genres
+    tap a tile    plays immediately
 ```
 
 Rolling behaviour is identical at both levels; drilling in replaces the roller's contents rather than
@@ -265,6 +281,7 @@ small file and never parses the whole catalogue.
 | **SD index** | **~150–250 KB** for 1044 rows (adds an art-URL column: +56 KB with host prefixes stripped, +106 KB without) |
 | Art, lazy per tile | `._SL128_.jpg`, median **4.6 KB**, ~0.11 s |
 | Art cache if fully populated | 840 stations x ~4.6 KB = **~3.8 MB** on SD |
+| Decoded tile in LVGL pool | 84x84 RGB565 = **14,112 B** — bounded cache required (see *What B costs*) |
 
 A weekly refresh is ~500 KB/week. Peak RAM is a single response (~20 KB) if parsed streaming —
 the catalogue is never held in memory. Genres cap at exactly 50, so no paging is needed.
@@ -284,8 +301,12 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 - ~~Station artwork~~ **RESOLVED: every station has artwork.** See *Artwork* below. The earlier
   "empty on all 150 sampled" claim in this document was **a parser bug of mine, not a property of the
   service**.
-- **Token lifetime and refresh.** `refreshAuthToken` exists in the WSDL; the lifetime is unknown.
-  Needs a re-auth path when it lapses.
+- ~~Token lifetime and refresh~~ **RESOLVED — refresh is in-band.** The token expired mid-session
+  (well under an hour), and the failing call came back as SOAP fault
+  **`Client.TokenRefreshRequired` carrying replacement credentials inside the fault body**. Extracting
+  `authToken`/`privateKey` from the fault and retrying worked immediately; no separate
+  `refreshAuthToken` call was needed. **The crawler must handle this fault by design** — parse, persist
+  to NVS, retry once. RUN-VERIFIED.
 - **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
   browser. Settings can show the `regUrl` (a QR code would be kinder on a wall panel).
   **Gotcha:** `linkDeviceId` is per-request and required to redeem the code — capture it with the
@@ -302,7 +323,9 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 3. **Rename Radio → Favorites**, add the fifth rail slot, convert the two Lucide glyphs.
 4. **Cache writer** — crawl + sorted SD index + A-Z offset tables + `all.tsv`, token hardcoded for
    bring-up. Testable entirely off-device against the files it produces.
-5. **Radio roller** — L1 genres, L2 stations, detail panel, Play. The core of the feature.
+5. **Radio browse UI** — L1 genre list (text/icon), L2 snapping tile carousel with artwork.
+   **Do the bounded image cache first**, before the list looks right — it is the part that decides
+   whether this design is viable at all.
 6. **Filtering** — A-Z jump strip first (cheap, no keyboard), then type-to-filter over `all.tsv`.
 7. **DeviceLink ceremony in Settings** + NVS token + `refreshAuthToken` handling.
 
