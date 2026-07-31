@@ -59,10 +59,14 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
   requirement, and `getMediaURI` resolves a station to a stream URL anonymously too. One playback
   test remains. **Spotify tracks/albums/playlists are constructible too** (its Sonos id is a
   transparent wrapper) — but its *stations and mixes* are gone at the Spotify end, not the Sonos end.
-  **Amazon `prime/stations/` is a dead namespace** (absent from the current presentation map; build
-  against `catalog/stations/`), and **Amazon is `DeviceLink`, not AppLink — 15 services here are, and
-  `getDeviceLinkCode` answers anonymously**, so a client CAN link its own account and browse. That
-  door is open where AppLink's is shut.
+  **DeviceLink services CAN be browsed in full — PROVEN on Amazon Music.** 15 of 106 here are
+  DeviceLink (vs 59 AppLink, 32 Anonymous). One browser authorisation by the owner yields an
+  authToken/privateKey, and `getMetadata` then returns the whole tree — **"Prime Stations" is a
+  root-level container, 26 genres x ~50 stations**, no Sonos app or cloud involved. The `#chunk-`
+  suffix in a station id is **minted per response — never construct one**, just take the browsed id
+  verbatim (old ones stay valid indefinitely). The `prime/stations/` *path* is legacy; build against
+  `catalog/stations/`. Gotcha: `linkDeviceId` is per-request and required to redeem the code — drop
+  it and the user has to authorise again.
   Handy trick recorded there: `http://<speaker>:1400/getaa?s=1&u=<encoded URI>` is a **read-only
   oracle for URI validity** — 200 = real, 404 = not — and it also gives album art for free. It covers
   tracks only: for containers/stations a 404 means nothing. Also records two durability risks to this project's premise (`customsd.htm` now 403s

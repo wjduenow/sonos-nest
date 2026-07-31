@@ -39,8 +39,8 @@ offers, but you CAN read the id of anything that has played — locally, read-on
 | **Spotify: track / album / playlist by id** | ✅ | Transparent wrapper; URI validity **proven read-only** via the `/getaa` oracle. Needs a helper for the Spotify API |
 | Spotify stations / Daily Mix / Discover Weekly | ❌ | Spotify's own API removed the radio generator and filters Spotify-owned playlists below extended quota (unreachable: needs 250k MAU) |
 | **Amazon `prime/stations/`** | ❌ | **Legacy namespace** — absent from the current presentation map; nothing new is minted there |
-| Amazon `catalog/stations/` | ⚠️ | Keys enumerable (14 public, or full tree via DeviceLink); construction probably works but needs one playback test |
-| **DeviceLink services (15 of 106)** | ✅ | `getDeviceLinkCode` answers anonymously — a client CAN link its own account and browse. Untested past the handshake |
+| **Amazon Prime Stations via DeviceLink** | ✅ | **PROVEN**: browse returns 26 genres x ~50 stations with server-minted ids. Never construct a `#chunk-`. Playback leg still untested |
+| **DeviceLink services (15 of 106)** | ✅ | **Handshake + browse both PROVEN on Amazon.** One browser ceremony by the owner, then full catalogue access with no Sonos app or cloud |
 
 ---
 
@@ -545,7 +545,80 @@ broken.
 
 ---
 
-## Amazon Music (sid 201): `prime/` is legacy — and DeviceLink is an open door
+## Amazon Music (sid 201): SOLVED — DeviceLink browse works, Prime Stations enumerate
+
+> ### ✅ PROVEN END TO END ON THIS HOUSEHOLD
+>
+> The DeviceLink handshake was completed for real (owner authorised in a browser; `getDeviceAuthToken`
+> returned a 630-char `authToken` + 524-char `privateKey`), and browsing works with no Sonos app and
+> no Sonos cloud in the path. **`getMetadata(root)` returns 7 containers, and the second one is
+> literally "Prime Stations".**
+>
+> ```
+> root -> upsell-banner/#upsell_banner              NEW with Amazon Prime Music
+>         catalog/playlists/#prime_playlists        Playlists
+>         catalog/stations/#prime_stations          Prime Stations      <-- the thing that was asked for
+>         catalog/popular/#catalog_popular_desc     Charts
+>         catalog/recs/#catalog_recs_desc           Recommended
+>         catalog/new/#catalog_new_desc             New
+>         library/#library_node_desc                My Music
+>
+> Prime Stations -> 26 containers: Recently Played, Popular Genres & Artists,
+>                   Holiday, Alternative Rock, Blues, Classic Rock, Country, Jazz,
+>                   Latin, Pop, R&B, Rap & Hip-Hop, Rock, K-Pop, Classical, ...
+>
+> Prime Stations > Jazz -> total=50 stations, e.g.
+>   program  Smooth Jazz        catalog/stations/A3SP31LN235GV3/#chunk-E6rfSVq6T76DZ0M1uqkjYQ
+>   program  Miles Davis        catalog/stations/A2JQOZI8G660XB/#chunk-SbRXgwInR3qWVewfxtHpVQ
+>   program  Ella Fitzgerald    catalog/stations/AQU23GR4JGHVS/#chunk-Yh80R5jKTEmpROI6ZrD4Ug
+> ```
+>
+> **26 genres x up to 50 stations each — the full Prime Stations catalogue, enumerable on-device.**
+>
+> ### The `#chunk-` question is answered: NEVER construct one
+>
+> **RUN-VERIFIED.** The token is minted fresh **on every response**. The same container fetched twice,
+> seconds apart:
+> ```
+> Smooth Jazz   1st fetch: #chunk-E6rfSVq6T76DZ0M1uqkjYQ
+> Smooth Jazz   2nd fetch: #chunk-e91yr96VT0qwGFIWXdRWzg
+> ```
+> And the household's Classic R&B favourite carries `#chunk-B3lICZsjReCUZn96D9JspA` from years ago
+> while browse now mints `#chunk-w9zY0Rd8S9ujZZFEFi0rFQ` for the same key — **both valid at once**
+> (the old one is what a speaker is playing).
+>
+> So: **the chunk is a per-response handle, old ones never expire, and there is no reason to guess.**
+> Browse, take the id verbatim, play it. Tests T2/T3/T4/T5 in the section below are moot — they
+> existed only to probe whether a client could mint a chunk, and the answer is that it never needs to.
+>
+> Note stations arrive as `itemType=program`, which per noson's mapping is
+> `x-sonosapi-radio:<id>?sid=&sn=` — matching the household's existing station favourites exactly.
+>
+> ### What this means beyond Amazon
+>
+> **15 of this household's 106 services are DeviceLink** and the same handshake applies to all of
+> them. This is the general answer to "can a standalone controller browse a real music service": for
+> AppLink services no, for DeviceLink services **yes, with one browser ceremony by the owner**.
+>
+> ### Still untested
+>
+> Playback. But the risk profile has changed completely: we would now be playing a **server-minted**
+> URI taken verbatim from a browse, not a constructed one. The one remaining question is whether an
+> un-resolved `x-sonosapi-radio:` is accepted by `SetAVTransportURI` (the UPnP 402 concern), and the
+> free test for that is unchanged — play an existing station favourite.
+>
+> ### Operational notes
+>
+> - The token pair lives in the session scratchpad at `amzn_token.json` (chmod 600) and is
+>   **deliberately not committed**. It is an Amazon Music credential. It will vanish with the session;
+>   a production implementation would keep it in NVS.
+> - Revoke any time from Amazon -> Login with Amazon / connected apps.
+> - `linkDeviceId` from `getDeviceLinkCode` is **per-request and required** by `getDeviceAuthToken`.
+>   Capture it with the `linkCode` or the authorisation is unredeemable and the user must repeat it.
+> - `getDeviceLinkCode` is answered anonymously, so the handshake can be initiated by anyone; only
+>   the browser approval is the owner's.
+
+### Original finding: `prime/` the PATH is legacy — and that is still true
 
 **Asked because the household's stations are here and `prime/` was the interest. Short answers:
 `prime/` is a dead namespace, its keys are the same id space as `catalog/`, station keys ARE
