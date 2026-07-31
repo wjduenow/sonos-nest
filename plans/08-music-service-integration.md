@@ -1,27 +1,159 @@
-# 08 — music service integration (YouTube Music, SMAPI, the Control API)
+# 08 — music services: the Radio feature, and the research behind it
 
-**The question:** the household has YouTube Music linked, and YouTube Music has its own radio
-stations. Can a unit enumerate them and put them on a Radio page?
+**Part 1 is the implementation plan. Part 2 is the research record** that establishes what is and
+isn't possible — read Part 2's *Verdict table* if you want the one-screen summary of which services
+can be browsed and which cannot.
 
-**For YouTube Music specifically: no, and not through any route.** Verified three independent ways
-(below). That is a closed question — **do not re-open it without new evidence**, because it cost
-three research agents to close properly.
-
-**But the broader goal — a real Radio page with browsable station catalogues — IS achievable.**
-32 of this household's 106 services need no credentials at all, and anonymous SMAPI browsing has been
-**verified end to end by running it**: browse the catalogue, resolve a station to a stream URL, with
-no token, no cloud, no Pi and no Sonos app. See *Anonymous SMAPI browsing WORKS*. One playback test
-with the owner present is all that remains before this can be built.
-
-**What works instead:** Sonos favourites (`FV:2`). A station favourited once in the Sonos app appears
-there as a playable `sid=284` container, which `core/library.cpp` already plays. That is how the 28
-YouTube Music favourites on this household got there.
-
-**What is newly possible and worth building:** a *capture* channel. You cannot browse what a service
-offers, but you CAN read the id of anything that has played — locally, read-only, no token. See
-*The capture channel* below. It is the only genuinely new capability this research produced.
+The short version: **Sonos favourites are not radio.** The jukebox's current "Radio" page lists
+`FV:2` favourites, which is a different thing wearing the wrong name. Amazon's Prime Stations *are*
+radio, they enumerate in full over SMAPI DeviceLink (proven on hardware), and they are what the new
+Radio page will show.
 
 ---
+
+# Part 1 — Implementation plan: Favorites + Radio
+
+## What changes
+
+| | now | after |
+|---|---|---|
+| rail slot 2 | **Radio** (`LV_SYMBOL_LIST`) — actually lists `FV:2` favourites | **Favorites**, heart icon — same content, honest name |
+| rail slot 3 | — | **Radio**, radio icon — Amazon Prime Stations, hierarchical |
+| rail | 4 items | **5 items** |
+
+Nothing about the favourites page's behaviour changes; it is a rename plus an icon. The new Radio
+page is the actual work.
+
+## UX
+
+### The rail grows to five
+
+`RAIL_BTN` is 72 px on an 86 px pitch, so five items occupy 430 px of the 600 px panel height —
+fits with room to spare. No geometry change needed beyond `PAGE_COUNT`.
+
+> ⚠️ **Icon problem, and it needs deciding before the UI work starts. LVGL's built-in symbol font has
+> neither a heart nor a radio glyph.** The current icons are `AUDIO / LIST / VOLUME_MAX / SETTINGS`,
+> i.e. "Radio" is a *list* icon today. Two options:
+>
+> - **(a) Convert a two-glyph Lucide subset** (`heart`, `radio`) into an LVGL font. This is what the
+>   design system actually specifies — `screens.cpp` already carries a TODO admitting the Lucide →
+>   `LV_SYMBOL_*` substitution is a deviation. Costs a few KB of flash, scoped to `UNIT_JUKEBOX` the
+>   same way the Montserrat sizes already are. **Recommended.**
+> - **(b) Interim fallback:** Favorites keeps `LV_SYMBOL_LIST`, Radio takes `LV_SYMBOL_AUDIO`. Ugly
+>   and ambiguous against Now Playing, but unblocks the rest.
+
+### Three levels, with a real back affordance
+
+```
+Radio root      26 genre tiles  (+ Recently Played, Popular Genres & Artists)
+  -> genre      up to 50 stations
+     -> tap     play
+```
+
+Both existing list pages are flat, so there is no back control anywhere in this unit yet. A header
+chevron is the right answer here — the nest's long-press-to-go-back convention is a rotary idiom and
+does not belong on a 7" touch panel. Keep a nav stack; depth never exceeds 3.
+
+**LVGL pool cost:** 50 station rows at ~1 KB each is ~50 KB of the 512 KB pool — comfortable, and the
+26-tile genre grid is cheaper. Free the level you are leaving, exactly as the favourites page already
+does on exit.
+
+## The SD cache
+
+### Why cache at all
+
+Browsing live costs one HTTPS SOAP round-trip per level at ~0.6 s, over the ESP-Hosted link that is
+documented to die under sustained load. Caching makes browsing instant, survives a dead link, and
+keeps the radio traffic to one scheduled burst instead of a request per tap.
+
+### Layout
+
+**One file per genre plus an index**, not a single blob:
+
+```
+/radio/index.tsv      version, fetchedAt, serviceId, accountSerial, then one line per genre:
+                      <genreIdx>\t<title>\t<container id>
+/radio/g00.tsv .. g25.tsv    one line per station:
+                      <title>\t<full item id>
+```
+
+TSV, not JSON: no parser, no allocator, read a line at a time. A page render touches exactly one
+small file and never parses the whole catalogue.
+
+> **Cache the station's full item id verbatim** — `catalog/stations/<KEY>/#chunk-<token>`. Do **not**
+> store key and chunk separately and recombine, and do **not** attempt to mint a chunk. Chunks are
+> server-minted per response but **never expire** (a years-old favourite is still playable), so a
+> cached id stays good indefinitely. See Part 2 for the evidence.
+
+### Refresh job
+
+- A low-priority task on core 0, or a step folded into netTask's idle path — **never** the UI task.
+- Triggered on boot when the index is older than N days, plus a manual **Refresh** in Settings.
+- **Weekly is ample.** The genre list is static and station rosters move slowly.
+- **Pace it: one request every 1–2 s, not 27 back to back.** The ESP-Hosted fault correlates with
+  sustained load, and a 500 KB burst is exactly that profile.
+- Write to a temp file and rename on success, so a failed crawl never leaves a half-written index.
+
+## Measured budget — the answer to "can we afford this?"
+
+**Yes, comfortably. Bandwidth is not the constraint.** Measured against the live service:
+
+| | measured |
+|---|---|
+| Prime Stations root | **11,278 B**, 26 containers, 0.60 s |
+| One genre (Jazz / Rock / Country, all sampled) | **~19.2 KB**, exactly **50** stations, 0.60 s |
+| Per station, on the wire | **~382 B** |
+| **Full crawl** | **27 requests · ~499 KB · ~16 s** |
+| **SD index** | **~90–190 KB** for ~1,300 stations |
+
+A weekly refresh is ~500 KB/week. Peak RAM is a single response (~20 KB) if parsed streaming —
+the catalogue is never held in memory. Genres cap at exactly 50, so no paging is needed.
+
+**The three real constraints, none of which are bandwidth:**
+
+1. **The SD card is still blocked.** It needs a FAT32 filesystem laid down from a PC, and the
+   filesystem throughput numbers are still unmeasured. This feature cannot ship before that.
+2. **Internal SRAM and TLS.** An mbedTLS session costs tens of KB of internal RAM and the jukebox
+   idles at only ~70–100 KB free. Crawl with **one connection at a time**, and never concurrently
+   with an album-art fetch.
+3. **The ESP-Hosted link dies under load** — the one unresolved fault on this board. Pace the crawl,
+   make it resumable, and treat a failure as "try again next boot" rather than retrying hard.
+
+## Open questions
+
+- **Station rows carry no artwork.** `albumArtURI` was **empty on all 150 stations sampled**. Either
+  art lives elsewhere (`getExtendedMetadata`, or `streamMetadata/logo` on the item) or the Radio list
+  is text-only. **Settle this before designing the tile.** If art does exist it is ~1,300 images —
+  lazy-load on scroll and cache per station, never bulk-fetch.
+- **Token lifetime and refresh.** `refreshAuthToken` exists in the WSDL; the lifetime is unknown.
+  Needs a re-auth path when it lapses.
+- **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
+  browser. Settings can show the `regUrl` (a QR code would be kinder on a wall panel).
+  **Gotcha:** `linkDeviceId` is per-request and required to redeem the code — capture it with the
+  `linkCode` or the user has to authorise twice.
+- **Does a browsed URI actually play?** The one untested leg. Cheapest test costs nothing new: play an
+  existing Amazon station favourite, which also settles the outstanding UPnP 402 question.
+- **Prime vs Unlimited.** Station *playback* may require Music Unlimited rather than plain Prime.
+
+## Build order
+
+1. **Unblock the SD card** — FAT32 from a PC, then `jukebox-sd` for real throughput numbers.
+2. **One playback test** — settles 402 and the tier question together.
+3. **Rename Radio → Favorites**, add the fifth rail slot, decide the icons.
+4. **Cache writer** — crawl + SD index, with the token hardcoded for bring-up.
+5. **Radio browse UI** reading the cache.
+6. **DeviceLink ceremony in Settings** + NVS token + refresh handling.
+
+Steps 1–2 are prerequisites and both need someone at the device. Steps 3–5 are independent of each
+other and can be built in any order.
+
+---
+
+# Part 2 — Research record
+
+Everything below is evidence for the choices above: what was tried, what worked, what was measured,
+and what remains unverified. Kept in full because the negative results are as load-bearing as the
+positive ones — several of them are questions that will otherwise be asked again.
 
 ## Verdict table
 
