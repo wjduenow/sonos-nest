@@ -24,6 +24,15 @@ Radio page will show.
 Nothing about the favourites page's behaviour changes; it is a rename plus an icon. The new Radio
 page is the actual work.
 
+## Scope decision: Amazon Prime Stations, exclusively
+
+The Radio page shows **Amazon Prime Stations and nothing else.** The anonymous-SMAPI route (TuneIn,
+SomaFM, NTS — 32 credential-free services, fully proven in Part 2) stays documented as a **fallback**,
+not a second source. Mixing catalogues would mean reconciling two id schemes, two auth models and two
+cache shapes for a list the user experiences as one thing. If the Amazon route ever fails — token
+revoked, tier downgraded, API change — Part 2 has everything needed to swap the backend without
+touching the UI.
+
 ## UX
 
 ### The rail grows to five
@@ -42,21 +51,72 @@ fits with room to spare. No geometry change needed beyond `PAGE_COUNT`.
 > - **(b) Interim fallback:** Favorites keeps `LV_SYMBOL_LIST`, Radio takes `LV_SYMBOL_AUDIO`. Ugly
 >   and ambiguous against Now Playing, but unblocks the rest.
 
-### Three levels, with a real back affordance
+### The list rolls — it is a drum, not a page of rows
+
+The Radio list should read like a jukebox mechanism: a **rolling drum** you spin, with one entry
+selected at the centre, at every level.
+
+**Use `lv_roller`.** LVGL ships exactly this widget — a perspective drum that snaps to a centred
+option, driven by drag. It is the mechanic being described, it is built in, and it costs nothing to
+adopt.
 
 ```
-Radio root      26 genre tiles  (+ Recently Played, Popular Genres & Artists)
-  -> genre      up to 50 stations
-     -> tap     play
+┌──────────────────────────────────────────────────────────┐
+│ ‹ Jazz                                          [search] │
+│ ┌───────────────────────┐  ┌───────────────────────────┐ │
+│ │   Instrumental Jazz   │  │                           │ │
+│ │   Cool Jazz           │  │      (art, if any)        │ │
+│ │ ▸ SMOOTH JAZZ ◂       │  │                           │ │
+│ │   Ultimate Jazz Radio │  │   Smooth Jazz             │ │
+│ │   Vocal Jazz          │  │   Jazz · Prime Station    │ │
+│ └───────────────────────┘  │        [ ▶  Play ]        │ │
+│  A B C D E F G H … Z       └───────────────────────────┘ │
+└──────────────────────────────────────────────────────────┘
 ```
 
-Both existing list pages are flat, so there is no back control anywhere in this unit yet. A header
-chevron is the right answer here — the nest's long-press-to-go-back convention is a rotary idiom and
-does not belong on a 7" touch panel. Keep a nav stack; depth never exceeds 3.
+**Roller left (~40%), detail panel right.** This layout is what makes the artwork question stop
+mattering: `lv_roller` options are plain text, so no per-row art is possible *or needed* — art belongs
+in the detail panel for the **one** selected station. That is a single lazily-fetched image instead of
+1,300, which kills the bulk-fetch problem outright. If the artwork investigation comes back negative,
+the panel shows title, genre and Play, and the design is unchanged.
 
-**LVGL pool cost:** 50 station rows at ~1 KB each is ~50 KB of the 512 KB pool — comfortable, and the
-26-tile genre grid is cheaper. Free the level you are leaving, exactly as the favourites page already
-does on exit.
+**Alternative if per-row art is ever wanted:** a normal list with
+`lv_obj_set_scroll_snap_y(LV_SCROLL_SNAP_CENTER)` gives drum-like snapping with rich rows. More pool
+per row and more work; only worth it if art turns out to exist *and* looks better inline.
+
+### Levels
+
+```
+L1  genres        26 entries, rolls        ‹ back = Radio root is top
+L2  stations      50 entries, rolls        ‹ back to genres
+    select        detail panel -> Play
+```
+
+Rolling behaviour is identical at both levels; drilling in replaces the roller's contents rather than
+building a new screen. A header chevron is the back affordance — the nest's long-press-to-go-back is a
+rotary idiom and does not belong on a 7" touch panel. Nav stack depth never exceeds 2.
+
+### Filtering — two mechanisms, both needed
+
+**1. Type-to-filter (on-screen keyboard).** A search affordance in the header opens an
+`lv_textarea` + `lv_keyboard` — the unit already has both wired for the device-name field in
+Settings, so this is reuse, not new machinery. Typing filters the roller live.
+
+- **Scope:** search is **global across all ~1,300 stations**, not just the current genre. Someone
+  hunting "Miles Davis" should not have to know he is under Jazz.
+- **Cap results at ~100.** A roller's options are one newline-joined string held in the LVGL pool; at
+  ~25 B per entry the full 1,300 is ~32 KB, which fits the 512 KB pool but is wasteful to rebuild on
+  every keystroke. Capping bounds both the allocation and the rebuild cost.
+- **Debounce ~200 ms** so a fast typist does not trigger a rebuild per character.
+- The keyboard occupies roughly the lower half of a 1024×600 panel; slide it over the detail panel and
+  keep the roller visible, so results update where the user is looking.
+
+**2. A-Z jump strip.** A vertical column of letters down the side. Tapping a letter rolls to the first
+entry beginning with it — the phone-contacts idiom, and much faster than dragging through 50 entries.
+
+- Requires each genre's stations **sorted by title**, plus a 26-entry offset table (letter → first
+  index). Both are produced at crawl time, not on device — see the cache section.
+- Letters with no entries render dimmed and ignore taps.
 
 ## The SD cache
 
@@ -73,9 +133,16 @@ keeps the radio traffic to one scheduled burst instead of a request per tap.
 ```
 /radio/index.tsv      version, fetchedAt, serviceId, accountSerial, then one line per genre:
                       <genreIdx>\t<title>\t<container id>
-/radio/g00.tsv .. g25.tsv    one line per station:
+/radio/g00.tsv .. g25.tsv    one line per station, SORTED BY TITLE:
                       <title>\t<full item id>
+/radio/g00.azx .. g25.azx    26 bytes-per-entry offset table: letter -> first line index
+/radio/all.tsv        flat cross-genre search index, sorted by title:
+                      <title>\t<genreIdx>\t<full item id>
 ```
+
+**Sort at crawl time, not on device.** The device must never sort 1,300 strings — the crawler writes
+each genre file already ordered by title and emits the A-Z offset table alongside it. `all.tsv`
+exists so global type-to-filter is a single linear scan of one file rather than 26 opens.
 
 TSV, not JSON: no parser, no allocator, read a line at a time. A page render touches exactly one
 small file and never parses the whole catalogue.
@@ -121,10 +188,12 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 
 ## Open questions
 
-- **Station rows carry no artwork.** `albumArtURI` was **empty on all 150 stations sampled**. Either
-  art lives elsewhere (`getExtendedMetadata`, or `streamMetadata/logo` on the item) or the Radio list
-  is text-only. **Settle this before designing the tile.** If art does exist it is ~1,300 images —
-  lazy-load on scroll and cache per station, never bulk-fetch.
+- **Station artwork — now de-risked, not blocking.** `albumArtURI` was empty on all 150 stations
+  sampled, and an investigation is open into whether art lives elsewhere (`getExtendedMetadata`,
+  `getMediaMetadata`, or `streamMetadata/logo`). **The roller design means either answer works**: art
+  belongs to the single selected station in the detail panel, so it is one lazy fetch, not 1,300. If
+  art exists, cache it per station on SD alongside the index; if not, the panel is typographic. Do
+  **not** let this block the UI work.
 - **Token lifetime and refresh.** `refreshAuthToken` exists in the WSDL; the lifetime is unknown.
   Needs a re-auth path when it lapses.
 - **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
@@ -138,14 +207,18 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 ## Build order
 
 1. **Unblock the SD card** — FAT32 from a PC, then `jukebox-sd` for real throughput numbers.
-2. **One playback test** — settles 402 and the tier question together.
-3. **Rename Radio → Favorites**, add the fifth rail slot, decide the icons.
-4. **Cache writer** — crawl + SD index, with the token hardcoded for bring-up.
-5. **Radio browse UI** reading the cache.
-6. **DeviceLink ceremony in Settings** + NVS token + refresh handling.
+2. **One playback test** — settles the UPnP 402 question and the Prime-vs-Unlimited tier question
+   together, using an existing station favourite so no new code is needed.
+3. **Rename Radio → Favorites**, add the fifth rail slot, convert the two Lucide glyphs.
+4. **Cache writer** — crawl + sorted SD index + A-Z offset tables + `all.tsv`, token hardcoded for
+   bring-up. Testable entirely off-device against the files it produces.
+5. **Radio roller** — L1 genres, L2 stations, detail panel, Play. The core of the feature.
+6. **Filtering** — A-Z jump strip first (cheap, no keyboard), then type-to-filter over `all.tsv`.
+7. **DeviceLink ceremony in Settings** + NVS token + `refreshAuthToken` handling.
 
-Steps 1–2 are prerequisites and both need someone at the device. Steps 3–5 are independent of each
-other and can be built in any order.
+Steps 1–2 are prerequisites and both need someone at the device. Step 4 produces files that step 5
+consumes, so those are ordered; 3 is independent of everything. Step 6 splits cleanly — the A-Z strip
+is worth having even if type-to-filter slips, since it makes 50 entries navigable on its own.
 
 ---
 
