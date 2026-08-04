@@ -148,6 +148,15 @@ static void processPending() {
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
 
+  // A ready-made URI + DIDL from the UI (Radio stations). Verified on hardware that an
+  // x-sonosapi-radio: URI goes straight to SetAVTransportURI with no getMediaURI resolve step —
+  // see plans/08. Stations are instantPlay, so this replaces the transport rather than enqueueing.
+  if (p.playUri.length()) {
+    sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
+    sonos::play(s_coordIp);
+    s_lastPoll = 0;                        // reflect the new track immediately
+  }
+
   // Grouping: join a speaker to the active group, or split one off. Re-discover topology
   // and refresh the active room's coordinator afterward, then signal the UI.
   if (p.groupJoinIp.length()) {

@@ -42,6 +42,10 @@ struct PendingCmds {
   String groupLeaveIp;        // remove this speaker from its group (become standalone)
   String localStreamUrl;      // non-empty: play this local HTTP file URL on the coordinator, looped
   String localStreamTitle;    // dc:title shown by Sonos for the local stream
+  String playUri;             // non-empty: a fully-formed transport URI to play on the coordinator,
+  String playMeta;            // with this DIDL. Used by the Radio page, where the unit already has
+                              // both from the station cache and there is nothing for netTask to
+                              // look up — unlike a favourite, which goes through library::.
   String wifiSsid;            // non-empty: apply these WiFi creds (with wifiPass) on netTask
   String wifiPass;
   bool   reboot = false;      // reboot the device. Set on a device-name change: a clean boot

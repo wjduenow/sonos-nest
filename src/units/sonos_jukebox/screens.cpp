@@ -575,19 +575,182 @@ static void kbShowCb(lv_event_t *e) {
 }
 static void kbDoneCb(lv_event_t *) { lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN); }
 
-// --- Radio (Amazon Prime Stations) --------------------------------------------------------------
+// --- Radio (Amazon Prime Stations) ---
+// Two levels over the SD cache: genres, then that genre's stations. Level 1 is a plain text grid
+// because the service ships only two grey placeholder images for all 26 genres — tiles there would
+// be 26 copies of the same square. Level 2 is the snapping carousel (option B in the design mock).
+//
+// Rows are built from a std::vector read off the card, and freed on the way out: at ~1 KB of LVGL
+// pool per row plus a decoded image each, a 50-row list left resident would be the single largest
+// thing on the heap. See the pool arithmetic in plans/08.-----------------------------------------------------------
 // Placeholder until the SD cache and the station carousel land (plans/08 steps 4-5). It reports the
 // real precondition rather than pretending: with no card there is nothing to browse, and saying so
 // beats an empty list that looks broken.
 static lv_obj_t *s_radioStatus = nullptr;
+static lv_obj_t *s_radioList = nullptr;      // holds either the genre grid or the station carousel
+static lv_obj_t *s_radioTitle = nullptr, *s_radioBack = nullptr;
+static int  s_radioLevel = 0;                // 0 = genres, 1 = stations
+static int  s_radioGenre = -1;               // which genre we descended into
+static String s_radioGenreId, s_radioGenreName;
+static std::vector<radiocache::Station> s_radioStations;
+static uint32_t s_radioShownGen = UINT32_MAX;   // cache generation actually rendered
+static int  s_radioSnapped = -1;                // centred row, for the detent cue
+
+static void radioShowGenres();
+static void radioShowStations(int genreIdx);
+
+// Tap a station: play it on the active room's coordinator, exactly as a favourite would be.
+static void radioPlayCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= (int)s_radioStations.size()) return;
+  uiSoundPlay(UiSound::Confirm);
+  amazon::Station st;
+  st.title = s_radioStations[i].title;
+  st.id    = s_radioStations[i].id;
+  if (stateLock()) {
+    g_pending.playUri  = amazon::playUri(st);
+    g_pending.playMeta = amazon::playMeta(st, s_radioGenreId);
+    stateUnlock();
+  }
+}
+
+static void radioGenreCb(lv_event_t *e) {
+  uiSoundPlay(UiSound::Tick);
+  radioShowStations((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void radioBackCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Tick);
+  radioShowGenres();
+}
+
+// Detents: fire when the CENTRED ROW CHANGES, never on scroll events — those arrive far more often
+// than rows cross and would smear into noise. Rate-limited so a fast flick thins out rather than
+// queueing; the cue queue drops when full, but relying on that would be accidental design.
+static void radioScrollCb(lv_event_t *e) {
+  lv_obj_t *list = (lv_obj_t *)lv_event_get_target(e);
+  const int32_t mid = lv_obj_get_scroll_y(list) + lv_obj_get_height(list) / 2;
+  int best = -1; int32_t bd = INT32_MAX;
+  const uint32_t n = lv_obj_get_child_count(list);
+  for (uint32_t i = 0; i < n; i++) {
+    lv_obj_t *c = lv_obj_get_child(list, i);
+    const int32_t cy = lv_obj_get_y(c) + lv_obj_get_height(c) / 2;
+    const int32_t d  = abs(cy - mid);
+    if (d < bd) { bd = d; best = (int)i; }
+  }
+  if (best < 0 || best == s_radioSnapped) return;
+  s_radioSnapped = best;
+  static uint32_t lastTick = 0;
+  if (settingsScrollSound() && millis() - lastTick >= 45) {
+    lastTick = millis();
+    uiSoundPlay(UiSound::Tick);
+  }
+}
+
+static void radioClear() {
+  if (s_radioList) lv_obj_clean(s_radioList);
+  s_radioStations.clear();
+  s_radioSnapped = -1;
+}
+
+static void radioShowGenres() {
+  radioClear();
+  s_radioLevel = 0; s_radioGenre = -1;
+  lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_radioTitle, "Radio");
+  lv_obj_remove_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_NONE);
+
+  const int n = radiocache::genreCount();
+  const lv_coord_t w = (SCREEN_W - RAIL_W - PAD_X * 2 - 20) / 2, h = 64;
+  for (int i = 0; i < n; i++) {
+    String title, id;
+    if (!radiocache::genre(i, title, id)) continue;
+    lv_obj_t *b = lv_button_create(s_radioList);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_pos(b, (i % 2) * (w + 20), (i / 2) * (h + 10));
+    lv_obj_set_style_radius(b, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(b, radioGenreCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_t *l = label(b, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(l, w - 32);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 16, 0);
+  }
+}
+
+static void radioShowStations(int genreIdx) {
+  String gname, gid;
+  if (!radiocache::genre(genreIdx, gname, gid)) return;
+  radioClear();
+  s_radioLevel = 1; s_radioGenre = genreIdx;
+  s_radioGenreId = gid; s_radioGenreName = gname;
+  radiocache::stations(genreIdx, s_radioStations);
+
+  lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_radioTitle, gname.c_str());
+  lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_CENTER);
+
+  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
+  for (size_t i = 0; i < s_radioStations.size(); i++) {
+    lv_obj_t *row = lv_button_create(s_radioList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 10)));
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, radioPlayCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    // Art tile placeholder. The bounded image cache lands next; until then the glyph keeps the
+    // row geometry honest so the carousel is laid out for what it will hold.
+    lv_obj_t *tile = panel(row, 72, 72, JB_SCREEN_ELEV_2, JB_R_MD);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_t *g = label(tile, LV_SYMBOL_AUDIO, &lv_font_montserrat_20, JB_TEXT_DIM);
+    lv_obj_center(g);
+
+    lv_obj_t *t = label(row, s_radioStations[i].title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(t, w - 120);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
+    lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
+  }
+  lv_mem_monitor_t mon; lv_mem_monitor(&mon);
+  Serial.printf("[ui    ] radio: %s, %u stations, lvgl_free=%uKB\n", gname.c_str(),
+                (unsigned)s_radioStations.size(), (unsigned)(mon.free_size / 1024));
+}
 
 static void buildRadio() {
   lv_obj_t *pg = s_page[PAGE_RADIO];
-  lv_obj_t *h = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
+
+  s_radioBack = lv_button_create(pg);
+  lv_obj_remove_style_all(s_radioBack);
+  lv_obj_set_size(s_radioBack, 52, 52);
+  lv_obj_align(s_radioBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
+  lv_obj_add_event_cb(s_radioBack, radioBackCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *bl = label(s_radioBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_center(bl);
+  lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+
+  s_radioTitle = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(s_radioTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
 
   s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 100);
+
+  s_radioList = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_radioList);
+  lv_obj_set_size(s_radioList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 110) - PAD_BOT);
+  lv_obj_align(s_radioList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 106);
+  lv_obj_set_style_bg_opa(s_radioList, LV_OPA_TRANSP, 0);
+  lv_obj_set_scroll_dir(s_radioList, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(s_radioList, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_add_event_cb(s_radioList, radioScrollCb, LV_EVENT_SCROLL, nullptr);
+  lv_obj_add_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void buildSettings() {
@@ -868,8 +1031,17 @@ void uiTick() {
     else if (!amazon::linked())         msg = "Amazon Music not linked.\nLink it in Settings to browse stations.";
     else if (radiocache::busy())        msg = "Building the station cache...";
     else if (!radiocache::ready())      msg = "Station cache not built yet.\nIt builds automatically once linked.";
-    else msg = String(radiocache::genreCount()) + " genres cached.\nBrowsing lands next.";
+    else msg = "";
     if (msg != shownRadio) { shownRadio = msg; lv_label_set_text(s_radioStatus, msg.c_str()); }
+    if (msg.isEmpty()) lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    else               lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+
+    // Populate once the cache exists, and repopulate after a refresh replaces it.
+    const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;
+    if (gen && gen != s_radioShownGen && !radiocache::busy()) {
+      s_radioShownGen = gen;
+      radioShowGenres();
+    }
   }
 
   // Favorites: render from the cache if it is fresh, otherwise ask once on arrival and poll for the
