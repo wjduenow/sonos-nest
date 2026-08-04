@@ -27,6 +27,8 @@
 #include "core/app.h"          // g_link* — netTask's link snapshot. NEVER call WiFi.* from here:
                               // on this board the radio is a co-processor and those are blocking
                               // RPCs, so a UI-task caller freezes rendering when the link dies.
+#include "core/amazon.h"
+#include "core/radio_cache.h"
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
 #include "ui_scale.h"
@@ -559,9 +561,6 @@ static void buildRadio() {
 
   s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 100);
-  lv_label_set_text(s_radioStatus, localStorageRoot()
-      ? "Amazon Prime Stations\nStation cache not built yet."
-      : "Amazon Prime Stations\nNo SD card — insert one to cache the station list.");
 }
 
 static void buildSettings() {
@@ -661,6 +660,9 @@ void uiInit() {
   buildRadio();
   buildRooms();
   buildSettings();
+  // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
+  // Started here rather than in appStartTasks() so the S3 units never spawn it.
+  radiocache::start();
 
   showPage(PAGE_NOW);
   backlightSet(100);
@@ -773,7 +775,21 @@ void uiTick() {
     rebuildRooms();
   }
 
-  // Radio: render from the cache if it is fresh, otherwise ask once on arrival and poll for the
+  // Radio: until the carousel lands, report exactly which precondition is unmet. Each of these is
+  // a different user action (insert a card / join Wi-Fi / link an account / wait), so a single
+  // "unavailable" would be useless.
+  if (s_cur == PAGE_RADIO && s_radioStatus) {
+    static String shownRadio;
+    String msg;
+    if (!localStorageRoot())            msg = "No SD card.\nInsert one to cache the station list.";
+    else if (!amazon::linked())         msg = "Amazon Music not linked.\nLink it in Settings to browse stations.";
+    else if (radiocache::busy())        msg = "Building the station cache...";
+    else if (!radiocache::ready())      msg = "Station cache not built yet.\nIt builds automatically once linked.";
+    else msg = String(radiocache::genreCount()) + " genres cached.\nBrowsing lands next.";
+    if (msg != shownRadio) { shownRadio = msg; lv_label_set_text(s_radioStatus, msg.c_str()); }
+  }
+
+  // Favorites: render from the cache if it is fresh, otherwise ask once on arrival and poll for the
   // async result. The browse runs on the net task; takeResults() returns true exactly once when a
   // new set lands. An empty result is cached too, so a system with no favourites doesn't re-browse
   // on every visit either.

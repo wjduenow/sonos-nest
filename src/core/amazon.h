@@ -34,6 +34,11 @@ struct Station {
   String artUrl;  // full-size; run through artThumbUrl() before fetching, or it may be a 6 MB PNG
 };
 
+// Fill in the two household-derived values linking and playback need — the Sonos household id and
+// our Amazon account serial (the sn= URI parameter). Both are read from any discovered speaker, so
+// this needs discovery to have run. Cheap, idempotent, and a no-op once both are known.
+void adopt();
+
 // --- Account linking ----------------------------------------------------------------------------
 // Three-step ceremony, owner in the loop once:
 //   1. linkBegin(url)  -> show `url` (or a QR of it) and ask the owner to approve in a browser

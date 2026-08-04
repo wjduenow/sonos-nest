@@ -21,6 +21,8 @@
 #include <WiFiClientSecure.h>
 
 #include "settings.h"
+#include "sonos/soap_client.h"
+#include "sonos/ssdp.h"
 
 namespace amazon {
 
@@ -162,6 +164,45 @@ static String request(const String &action, const String &body) {
   Serial.printf("[amazon] token refreshed in-band (%u/%u chars), retrying\n",
                 (unsigned)tok.length(), (unsigned)key.length());
   return post(action, credsHeader(), body);
+}
+
+// --- household-derived values ---------------------------------------------------------------------
+
+void adopt() {
+  if (settingsHouseholdId().length() && settingsAmazonSerial()) return;
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);
+  if (zs.empty()) return;
+  const String ip = zs[0].ip;
+
+  if (settingsHouseholdId().isEmpty()) {
+    String r;
+    if (sonos::soapAction(ip, "/DeviceProperties/Control",
+                   "urn:schemas-upnp-org:service:DeviceProperties:1", "GetHouseholdID", "", r)) {
+      const String hh = tagValue(r, "CurrentHouseholdID");
+      if (hh.length()) { settingsSetHouseholdId(hh); Serial.printf("[amazon] household %s\n", hh.c_str()); }
+    }
+  }
+
+  // The sn= parameter. Our own account's serial is whatever the household already assigned to
+  // Amazon Music, and the only place it is readable is an existing favourite's res URI. Playback
+  // was verified with the correct value; sending 0 is untested, so prefer the real one and only
+  // fall back if the household has no Amazon favourite at all.
+  if (!settingsAmazonSerial()) {
+    String r;
+    if (sonos::soapAction(ip, "/MediaServer/ContentDirectory/Control",
+                   "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
+                   "<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                   "<Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount>"
+                   "<SortCriteria></SortCriteria>", r)) {
+      const int at = r.indexOf("sid=201");
+      const int sn = (at < 0) ? -1 : r.indexOf("sn=", at);
+      if (sn > 0) {
+        const uint8_t v = (uint8_t)strtoul(r.substring(sn + 3, sn + 6).c_str(), nullptr, 10);
+        if (v) { settingsSetAmazonSerial(v); Serial.printf("[amazon] account serial sn=%u\n", v); }
+      }
+    }
+  }
 }
 
 // --- linking ------------------------------------------------------------------------------------
