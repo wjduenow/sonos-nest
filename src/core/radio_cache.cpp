@@ -34,12 +34,12 @@
 #include "amazon.h"
 #include "board.h"
 #include "net/wifi.h"
+#include "settings.h"
 
 namespace radiocache {
 
 static const char *kSub     = "/radio";
 static const char *kTmpSub  = "/radio.tmp";
-static const uint32_t kMaxAgeS = 7 * 24 * 3600;   // weekly; genre lists are static, rosters crawl
 static const uint32_t kPaceMs  = 1500;            // between requests — see the pacing note below
 
 static bool     s_busy = false;
@@ -281,10 +281,23 @@ static void cacheTask(void *) {
     // Wi-Fi down, and the Amazon account unlinked, and all three can arrive later.
     if (localStorageRoot() && wifiIsConnected()) amazon::adopt();
     if (localStorageRoot() && wifiIsConnected() && amazon::linked()) {
-      const uint32_t now = (uint32_t)time(nullptr);
-      const bool stale = !ready() ||
-                         (now > 1600000000 && fetchedAt() && now - fetchedAt() > kMaxAgeS);
-      if (s_wantRefresh || stale) {
+      // Scheduling: a fixed LOCAL hour once a day, not an age timer. ~500 KB of crawl traffic on
+      // a link that is this board's known weak point belongs at 4am, not whenever a 24h timer
+      // happens to expire — which drifts into the evening within a week.
+      //
+      // "Already ran today" is derived from the cache's own fetchedAt rather than a counter, so it
+      // survives a reboot: rebooting at 04:30 must not trigger a second crawl.
+      const time_t now = time(nullptr);
+      bool due = !ready();                       // no cache at all: build one immediately
+      if (!due && settingsRadioAutoRefresh() && now > 1600000000) {
+        struct tm lt {}, ft {};
+        localtime_r(&now, &lt);
+        const time_t f = (time_t)fetchedAt();
+        localtime_r(&f, &ft);
+        const bool ranToday = fetchedAt() && lt.tm_year == ft.tm_year && lt.tm_yday == ft.tm_yday;
+        due = (lt.tm_hour == (int)settingsRadioRefreshHour()) && !ranToday;
+      }
+      if (s_wantRefresh || due) {
         s_wantRefresh = false;
         refresh();
       }

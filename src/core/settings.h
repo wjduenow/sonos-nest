@@ -23,6 +23,15 @@ void    settingsSetUiSound(uint8_t pct);
 bool    settingsScrollSound();
 void    settingsSetScrollSound(bool on);
 
+// --- Radio cache refresh schedule ---------------------------------------------------------------
+// The station catalogue is crawled once a day at a fixed LOCAL hour (the device's CLOCK_TZ), not on
+// an age timer: a predictable overnight slot keeps ~500 KB of traffic off the ESP-Hosted link at the
+// times anyone is listening. Default 4 (04:00 local).
+bool    settingsRadioAutoRefresh();
+void    settingsSetRadioAutoRefresh(bool on);
+uint8_t settingsRadioRefreshHour();          // 0-23 local
+void    settingsSetRadioRefreshHour(uint8_t hour);
+
 // --- Amazon Music (SMAPI DeviceLink) ------------------------------------------------------------
 // Our OWN account credentials, not the household's — Sonos never discloses those (plans/08). The
 // token expires in under an hour and is refreshed in-band by core/amazon.cpp, so these are written

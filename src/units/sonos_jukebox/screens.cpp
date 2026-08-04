@@ -31,6 +31,8 @@
 #include "core/radio_cache.h"
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
+#include "../../boards/crowpanel_p4_7in/bringup_console.h"   // no-op unless the
+                                                            // bring-up flag is set
 #include "ui_scale.h"
 
 // --- Geometry, from the design's device shell -------------------------------------------------
@@ -525,6 +527,31 @@ static void soundCb(lv_event_t *e) {
   if (lv_event_get_code(e) == LV_EVENT_RELEASED) uiSoundPlay(UiSound::Tick);
 }
 
+static lv_obj_t *s_hourLbl = nullptr, *s_radioMeta = nullptr;
+
+static void hourStep(int delta) {
+  int h = (int)settingsRadioRefreshHour() + delta;
+  if (h < 0) h = 23; if (h > 23) h = 0;
+  settingsSetRadioRefreshHour((uint8_t)h);
+  if (s_hourLbl) lv_label_set_text_fmt(s_hourLbl, "%02d:00", h);
+  uiSoundPlay(UiSound::Tick);
+}
+static void hourDownCb(lv_event_t *) { hourStep(-1); }
+static void hourUpCb(lv_event_t *)   { hourStep(+1); }
+static void autoRefreshCb(lv_event_t *e) {
+  const bool on = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+  settingsSetRadioAutoRefresh(on);
+  uiSoundPlay(UiSound::Tick);
+}
+static void scrollSoundCb(lv_event_t *e) {
+  settingsSetScrollSound(lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED));
+  uiSoundPlay(UiSound::Tick);
+}
+static void refreshNowCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Confirm);
+  radiocache::requestRefresh();
+}
+
 // Device name drives the DHCP hostname, the mDNS name and the OTA name, and all three are derived
 // once at boot (wifiHostname()/otaHostname()). A reboot is therefore the honest way to apply it —
 // which is exactly what g_pending.reboot exists for.
@@ -620,6 +647,53 @@ static void buildSettings() {
 
   lv_obj_t *hint = label(pg, "0 turns feedback off.", &lv_font_montserrat_12, JB_TEXT_DIM);
   lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 318);
+
+  // --- Scroll feedback (separate from the master level above) ---
+  lv_obj_t *ssl = label(pg, "Clicks while scrolling", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_align(ssl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 352);
+  lv_obj_t *ssw = lv_switch_create(pg);
+  lv_obj_set_size(ssw, 72, 38);
+  lv_obj_align(ssw, LV_ALIGN_TOP_LEFT, 300, PAD_TOP + 346);
+  lv_obj_set_style_bg_color(ssw, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+  if (settingsScrollSound()) lv_obj_add_state(ssw, LV_STATE_CHECKED);
+  lv_obj_add_event_cb(ssw, scrollSoundCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // --- Radio catalogue refresh ---
+  lv_obj_t *rl = label(pg, "Refresh radio stations daily at", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_align(rl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 410);
+
+  lv_obj_t *rsw = lv_switch_create(pg);
+  lv_obj_set_size(rsw, 72, 38);
+  lv_obj_align(rsw, LV_ALIGN_TOP_LEFT, 300, PAD_TOP + 404);
+  lv_obj_set_style_bg_color(rsw, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+  if (settingsRadioAutoRefresh()) lv_obj_add_state(rsw, LV_STATE_CHECKED);
+  lv_obj_add_event_cb(rsw, autoRefreshCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  lv_obj_t *dn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, hourDownCb);
+  lv_obj_align(dn, LV_ALIGN_TOP_LEFT, 400, PAD_TOP + 400);
+  s_hourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_align(s_hourLbl, LV_ALIGN_TOP_LEFT, 462, PAD_TOP + 408);
+  lv_label_set_text_fmt(s_hourLbl, "%02d:00", settingsRadioRefreshHour());
+  lv_obj_t *up = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, hourUpCb);
+  lv_obj_align(up, LV_ALIGN_TOP_LEFT, 556, PAD_TOP + 400);
+
+  // Local time, so the label means what it says wherever the device lives.
+  lv_obj_t *rh = label(pg, "Device local time. ~500 KB once a day.", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(rh, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 438);
+
+  lv_obj_t *rn = lv_button_create(pg);
+  lv_obj_remove_style_all(rn);
+  lv_obj_set_size(rn, 180, 52);
+  lv_obj_align(rn, LV_ALIGN_TOP_LEFT, 624, PAD_TOP + 398);
+  lv_obj_set_style_radius(rn, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(rn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(rn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_add_event_cb(rn, refreshNowCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *rnl = label(rn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
+  lv_obj_center(rnl);
+
+  s_radioMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(s_radioMeta, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 462);
 
   // Keyboard last so it draws above everything, hidden until the field is focused.
   s_kb = lv_keyboard_create(pg);
@@ -775,6 +849,15 @@ void uiTick() {
     rebuildRooms();
   }
 
+  if (s_cur == PAGE_SETTINGS && s_radioMeta) {
+    static String shownMeta;
+    String m;
+    if (radiocache::busy())        m = "Refreshing now...";
+    else if (radiocache::ready())  m = String(radiocache::genreCount()) + " genres cached.";
+    else                           m = "No station cache yet.";
+    if (m != shownMeta) { shownMeta = m; lv_label_set_text(s_radioMeta, m.c_str()); }
+  }
+
   // Radio: until the carousel lands, report exactly which precondition is unmet. Each of these is
   // a different user action (insert a card / join Wi-Fi / link an account / wait), so a single
   // "unavailable" would be useless.
@@ -842,6 +925,8 @@ void uiTick() {
                     (unsigned)g_linkZones, (unsigned)(mon.free_size / 1024));
     }
   }
+
+  bringupConsoleTick();   // bring-up only; compiles to nothing without the flag
 
   lv_timer_handler();
 }

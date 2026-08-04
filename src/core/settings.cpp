@@ -26,6 +26,11 @@ void settingsSetUiSound(uint8_t pct) {
 bool settingsScrollSound()           { return s_prefs.getUChar("scrsnd", 1) != 0; }
 void settingsSetScrollSound(bool on) { s_prefs.putUChar("scrsnd", on ? 1 : 0); }
 
+bool settingsRadioAutoRefresh()           { return s_prefs.getUChar("rdauto", 1) != 0; }
+void settingsSetRadioAutoRefresh(bool on) { s_prefs.putUChar("rdauto", on ? 1 : 0); }
+uint8_t settingsRadioRefreshHour()        { uint8_t h = s_prefs.getUChar("rdhour", 4); return h > 23 ? 4 : h; }
+void settingsSetRadioRefreshHour(uint8_t hour) { s_prefs.putUChar("rdhour", hour > 23 ? 4 : hour); }
+
 // Amazon Music DeviceLink credentials. NVS keys are capped at 15 chars.
 String settingsAmazonToken() { return s_prefs.getString("amztok", ""); }
 String settingsAmazonKey()   { return s_prefs.getString("amzkey", ""); }

@@ -181,6 +181,9 @@ String registrationJson() {
   // NOT localManagerUrl() — that's specifically a *file* manager, which the button lacks even
   // though it serves a config page. Emit null so the portal renders "Open config" disabled.
   const char *cfg = boardConfigUrl();
+  doc["radio_refresh_hour"] = settingsRadioRefreshHour();
+  doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
+
   if (cfg) doc["configUrl"] = cfg;
   else     doc["configUrl"] = (const char *)nullptr;
 
@@ -204,6 +207,30 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     if (field == "sleepTrack") settingsSetSleepTrack(value);   // "" => back to the unit default
     else                       settingsSetWakeTrack(value);    // "" => back to auto-detect
     return true;
+  }
+
+  // Radio catalogue refresh schedule. Exposed here rather than in a board's own page so every
+
+  // board with a config UI gets it identically; boards without one simply never call this.
+
+  if (field == "radio_refresh_hour") {
+
+    const int h = value.toInt();
+
+    if (h < 0 || h > 23) return false;
+
+    settingsSetRadioRefreshHour((uint8_t)h);
+
+    return true;
+
+  }
+
+  if (field == "radio_auto_refresh") {
+
+    settingsSetRadioAutoRefresh(value == "1" || value == "true" || value == "on");
+
+    return true;
+
   }
 
   if (field == "room") {
