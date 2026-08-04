@@ -235,6 +235,20 @@ all 26 genres carry a populated `albumArtURI`. Zero without.
 >
 > **`didl.cpp`-style tag scraping must match the opening tag as `<name` followed by `>` or whitespace,
 > not `<name>`.** This is exactly how the research got it wrong.
+>
+> ### It happened three times. Treat this as a parser spec, not an anecdote.
+>
+> | what bit us | why a naive regex missed it |
+> |---|---|
+> | `<albumArtURI requiresAuthentication="false">` | **attributes** on the opening tag |
+> | `<ns:authToken>` in a `TokenRefreshRequired` fault | **namespace prefix** on the tag |
+> | `<r:resMD>` containing a nested `<item>…</item>` | **nesting** — a non-greedy `<item>.*?</item>` stops at the INNER close and silently truncates the record |
+>
+> All three produced *plausible wrong answers* rather than errors: "stations have no artwork", "the
+> refresh fault carries no credentials", "this favourite has no metadata". Every one cost a cycle.
+> **The firmware parser must tolerate attributes, namespace prefixes, and nested same-name elements**
+> — and where a field is expected, its absence should be logged loudly rather than defaulted to
+> empty.
 
 A complete station item — these five children are the *entire* record:
 
@@ -414,12 +428,13 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 - ~~Station artwork~~ **RESOLVED: every station has artwork.** See *Artwork* below. The earlier
   "empty on all 150 sampled" claim in this document was **a parser bug of mine, not a property of the
   service**.
-- ~~Token lifetime and refresh~~ **RESOLVED — refresh is in-band.** The token expired mid-session
-  (well under an hour), and the failing call came back as SOAP fault
-  **`Client.TokenRefreshRequired` carrying replacement credentials inside the fault body**. Extracting
-  `authToken`/`privateKey` from the fault and retrying worked immediately; no separate
-  `refreshAuthToken` call was needed. **The crawler must handle this fault by design** — parse, persist
-  to NVS, retry once. RUN-VERIFIED.
+- ~~Token lifetime and refresh~~ **RESOLVED — and fault-parsing is the ONLY path.** The token expires
+  in well under an hour. The failing call returns SOAP fault `Client.TokenRefreshRequired` with
+  replacement credentials in the fault body, under **namespaced** tags:
+  `<detail><ns:refreshAuthTokenResult><ns:authToken>…</ns:authToken><ns:privateKey>…</ns:privateKey>`.
+  **Calling `refreshAuthToken` as a standalone operation returns HTTP 404 `Received unsupported
+  operation name`** — Amazon's endpoint does not implement it, despite it being in the WSDL. So the
+  crawler *must* parse the fault, persist to NVS and retry; there is no alternative. RUN-VERIFIED.
 - **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
   browser. Settings can show the `regUrl` (a QR code would be kinder on a wall panel).
   **Gotcha:** `linkDeviceId` is per-request and required to redeem the code — capture it with the
@@ -434,8 +449,24 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
    probe's raw-sector write tests are now behind `-DSD_ALLOW_RAW_WRITE`, **off by default**: they
    overwrite LBA 2048, which is exactly where a Windows-aligned partition puts its FAT32 boot sector,
    and they destroyed a freshly formatted card twice before that was noticed. Raw *reads* still run.
-2. **One playback test** — settles the UPnP 402 question and the Prime-vs-Unlimited tier question
-   together, using an existing station favourite so no new code is needed.
+2. ~~One playback test~~ **DONE — both tests pass. The feature is proven end to end.**
+
+   Run on *Master Bonus* (192.168.68.114, standalone), restored to its prior state afterwards.
+
+   | | result |
+   |---|---|
+   | **T1** — existing station favourite, URI + `r:resMD` verbatim | **PLAYS.** `TRANSITIONING` → `PLAYING`, position advancing, "Where Did Our Love Go" |
+   | **T6** — **fully constructed** URI + hand-built DIDL, station never played on this household | **PLAYS.** `PLAYING` at +4 s, "Viagem (Se Eu Soubesse)" — Leo Gandelman |
+
+   **The UPnP 402 concern is dead.** A raw `x-sonosapi-radio:` URI goes straight to
+   `SetAVTransportURI` with no `getMediaURI` resolve step, exactly as `core/library.cpp` already does
+   for favourites. **And the tier question is answered** — this household's Amazon subscription plays
+   stations.
+
+   T6 is the important one: browse via DeviceLink → take the station id → build
+   `x-sonosapi-radio:<urlencoded id>?sid=201&flags=8300&sn=6` plus a DIDL with `item id="100c206c" +
+   id`, `parentID="10082064" + genre id`, class `audioBroadcast`, desc `SA_RINCON51463_X_#Svc51463-0-Token`
+   → play. **That is the whole Radio feature, validated on hardware.**
 3. **Rename Radio → Favorites**, add the fifth rail slot, convert the two Lucide glyphs.
 4. **Cache writer** — crawl + sorted SD index + A-Z offset tables + `all.tsv`, token hardcoded for
    bring-up. Testable entirely off-device against the files it produces.
