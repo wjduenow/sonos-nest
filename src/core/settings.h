@@ -17,6 +17,27 @@ void    settingsSetBrightness(uint8_t pct);
 uint8_t settingsUiSound();
 void    settingsSetUiSound(uint8_t pct);
 
+// Scroll/detent feedback, separate from the master level above: wanting button clicks without
+// scroll noise is a reasonable preference, and a 50-row flick makes far more sound than a button.
+// settingsUiSound()==0 silences everything regardless — this only has meaning above that.
+bool    settingsScrollSound();
+void    settingsSetScrollSound(bool on);
+
+// --- Amazon Music (SMAPI DeviceLink) ------------------------------------------------------------
+// Our OWN account credentials, not the household's — Sonos never discloses those (plans/08). The
+// token expires in under an hour and is refreshed in-band by core/amazon.cpp, so these are written
+// far more often than most settings; both are ~600 chars.
+String  settingsAmazonToken();
+String  settingsAmazonKey();
+void    settingsSetAmazonAuth(const String &token, const String &key);
+// Account serial for the sn= URI parameter. Playback ignores it in practice, but it costs nothing
+// to send the right one, and it is readable from any existing Amazon favourite's res URI.
+uint8_t settingsAmazonSerial();
+void    settingsSetAmazonSerial(uint8_t sn);
+// The Sonos household id, used as the correlation key when linking.
+String  settingsHouseholdId();
+void    settingsSetHouseholdId(const String &id);
+
 uint8_t settingsRing();
 void    settingsSetRing(uint8_t pct);
 

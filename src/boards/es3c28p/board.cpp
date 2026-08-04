@@ -43,6 +43,10 @@ bool      knobDown()     { return false; }
 // No speaker on this board (or none wired for UI feedback) — see core/board.h.
 void uiSoundPlay(UiSound) {}
 
+// has an SD card, but it is owned by local_tracks/local_stream as a MEDIA library;
+// nothing has needed a firmware-writable data root here yet. Implement if that changes.
+const char *localStorageRoot() { return nullptr; }
+
 // On-die radio: a dead link is a Wi-Fi problem, not a transport one, so the normal reconnect
 // path is the right and only recovery. See core/board.h.
 bool netLinkRecover() { return false; }

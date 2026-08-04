@@ -92,6 +92,16 @@ const char *localManagerUrl();
 // network is up. Pointer is owned by the board — copy it before the next call.
 const char *boardConfigUrl();
 
+// Root of a writable filesystem the firmware may use for its own data (caches, indexes), e.g.
+// "/sdcard". nullptr on boards with no storage, or when the card is missing or unreadable — callers
+// MUST treat nullptr as "this feature is unavailable", not as an error to retry.
+// Files underneath are accessed with plain stdio; the board only owns mounting it.
+//
+// *** Writers: 4 KB per write() call, maximum, and keep any single file under ~256 KB. ***
+// Larger chunks fail immediately on this hardware and sustained writes die past ~300 KB. Measured,
+// not folklore — see plans/08-music-service-integration.md.
+const char *localStorageRoot();
+
 // Local track library — playable files (e.g. .mp3) on the board's SD card. Empty on boards
 // without local storage. Call localTracksRefresh() to (re)scan before listing.
 void        localTracksRefresh();

@@ -17,6 +17,7 @@
 #include "core/board.h"
 #include "display.h"
 #include "pins.h"
+#include "sd_card.h"
 #include "touch.h"
 #include "ui_sound.h"
 
@@ -38,6 +39,10 @@ bool boardInit() {
 
   // Nor is audio: silent feedback is a downgrade, not a failure.
   if (!uiSoundInit()) Serial.println("[board ] continuing without UI tones");
+
+  // Nor is storage: without a card the Radio page has no cache and says so, but everything that
+  // talks to Sonos directly is unaffected. localStorageRoot() returns nullptr and callers skip.
+  if (!sdCardInit()) Serial.println("[board ] continuing without SD storage");
 
   return true;
 }

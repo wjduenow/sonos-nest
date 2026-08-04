@@ -51,29 +51,32 @@ static lv_obj_t *s_provisioning = nullptr;
 // Pages live inside the content area and are shown/hidden rather than rebuilt: the design's rail
 // is instant navigation, and tearing down LVGL trees on every switch would both stutter and churn
 // the LV_MEM_SIZE pool.
-enum Page { PAGE_NOW = 0, PAGE_RADIO = 1, PAGE_ROOMS = 2, PAGE_SETTINGS = 3, PAGE_COUNT = 4 };
-static lv_obj_t *s_page[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
-static lv_obj_t *s_railBtn[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
-static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
+// PAGE_FAVORITES is the Sonos favourites list (FV:2) — it was called "Radio" until it acquired a
+// neighbour that actually is radio. PAGE_RADIO is Amazon Prime Stations, browsed from the SD cache.
+enum Page { PAGE_NOW = 0, PAGE_FAVORITES = 1, PAGE_RADIO = 2, PAGE_ROOMS = 3, PAGE_SETTINGS = 4,
+            PAGE_COUNT = 5 };
+static lv_obj_t *s_page[PAGE_COUNT]     = {nullptr};
+static lv_obj_t *s_railBtn[PAGE_COUNT]  = {nullptr};
+static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr};
 static int s_cur = PAGE_NOW;
 
 // Radio (Sonos Favourites, FV:2)
-static lv_obj_t *s_radioList = nullptr, *s_radioStatus = nullptr;
-static bool s_radioRequested = false;    // a browse has been asked for since entering the page
-static bool s_radioRendered  = false;    // the rows on screen are current (cleared on page exit)
+static lv_obj_t *s_favList = nullptr, *s_favStatus = nullptr;
+static bool s_favRequested = false;    // a browse has been asked for since entering the page
+static bool s_favRendered  = false;    // the rows on screen are current (cleared on page exit)
 
 // Favourites cache. Browsing FV:2 is not cheap — library::collectRows() paginates PAGE=16 up to
 // MAX_ROWS=200, i.e. up to 13 SOAP round-trips — and without this, every single tap of the Radio
-// rail icon re-ran the whole browse, because leaving the page resets s_radioRequested. Radio ->
+// rail icon re-ran the whole browse, because leaving the page resets s_favRequested. Radio ->
 // Now Playing -> Radio three times was ~40 requests in a couple of seconds, over the same
 // ESP-Hosted SDIO bridge that is documented as failing under sustained load. Same reasoning as
 // kArtSettleMs in album_art.cpp: on this board, traffic we can avoid is traffic we should avoid.
 //
 // The labels live on the heap, NOT in the LVGL pool — caching them costs a few KB and is unrelated
 // to the row-count budget below. Favourites change rarely; a minute of staleness is invisible.
-static std::vector<String> s_radioLabels;
-static uint32_t s_radioFetchedMs = 0;
-static const uint32_t kRadioCacheMs = 60000;
+static std::vector<String> s_favLabels;
+static uint32_t s_favFetchedMs = 0;
+static const uint32_t kFavCacheMs = 60000;
 
 // Settings
 static lv_obj_t *s_nameTa = nullptr, *s_kb = nullptr, *s_soundSlider = nullptr,
@@ -188,11 +191,15 @@ static void buildRail(lv_obj_t *scr) {
   lv_obj_t *line = panel(scr, 1, SCREEN_H, JB_SCREEN_LINE, 0);
   lv_obj_align(line, LV_ALIGN_TOP_LEFT, RAIL_W, 0);
 
-  // Only Now Playing exists so far; Radio and Rooms are placeholders so the rail reads as the
-  // designed 3-item nav rather than appearing broken.
-  // Now / Radio / Rooms, matching the design's rail order.
-  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, LV_SYMBOL_LIST, LV_SYMBOL_VOLUME_MAX,
-                                   LV_SYMBOL_SETTINGS};
+  // Now / Favorites / Radio / Rooms / Settings.
+  //
+  // TODO(icons): these are stand-ins. The design system specifies Lucide, and LVGL's built-in
+  // symbol font has NEITHER a heart (Favorites) NOR a radio glyph — the two this rail most needs.
+  // The fix is converting a two-glyph Lucide subset into an LVGL font, scoped to UNIT_JUKEBOX the
+  // same way the Montserrat sizes already are. Until then: PLAY for Now Playing, LIST for
+  // Favorites, AUDIO for Radio — distinct from each other, but none of them right.
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_PLAY, LV_SYMBOL_LIST, LV_SYMBOL_AUDIO,
+                                   LV_SYMBOL_VOLUME_MAX, LV_SYMBOL_SETTINGS};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
@@ -301,19 +308,19 @@ static void showPage(int page) {
 
   // Leaving Radio: free the rows AND the cached browse results. CLAUDE.md is explicit that a long
   // browse list can fill LV_MEM_SIZE and freeze the UI on a layer-alloc retry loop, so this is not
-  // optional tidiness. s_radioLabels is deliberately NOT cleared — it is plain heap, and keeping
-  // it is what stops the next visit from re-issuing the browse (see kRadioCacheMs).
-  if (s_cur == PAGE_RADIO && page != PAGE_RADIO) {
-    lv_obj_clean(s_radioList);
+  // optional tidiness. s_favLabels is deliberately NOT cleared — it is plain heap, and keeping
+  // it is what stops the next visit from re-issuing the browse (see kFavCacheMs).
+  if (s_cur == PAGE_FAVORITES && page != PAGE_FAVORITES) {
+    lv_obj_clean(s_favList);
     library::clearResults();
-    s_radioRequested = false;
-    s_radioRendered  = false;
-    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(s_radioStatus, "Loading favourites" LV_SYMBOL_REFRESH);
+    s_favRequested = false;
+    s_favRendered  = false;
+    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_favStatus, "Loading favourites" LV_SYMBOL_REFRESH);
     // Restore the alignment too: a truncated list moves this label to the bottom of the page
-    // (see buildRadioRows), and restoring only the text left the next visit's "Loading…" pinned
+    // (see buildFavRows), and restoring only the text left the next visit's "Loading…" pinned
     // down there instead of under the header.
-    lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
+    lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
   }
 
   s_cur = page;
@@ -417,7 +424,7 @@ static void buildRooms() {
 
 // Play the tapped favourite. library:: was told PLAY_FAVORITE at browse time, so this becomes a
 // SetAVTransportURI + Play on the coordinator — the net task does the SOAP, as always.
-static void favouriteCb(lv_event_t *e) {
+static void favPlayCb(lv_event_t *e) {
   uiSoundPlay(UiSound::Confirm);
   library::requestPlay((int)(intptr_t)lv_event_get_user_data(e));
   showPage(PAGE_NOW);
@@ -438,20 +445,20 @@ static void favouriteCb(lv_event_t *e) {
 // clear of the four full-screen pages and the keyboard. Anything beyond is still reported rather
 // than silently dropped — a truncated list that claims to be complete is its own bug. The
 // before/after pool numbers are logged on every build; watch them if rows get more expensive.
-static const size_t kMaxRadioRows = 120;
+static const size_t kMaxFavRows = 120;
 
-static void buildRadioRows(const std::vector<String> &labels) {
-  lv_obj_clean(s_radioList);
-  const lv_coord_t rowH = 72, rowW = lv_obj_get_width(s_radioList) - 8;
+static void buildFavRows(const std::vector<String> &labels) {
+  lv_obj_clean(s_favList);
+  const lv_coord_t rowH = 72, rowW = lv_obj_get_width(s_favList) - 8;
 
-  const size_t shown = labels.size() > kMaxRadioRows ? kMaxRadioRows : labels.size();
+  const size_t shown = labels.size() > kMaxFavRows ? kMaxFavRows : labels.size();
   lv_mem_monitor_t before;
   lv_mem_monitor(&before);
-  Serial.printf("[ui    ] radio: %u favourite(s), rendering %u, lvgl_free=%uKB\n",
+  Serial.printf("[ui    ] favorites: %u item(s), rendering %u, lvgl_free=%uKB\n",
                 (unsigned)labels.size(), (unsigned)shown, (unsigned)(before.free_size / 1024));
 
   for (size_t i = 0; i < shown; ++i) {
-    lv_obj_t *row = lv_button_create(s_radioList);
+    lv_obj_t *row = lv_button_create(s_favList);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, rowW, rowH);
     lv_obj_set_style_radius(row, JB_R_MD, 0);
@@ -459,7 +466,7 @@ static void buildRadioRows(const std::vector<String> &labels) {
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), LV_STATE_PRESSED);
     lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, (lv_coord_t)(i * (rowH + 2)));
-    lv_obj_add_event_cb(row, favouriteCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_add_event_cb(row, favPlayCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
     lv_obj_t *tile = panel(row, 52, 52, JB_SCREEN_ELEV_2, 10);
     lv_obj_align(tile, LV_ALIGN_LEFT_MID, 6, 0);
@@ -473,38 +480,38 @@ static void buildRadioRows(const std::vector<String> &labels) {
   }
   lv_mem_monitor_t after;
   lv_mem_monitor(&after);
-  Serial.printf("[ui    ] radio: rendered, lvgl_free=%uKB (used %uKB for the list)\n",
+  Serial.printf("[ui    ] favorites: rendered, lvgl_free=%uKB (used %uKB for the list)\n",
                 (unsigned)(after.free_size / 1024),
                 (unsigned)((before.free_size - after.free_size) / 1024));
 
   if (labels.size() > shown) {
     // Say so on screen. Silently showing 40 of 120 would be worse than the freeze it prevents.
-    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text_fmt(s_radioStatus, "Showing first %u of %u favourites",
+    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text_fmt(s_favStatus, "Showing first %u of %u favourites",
                           (unsigned)shown, (unsigned)labels.size());
-    lv_obj_align(s_radioStatus, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
+    lv_obj_align(s_favStatus, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
   } else {
-    lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
-static void buildRadio() {
-  lv_obj_t *pg = s_page[PAGE_RADIO];
-  lv_obj_t *h = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
+static void buildFavourites() {
+  lv_obj_t *pg = s_page[PAGE_FAVORITES];
+  lv_obj_t *h = label(pg, "Favorites", &lv_font_montserrat_28, JB_TEXT);
   lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);   // clear of the status bar
 
-  s_radioStatus = label(pg, "Loading favourites" LV_SYMBOL_REFRESH, &lv_font_montserrat_22,
+  s_favStatus = label(pg, "Loading favourites" LV_SYMBOL_REFRESH, &lv_font_montserrat_22,
                         JB_TEXT_DIM);
-  lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
+  lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
 
-  s_radioList = lv_obj_create(pg);
-  lv_obj_remove_style_all(s_radioList);
-  lv_obj_set_size(s_radioList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 90) - PAD_BOT);
-  lv_obj_align(s_radioList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
-  lv_obj_set_style_bg_opa(s_radioList, LV_OPA_TRANSP, 0);
+  s_favList = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_favList);
+  lv_obj_set_size(s_favList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 90) - PAD_BOT);
+  lv_obj_align(s_favList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
+  lv_obj_set_style_bg_opa(s_favList, LV_OPA_TRANSP, 0);
   // Scrollable: a Favourites list is arbitrarily long and this panel is finite.
-  lv_obj_set_scroll_dir(s_radioList, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(s_radioList, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_scroll_dir(s_favList, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(s_favList, LV_SCROLLBAR_MODE_AUTO);
 }
 
 // --- Settings -----------------------------------------------------------------------------------
@@ -538,6 +545,24 @@ static void kbShowCb(lv_event_t *e) {
   lv_keyboard_set_textarea(s_kb, (lv_obj_t *)lv_event_get_target(e));
 }
 static void kbDoneCb(lv_event_t *) { lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN); }
+
+// --- Radio (Amazon Prime Stations) --------------------------------------------------------------
+// Placeholder until the SD cache and the station carousel land (plans/08 steps 4-5). It reports the
+// real precondition rather than pretending: with no card there is nothing to browse, and saying so
+// beats an empty list that looks broken.
+static lv_obj_t *s_radioStatus = nullptr;
+
+static void buildRadio() {
+  lv_obj_t *pg = s_page[PAGE_RADIO];
+  lv_obj_t *h = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
+
+  s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 100);
+  lv_label_set_text(s_radioStatus, localStorageRoot()
+      ? "Amazon Prime Stations\nStation cache not built yet."
+      : "Amazon Prime Stations\nNo SD card — insert one to cache the station list.");
+}
 
 static void buildSettings() {
   lv_obj_t *pg = s_page[PAGE_SETTINGS];
@@ -632,6 +657,7 @@ void uiInit() {
 
   buildNowPlaying();
   buildTransport();
+  buildFavourites();
   buildRadio();
   buildRooms();
   buildSettings();
@@ -751,25 +777,25 @@ void uiTick() {
   // async result. The browse runs on the net task; takeResults() returns true exactly once when a
   // new set lands. An empty result is cached too, so a system with no favourites doesn't re-browse
   // on every visit either.
-  if (s_cur == PAGE_RADIO) {
-    if (!s_radioRendered) {
-      const bool fresh = s_radioFetchedMs && (millis() - s_radioFetchedMs) < kRadioCacheMs;
+  if (s_cur == PAGE_FAVORITES) {
+    if (!s_favRendered) {
+      const bool fresh = s_favFetchedMs && (millis() - s_favFetchedMs) < kFavCacheMs;
       if (fresh) {
-        if (s_radioLabels.empty()) lv_label_set_text(s_radioStatus, "No favourites on this system");
-        else                       buildRadioRows(s_radioLabels);
-        s_radioRendered = true;
-      } else if (!s_radioRequested) {
-        s_radioRequested = true;
+        if (s_favLabels.empty()) lv_label_set_text(s_favStatus, "No favourites on this system");
+        else                       buildFavRows(s_favLabels);
+        s_favRendered = true;
+      } else if (!s_favRequested) {
+        s_favRequested = true;
         library::requestBrowse("FV:2", library::PLAY_FAVORITE);
       }
     }
     std::vector<String> labels;
     if (library::takeResults(labels)) {
-      s_radioLabels    = labels;
-      s_radioFetchedMs = millis();
-      s_radioRendered  = true;
-      if (labels.empty()) lv_label_set_text(s_radioStatus, "No favourites on this system");
-      else                buildRadioRows(labels);
+      s_favLabels    = labels;
+      s_favFetchedMs = millis();
+      s_favRendered  = true;
+      if (labels.empty()) lv_label_set_text(s_favStatus, "No favourites on this system");
+      else                buildFavRows(labels);
     }
   }
 
