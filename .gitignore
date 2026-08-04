@@ -41,3 +41,7 @@ src/idf_component.yml.orig
 managed_components/
 sdkconfig.defaults
 sdkconfig.*
+
+# Scratch A/B mockup published as an artifact; regenerate rather than commit (124 KB of
+# base64 station artwork).
+.mock-radio.html
