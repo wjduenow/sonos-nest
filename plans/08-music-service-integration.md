@@ -153,10 +153,34 @@ void uiSoundArm();   // wake the amp ahead of imminent cues; safe to call repeat
 No-op on the three boards without speakers, same as `uiSoundPlay`. If the extra API is not wanted, the
 fallback is to accept a soft first detent — but it is the one the user notices most.
 
-**Honouring the setting.** `settingsUiSound() == 0` must silence detents like everything else. Worth
-deciding separately whether scroll audio deserves **its own** toggle: wanting button feedback but not
-scroll noise is a reasonable preference, and a 50-row flick makes a lot more sound than a button does.
-Open question, not decided here.
+**5. Scroll audio gets its own toggle — DECIDED.** Wanting button feedback without scroll noise is a
+reasonable preference, and a 50-row flick makes far more sound than any button press.
+
+```c
+// core/settings.h — alongside settingsUiSound()
+bool settingsScrollSound();
+void settingsSetScrollSound(bool on);
+```
+```c
+// core/settings.cpp — NVS keys are capped at 15 chars; "scrsnd" matches the "uisnd"/"btnvol" style
+bool settingsScrollSound()          { return s_prefs.getUChar("scrsnd", 1) != 0; }
+void settingsSetScrollSound(bool on){ s_prefs.putUChar("scrsnd", on ? 1 : 0); }
+```
+
+- **Precedence: the master gates the toggle.** `settingsUiSound() == 0` silences everything including
+  detents; `settingsScrollSound()` only has meaning when the master level is non-zero. The Settings
+  row should render disabled/dimmed while the UI-sound slider sits at 0, so the relationship is
+  visible rather than mysterious.
+- **Default ON.** The detent is the point of the carousel, not a novelty bolted onto it — shipping it
+  off would mean nobody experiences the design as intended. It is one NVS byte to flip if that proves
+  wrong.
+- **Enforce it in the UNIT, not the board.** The unit checks `settingsScrollSound()` before calling
+  `uiSoundPlay(UiSound::Detent)`. This matters for layering: `Detent` is a generic cue, and another
+  unit might legitimately use it for something that is not scrolling — a board silently swallowing it
+  on a *scroll* preference would be wrong. The board keeps reading `settingsUiSound()` for level, as
+  `board.h` already documents; it just never learns why a cue was or wasn't requested.
+- **UI:** an `lv_switch` row directly beneath the existing UI-sound slider on Settings, so the
+  dependency reads at a glance.
 
 **Do not let audio gate the UI.** Already true by construction — `uiSoundPlay()` posts to a queue and
 returns — but it matters more here than anywhere else, because detents fire from the scroll handler
