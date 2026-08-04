@@ -257,9 +257,15 @@ static void probeRaw() {
   Serial.printf("[raw] read sector 0: %s\n", esp_err_to_name(e));
   if (e == ESP_OK) dumpBootSector(sec);
 
-  // Scratch sector near the end of the card, well clear of any filesystem structures. The owner
-  // confirmed the card is empty, and it is about to be reformatted regardless.
+  // *** RAW SECTOR WRITES ARE DESTRUCTIVE AND ARE NOW OPT-IN. ***
+  // These write test patterns at fixed LBAs with no regard for what is on the card. LBA 2048 is
+  // where Windows puts the first partition's FAT32 boot sector on a 1 MiB-aligned card, so this
+  // sweep DESTROYS a freshly formatted filesystem — and because loop() retries, it did so every
+  // 10 seconds. It was written when the card was known-blank and that assumption silently expired.
+  // Raw reads below stay unconditional; only writes are gated.
+#ifdef SD_ALLOW_RAW_WRITE
   const uint32_t scratch = (s_raw.csd.capacity > 64) ? (s_raw.csd.capacity - 64) : 1;
+#ifdef SD_ALLOW_RAW_WRITE
   for (int i = 0; i < 512; ++i) sec[i] = (uint8_t)(i ^ 0x5A);
   e = sdmmc_write_sectors(&s_raw, sec, scratch, 1);
   Serial.printf("[raw] write sector %lu: %s\n", (unsigned long)scratch, esp_err_to_name(e));
@@ -273,6 +279,9 @@ static void probeRaw() {
     Serial.println("[raw]   writes fail while init+read succeed: card locked/worn, or DAT-line/power");
     Serial.println("[raw]   fault. Try the card in a PC — if it won't format there either, it's the card.");
   }
+#else
+  (void)scratch;
+#endif
 
   // --- Multi-block sweep, below FATFS -----------------------------------------------------------
   // 4 KB writes through the filesystem work and 32 KB writes don't, with neither the buffer's
@@ -319,6 +328,11 @@ static void probeRaw() {
     }
     free(big);
   }
+
+#else
+  Serial.println("[raw] raw-write tests SKIPPED (build with -DSD_ALLOW_RAW_WRITE to enable —");
+  Serial.println("[raw]   they overwrite LBA 2048 and will destroy any filesystem on the card)");
+#endif
 
   free(sec);
   sdmmc_host_deinit();   // hand the slot back before the VFS path re-initialises it

@@ -363,8 +363,46 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 
 **The three real constraints, none of which are bandwidth:**
 
-1. **The SD card is still blocked.** It needs a FAT32 filesystem laid down from a PC, and the
-   filesystem throughput numbers are still unmeasured. This feature cannot ship before that.
+1. ~~The SD card is blocked~~ **MEASURED — and it comfortably beats the network, with one hard rule.**
+
+   | | measured on a clean Windows FAT32 volume |
+   |---|---|
+   | 156,800 B (one 280x280 cover) write, **4 KB chunks** | **162 ms = 967 KB/s** |
+   | same, read | **216 ms = 725 KB/s** |
+   | 4 KB round-trip | byte-exact |
+   | the network path it replaces | 228 KB / 1353 ms = **~168 KB/s** |
+
+   **The card is ~4-6x faster than the C6 link. The caching design is validated.**
+
+   > ### ⚠️ WRITE IN 4 KB CHUNKS. Anything larger fails immediately.
+   >
+   > 32 KB chunks fail on the first write, from PSRAM **and** from internal RAM, with and without a
+   > raised `command_timeout_ms`:
+   > ```
+   > sdmmc_send_cmd_num_of_written_blocks: sdmmc_send_app_cmd returned 0x107   (TIMEOUT)
+   > sdmmc_write_sectors_dma: ... returned 0x109                              (INVALID_RESPONSE)
+   > sdmmc_write_sectors_dma: sdmmc_send_cmd returned 0x107, status 0x400d00
+   > ```
+   > `0x400d00` decodes to **CURRENT_STATE = 6 (rcv)** with **ILLEGAL_COMMAND set** — the card is
+   > stuck mid-receive and rejecting the next command, and ACMD22 (how many blocks actually landed)
+   > times out. It is a multi-block write that never terminates cleanly.
+   >
+   > **Not a card fault, and not the sector-size bug.** Raw `sdmmc_write_sectors` was verified
+   > byte-exact at 128 blocks (64 KB) on this same card. The failure is specific to the FATFS write
+   > path at >4 KB.
+   >
+   > **Second limit: sustained writing fails past ~300 KB even at 4 KB chunks.** A 2 MB sequential
+   > write died after 303,104 B. Consistent with the card's internal buffer filling and a long
+   > programming pause outrunning the driver's patience.
+   >
+   > **Neither limit touches this feature** — every file it writes is well clear: art ~4.6 KB,
+   > per-genre index 10-20 KB, `all.tsv` ~157 KB. But **the crawler must cap any single file at
+   > ~256 KB** and split beyond that, and must never raise the write chunk above 4 KB. Both are
+   > cheap rules; discovering them the hard way is not.
+   >
+   > Untested hypothesis for anyone who wants the limit gone: insert a short pause every N KB and see
+   > whether sustained writes recover. Two lines, and it would distinguish "driver impatience" from
+   > "card limitation".
 2. **Internal SRAM and TLS.** An mbedTLS session costs tens of KB of internal RAM and the jukebox
    idles at only ~70–100 KB free. Crawl with **one connection at a time**, and never concurrently
    with an album-art fetch.
@@ -392,7 +430,10 @@ the catalogue is never held in memory. Genres cap at exactly 50, so no paging is
 
 ## Build order
 
-1. **Unblock the SD card** — FAT32 from a PC, then `jukebox-sd` for real throughput numbers.
+1. ~~Unblock the SD card~~ **DONE** — FAT32 from a PC, throughput measured (see above). Note the
+   probe's raw-sector write tests are now behind `-DSD_ALLOW_RAW_WRITE`, **off by default**: they
+   overwrite LBA 2048, which is exactly where a Windows-aligned partition puts its FAT32 boot sector,
+   and they destroyed a freshly formatted card twice before that was noticed. Raw *reads* still run.
 2. **One playback test** — settles the UPnP 402 question and the Prime-vs-Unlimited tier question
    together, using an existing station favourite so no new code is needed.
 3. **Rename Radio → Favorites**, add the fifth rail slot, convert the two Lucide glyphs.
