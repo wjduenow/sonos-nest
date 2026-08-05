@@ -148,11 +148,21 @@ static void processPending() {
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
 
-  // A ready-made URI + DIDL from the UI (Radio stations). Verified on hardware that an
-  // x-sonosapi-radio: URI goes straight to SetAVTransportURI with no getMediaURI resolve step —
-  // see plans/08. Stations are instantPlay, so this replaces the transport rather than enqueueing.
+  // A ready-made URI + DIDL from the UI — a Radio station, or a favourite played from the cache.
+  //
+  // The scheme decides the mechanism, exactly as library::playItem() does: a CONTAINER (a service
+  // playlist/album, or a Sonos saved queue) cannot be set as the transport URI, so it has to be
+  // enqueued and the queue played. Everything else — stations, single tracks, streams — replaces
+  // the transport directly. Verified on hardware that an x-sonosapi-radio: URI needs no
+  // getMediaURI resolve step first (plans/08).
   if (p.playUri.length()) {
-    sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
+    if (p.playUri.startsWith("x-rincon-cpcontainer:") || p.playUri.startsWith("file:")) {
+      sonos::removeAllTracksFromQueue(s_coordIp);
+      sonos::addUriToQueue(s_coordIp, p.playUri, p.playMeta);
+      sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
+    } else {
+      sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
+    }
     sonos::play(s_coordIp);
     s_lastPoll = 0;                        // reflect the new track immediately
   }

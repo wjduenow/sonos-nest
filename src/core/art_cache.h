@@ -36,4 +36,8 @@ uint32_t generation();
 // the artwork does not — 50/50 identical art URLs vs 0/50 identical chunks, measured.
 String keyOf(const String &stationId);
 
+// A cache key for an arbitrary URL (favourites have no station key). FNV-1a hex — short, stable,
+// and filesystem-safe, which the raw URL is not.
+String keyOfUrl(const String &url);
+
 }  // namespace artcache

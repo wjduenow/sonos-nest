@@ -14,6 +14,7 @@
 #include <WiFi.h>
 
 #include "core/board.h"
+#include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/webconfig.h"
 #include "web_config.h"
@@ -70,6 +71,14 @@ button.ghost{background:var(--elev2);color:var(--text)}
 </section>
 
 <section>
+  <h2>Favorites</h2>
+  <p style="color:var(--dim);font-size:14px;margin:0 0 12px">
+    Refreshed automatically a few minutes after you edit them in the Sonos app, and on the
+    schedule above.</p>
+  <button class="ghost" id="favnow" type="button">Refresh favorites now</button>
+</section>
+
+<section>
   <h2>Device</h2>
   <label for="name">Name (also the network hostname)</label>
   <div class="row"><input type="text" id="name" maxlength="31">
@@ -106,6 +115,9 @@ $('#auto').onchange=e=>put('radio_auto_refresh',e.target.checked?'1':'0');
 $('#bright').onchange=e=>put('brightness',e.target.value);
 $('#savename').onclick=()=>put('deviceName',$('#name').value)
   .then(()=>msg('Saved. The device reboots to register the new name.'));
+$('#favnow').onclick=async()=>{msg('Refreshing favorites...');
+  const r=await fetch('/api/favorites/refresh',{method:'POST'});
+  msg(r.ok?'Favorites refresh started.':'Could not start a refresh.')};
 $('#now').onclick=async()=>{msg('Refreshing...');
   const r=await fetch('/api/radio/refresh',{method:'POST'});
   msg(r.ok?'Refresh started. It takes about a minute.':'Could not start a refresh.')};
@@ -154,6 +166,11 @@ static void handleRefresh() {
   s_server->send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleFavRefresh() {
+  favcache::requestRefresh();
+  s_server->send(200, "application/json", "{\"ok\":true}");
+}
+
 static void serverTask(void *) {
   // boardInit() runs before appBoot() brings up WiFi, so wait here rather than failing to bind.
   while (WiFi.status() != WL_CONNECTED) vTaskDelay(pdMS_TO_TICKS(500));
@@ -163,6 +180,7 @@ static void serverTask(void *) {
   s_server->on("/api/config", HTTP_GET, handleGet);
   s_server->on("/api/config", HTTP_POST, handlePost);
   s_server->on("/api/radio/refresh", HTTP_POST, handleRefresh);
+  s_server->on("/api/favorites/refresh", HTTP_POST, handleFavRefresh);
   s_server->begin();
   s_url = String("http://") + WiFi.localIP().toString();
   Serial.printf("[web   ] config server on %s\n", s_url.c_str());

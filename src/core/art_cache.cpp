@@ -34,7 +34,7 @@ static QueueHandle_t s_q = nullptr;
 static volatile uint32_t s_gen = 1;
 static SemaphoreHandle_t s_lock = nullptr;        // guards the slot table
 
-struct Req { char key[24]; char url[220]; };
+struct Req { char key[24]; char url[300]; };   // favourite art URLs run long
 
 // TJpg writes into whichever slot the worker is filling.
 static uint16_t *s_target = nullptr;
@@ -58,6 +58,36 @@ String keyOf(const String &stationId) {
   const int s = a + 9;
   const int e = stationId.indexOf('/', s);
   return (e < 0) ? stationId.substring(s) : stationId.substring(s, e);
+}
+
+String keyOfUrl(const String &url) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < url.length(); ++i) { h ^= (uint8_t)url[i]; h *= 16777619u; }
+  char b[12]; snprintf(b, sizeof b, "u%08x", (unsigned)h);
+  return String(b);
+}
+
+// Ask the image host for a small version. Every one of these serves originals far larger than a
+// 72 px tile — an Amazon cover is up to 6.7 MB and often PNG, which TJpg cannot decode at all — so
+// fetching full size would be both slow on a fragile link and useless. Unknown hosts fall through
+// unchanged and are simply downloaded as-is.
+static String thumbUrl(const String &url, int px) {
+  if (url.indexOf("media-amazon.com") >= 0 || url.indexOf("ssl-images-amazon.com") >= 0)
+    return amazon::artThumbUrl(url, px > 96 ? 160 : 128);   // also transcodes PNG -> baseline JPEG
+  if (url.indexOf("googleusercontent.com") >= 0) {
+    const int eq = url.lastIndexOf('=');                    // strip an existing =sNNN / =wNNN-hNNN
+    return (eq > 0 ? url.substring(0, eq) : url) + "=s" + String(px * 2);
+  }
+  if (url.indexOf("i.ytimg.com") >= 0) {
+    const int slash = url.lastIndexOf('/');
+    if (slash > 0) return url.substring(0, slash) + "/mqdefault.jpg";   // 320x180, ~10 KB
+  }
+  if (url.indexOf("i.scdn.co/image/") >= 0) {
+    // Spotify encodes the size in the id prefix: b273 = 640, e02 = 300, 851 = 64.
+    String u = url; u.replace("ab67616d0000b273", "ab67616d00001e02");
+    return u;
+  }
+  return url;
 }
 
 static String dir() {
@@ -235,7 +265,7 @@ const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
   // it settles will simply ask again on the next pass.
   Req r {};
   strncpy(r.key, stationKey.c_str(), sizeof r.key - 1);
-  const String small = amazon::artThumbUrl(artUrl, s_px > 96 ? 160 : 128);
+  const String small = thumbUrl(artUrl, s_px);
   strncpy(r.url, small.c_str(), sizeof r.url - 1);
   xQueueSend(s_q, &r, 0);
   return nullptr;

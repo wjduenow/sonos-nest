@@ -29,6 +29,7 @@
                               // RPCs, so a UI-task caller freezes rendering when the link dies.
 #include "core/amazon.h"
 #include "core/art_cache.h"
+#include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
@@ -70,24 +71,6 @@ static lv_obj_t *s_page[PAGE_COUNT]     = {nullptr};
 static lv_obj_t *s_railBtn[PAGE_COUNT]  = {nullptr};
 static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr};
 static int s_cur = PAGE_NOW;
-
-// Radio (Sonos Favourites, FV:2)
-static lv_obj_t *s_favList = nullptr, *s_favStatus = nullptr;
-static bool s_favRequested = false;    // a browse has been asked for since entering the page
-static bool s_favRendered  = false;    // the rows on screen are current (cleared on page exit)
-
-// Favourites cache. Browsing FV:2 is not cheap — library::collectRows() paginates PAGE=16 up to
-// MAX_ROWS=200, i.e. up to 13 SOAP round-trips — and without this, every single tap of the Radio
-// rail icon re-ran the whole browse, because leaving the page resets s_favRequested. Radio ->
-// Now Playing -> Radio three times was ~40 requests in a couple of seconds, over the same
-// ESP-Hosted SDIO bridge that is documented as failing under sustained load. Same reasoning as
-// kArtSettleMs in album_art.cpp: on this board, traffic we can avoid is traffic we should avoid.
-//
-// The labels live on the heap, NOT in the LVGL pool — caching them costs a few KB and is unrelated
-// to the row-count budget below. Favourites change rarely; a minute of staleness is invisible.
-static std::vector<String> s_favLabels;
-static uint32_t s_favFetchedMs = 0;
-static const uint32_t kFavCacheMs = 60000;
 
 // Settings
 static lv_obj_t *s_nameTa = nullptr, *s_kb = nullptr, *s_soundSlider = nullptr,
@@ -316,22 +299,9 @@ static void buildTransport() {
 static void showPage(int page) {
   if (page < 0 || page >= PAGE_COUNT) return;
 
-  // Leaving Radio: free the rows AND the cached browse results. CLAUDE.md is explicit that a long
-  // browse list can fill LV_MEM_SIZE and freeze the UI on a layer-alloc retry loop, so this is not
-  // optional tidiness. s_favLabels is deliberately NOT cleared — it is plain heap, and keeping
-  // it is what stops the next visit from re-issuing the browse (see kFavCacheMs).
-  if (s_cur == PAGE_FAVORITES && page != PAGE_FAVORITES) {
-    lv_obj_clean(s_favList);
-    library::clearResults();
-    s_favRequested = false;
-    s_favRendered  = false;
-    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(s_favStatus, "Loading favourites" LV_SYMBOL_REFRESH);
-    // Restore the alignment too: a truncated list moves this label to the bottom of the page
-    // (see buildFavRows), and restoring only the text left the next visit's "Loading…" pinned
-    // down there instead of under the header.
-    lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
-  }
+  // Leaving Favorites no longer needs to free anything: the list is rebuilt from the SD cache on
+  // entry, and the LVGL rows are replaced wholesale by favShowAll(). The old code also had to drop
+  // a library:: result set, which the cache made unnecessary.
 
   s_cur = page;
   for (int i = 0; i < PAGE_COUNT; i++) {
@@ -432,96 +402,267 @@ static void buildRooms() {
   lv_obj_set_scrollbar_mode(s_roomsWrap, LV_SCROLLBAR_MODE_AUTO);
 }
 
-// Play the tapped favourite. library:: was told PLAY_FAVORITE at browse time, so this becomes a
-// SetAVTransportURI + Play on the coordinator — the net task does the SOAP, as always.
-static void favPlayCb(lv_event_t *e) {
-  uiSoundPlay(UiSound::Confirm);
-  library::requestPlay((int)(intptr_t)lv_event_get_user_data(e));
-  showPage(PAGE_NOW);
+// Favorites — the same navigation as Radio: a snapping carousel with artwork, an A-Z jump strip
+// and global type-to-filter. One level rather than two, because favourites are a flat list.
+//
+// Backed by favcache (SD) rather than a live FV:2 browse, so entering the page is instant and works
+// with a dead link. The difference from the station cache is the refresh policy: favourites are
+// edited by the owner in the Sonos app and expected to appear straight away, so the page asks for a
+// refresh on entry whenever the cache is more than a few minutes old, on top of the daily schedule
+// and the manual button. See fav_cache.h.
+static lv_obj_t *s_favList = nullptr, *s_favStatus = nullptr, *s_favAz = nullptr;
+static lv_obj_t *s_favSearchTa = nullptr, *s_favKb = nullptr, *s_favBack = nullptr,
+                *s_favTitle = nullptr, *s_favSearchBtn = nullptr;
+static std::vector<favcache::Fav> s_favs;
+static std::vector<lv_obj_t *>    s_favTiles;
+static uint32_t s_favShownGen = UINT32_MAX;
+static uint32_t s_favArtGen = 0;
+static bool     s_favEntered = false;
+static int      s_favSnapped = -1;
+static bool     s_favSearching = false;
+static String   s_favPending;
+static uint32_t s_favSearchAt = 0;
+
+static void favShowAll();
+static void favPaintArt();
+
+static void favLayout(bool withSearch, bool withAz) {
+  const lv_coord_t w   = SCREEN_W - RAIL_W - PAD_X * 2;
+  const lv_coord_t top = PAD_TOP + 106 + (withSearch ? 68 : 0);
+  const lv_coord_t bot = PAD_BOT + (withAz ? 54 : 0);
+  lv_obj_set_size(s_favList, w, SCREEN_H - top - bot);
+  lv_obj_align(s_favList, LV_ALIGN_TOP_LEFT, 0, top);
 }
 
-// One row per favourite, following the design's ListRow: art tile, title, subtitle, trailing
-// badge. There is no per-item artwork from a Favourites browse (only labels), so the tile carries
-// a glyph rather than a fake image.
-// Backstop cap on rendered rows. Each row is 4 LVGL objects (button + art tile + glyph + label) at
-// roughly 1 KB of the LVGL pool. Exhausting that pool is not a failure in LVGL — it is a layer-
-// alloc RETRY LOOP, so the UI task spins forever, the screen freezes mid-build, and because the
-// health heartbeat prints from uiTick the device goes silent on serial too. It looks exactly like
-// a total system hang while netTask is in fact still running. CLAUDE.md warns about precisely this.
-//
-// This was 40 because the pool was the nest's 96 KB, which meant a real 70-favourite system had
-// most of its list hidden behind a notice. The jukebox pool is now 512 KB in PSRAM (lv_conf.h), so
-// the cap is a safety net rather than the binding constraint: 120 rows is ~120 KB, comfortably
-// clear of the four full-screen pages and the keyboard. Anything beyond is still reported rather
-// than silently dropped — a truncated list that claims to be complete is its own bug. The
-// before/after pool numbers are logged on every build; watch them if rows get more expensive.
-static const size_t kMaxFavRows = 120;
+static void favPlayCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= (int)s_favs.size()) return;
+  uiSoundPlay(UiSound::Confirm);
+  // The cached URI + DIDL are enough: processPending picks enqueue-vs-transport off the scheme,
+  // so a playlist favourite and a track favourite both work without touching FV:2 again.
+  if (stateLock()) {
+    g_pending.playUri  = s_favs[i].uri;
+    g_pending.playMeta = s_favs[i].meta;
+    stateUnlock();
+  }
+}
 
-static void buildFavRows(const std::vector<String> &labels) {
+static void favScrollCb(lv_event_t *e) {
+  favPaintArt();
+  lv_obj_t *list = (lv_obj_t *)lv_event_get_target(e);
+  const int32_t mid = lv_obj_get_scroll_y(list) + lv_obj_get_height(list) / 2;
+  int best = -1; int32_t bd = INT32_MAX;
+  const uint32_t n = lv_obj_get_child_count(list);
+  for (uint32_t i = 0; i < n; i++) {
+    lv_obj_t *c = lv_obj_get_child(list, i);
+    const int32_t cy = lv_obj_get_y(c) + lv_obj_get_height(c) / 2;
+    const int32_t d = abs(cy - mid);
+    if (d < bd) { bd = d; best = (int)i; }
+  }
+  if (best < 0 || best == s_favSnapped) return;
+  s_favSnapped = best;
+  static uint32_t lastTick = 0;
+  if (settingsScrollSound() && millis() - lastTick >= 45) { lastTick = millis(); uiSoundPlay(UiSound::Tick); }
+}
+
+static void favPaintArt() {
+  if (s_favTiles.empty()) return;
+  const int32_t top = lv_obj_get_scroll_y(s_favList);
+  const int32_t bot = top + lv_obj_get_height(s_favList);
+  for (size_t i = 0; i < s_favTiles.size() && i < s_favs.size(); i++) {
+    lv_obj_t *tile = s_favTiles[i];
+    if (!tile) continue;
+    const int32_t y = lv_obj_get_y(tile);
+    if (y + 200 < top || y - 200 > bot) continue;
+    if (s_favs[i].artUrl.isEmpty()) continue;
+    const lv_image_dsc_t *d = artcache::get(artcache::keyOfUrl(s_favs[i].artUrl), s_favs[i].artUrl);
+    if (d && lv_image_get_src(tile) != d) lv_image_set_src(tile, d);
+  }
+}
+
+static void favRenderRows() {
   lv_obj_clean(s_favList);
-  const lv_coord_t rowH = 72, rowW = lv_obj_get_width(s_favList) - 8;
-
-  const size_t shown = labels.size() > kMaxFavRows ? kMaxFavRows : labels.size();
-  lv_mem_monitor_t before;
-  lv_mem_monitor(&before);
-  Serial.printf("[ui    ] favorites: %u item(s), rendering %u, lvgl_free=%uKB\n",
-                (unsigned)labels.size(), (unsigned)shown, (unsigned)(before.free_size / 1024));
-
-  for (size_t i = 0; i < shown; ++i) {
+  s_favTiles.clear();
+  s_favSnapped = -1;
+  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
+  for (size_t i = 0; i < s_favs.size(); i++) {
     lv_obj_t *row = lv_button_create(s_favList);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, rowW, rowH);
-    lv_obj_set_style_radius(row, JB_R_MD, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), LV_STATE_PRESSED);
-    lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, (lv_coord_t)(i * (rowH + 2)));
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 10)));
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
     lv_obj_add_event_cb(row, favPlayCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-    lv_obj_t *tile = panel(row, 52, 52, JB_SCREEN_ELEV_2, 10);
-    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 6, 0);
-    lv_obj_t *g = label(tile, LV_SYMBOL_AUDIO, &lv_font_montserrat_20, JB_TEXT_DIM);
-    lv_obj_center(g);
+    lv_obj_t *tile = panel(row, 72, 72, JB_SCREEN_ELEV_2, JB_R_MD);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_t *img = lv_image_create(tile);
+    lv_obj_set_size(img, 72, 72);
+    lv_obj_center(img);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    s_favTiles.push_back(img);
 
-    lv_obj_t *t = label(row, labels[i].c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_t *t = label(row, s_favs[i].title.c_str(), &lv_font_montserrat_22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(t, rowW - 80);
-    lv_obj_align(t, LV_ALIGN_LEFT_MID, 72, 0);
+    lv_obj_set_width(t, w - 120);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, 0);
   }
-  lv_mem_monitor_t after;
-  lv_mem_monitor(&after);
-  Serial.printf("[ui    ] favorites: rendered, lvgl_free=%uKB (used %uKB for the list)\n",
-                (unsigned)(after.free_size / 1024),
-                (unsigned)((before.free_size - after.free_size) / 1024));
+  favPaintArt();
+}
 
-  if (labels.size() > shown) {
-    // Say so on screen. Silently showing 40 of 120 would be worse than the freeze it prevents.
-    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text_fmt(s_favStatus, "Showing first %u of %u favourites",
-                          (unsigned)shown, (unsigned)labels.size());
-    lv_obj_align(s_favStatus, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
-  } else {
-    lv_obj_add_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+static void favAzJump(lv_event_t *e) {
+  const char c = (char)(intptr_t)lv_event_get_user_data(e);
+  for (size_t i = 0; i < s_favs.size(); i++) {
+    char f = s_favs[i].title.length() ? s_favs[i].title[0] : 0;
+    if (f >= 'a' && f <= 'z') f -= 32;
+    if (f == c) { lv_obj_scroll_to_y(s_favList, (lv_coord_t)(i * 106), LV_ANIM_ON);
+                  uiSoundPlay(UiSound::Tick); return; }
   }
 }
+
+static void favBuildAz() {
+  lv_obj_clean(s_favAz);
+  bool have[26] = {false};
+  for (const auto &v : s_favs) {
+    char f = v.title.length() ? v.title[0] : 0;
+    if (f >= 'a' && f <= 'z') f -= 32;
+    if (f >= 'A' && f <= 'Z') have[f - 'A'] = true;
+  }
+  const lv_coord_t step = (SCREEN_W - RAIL_W - PAD_X * 2) / 26;
+  for (int i = 0; i < 26; i++) {
+    lv_obj_t *b = lv_button_create(s_favAz);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, step, 44);
+    lv_obj_set_pos(b, i * step, 0);
+    char t[2] = {(char)('A' + i), 0};
+    lv_obj_t *l = label(b, t, &lv_font_montserrat_16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
+    lv_obj_center(l);
+    if (have[i]) lv_obj_add_event_cb(b, favAzJump, LV_EVENT_CLICKED, (void *)(intptr_t)('A' + i));
+  }
+}
+
+static void favShowAll() {
+  s_favSearching = false;
+  s_favs.clear();
+  favcache::all(s_favs);
+  lv_obj_add_flag(s_favSearchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_favKb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_favBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_favTitle, "Favorites");
+  favLayout(false, true);
+  favRenderRows();
+  favBuildAz();
+  lv_obj_remove_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void favRunSearch(const String &q) {
+  s_favs.clear();
+  lv_obj_add_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
+  if (q.length() < 2) {
+    lv_obj_clean(s_favList); s_favTiles.clear();
+    lv_label_set_text(s_favStatus, "Type at least two letters.");
+    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  favcache::search(q, s_favs, 60);
+  favLayout(true, false);
+  if (s_favs.empty()) {
+    lv_obj_clean(s_favList); s_favTiles.clear();
+    lv_label_set_text(s_favStatus, "No favourites match.");
+    lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_add_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+  favRenderRows();
+}
+
+static void favSearchCb(lv_event_t *) {
+  s_favPending = String(lv_textarea_get_text(s_favSearchTa));
+  s_favSearchAt = millis();
+}
+static void favSearchBtnCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Tick);
+  s_favSearching = true;
+  s_favs.clear();
+  lv_obj_clean(s_favList); s_favTiles.clear();
+  lv_obj_add_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(s_favSearchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(s_favKb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(s_favBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_favTitle, "Search favorites");
+  favLayout(true, false);
+  lv_keyboard_set_textarea(s_favKb, s_favSearchTa);
+  lv_textarea_set_text(s_favSearchTa, "");
+  lv_label_set_text(s_favStatus, "Type at least two letters.");
+  lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+}
+static void favBackCb(lv_event_t *) { uiSoundPlay(UiSound::Tick); favShowAll(); }
 
 static void buildFavourites() {
   lv_obj_t *pg = s_page[PAGE_FAVORITES];
-  lv_obj_t *h = label(pg, "Favorites", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);   // clear of the status bar
 
-  s_favStatus = label(pg, "Loading favourites" LV_SYMBOL_REFRESH, &lv_font_montserrat_22,
-                        JB_TEXT_DIM);
-  lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 90);
+  s_favBack = lv_button_create(pg);
+  lv_obj_remove_style_all(s_favBack);
+  lv_obj_set_size(s_favBack, 52, 52);
+  lv_obj_align(s_favBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
+  lv_obj_add_event_cb(s_favBack, favBackCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *bl = label(s_favBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_center(bl);
+  lv_obj_add_flag(s_favBack, LV_OBJ_FLAG_HIDDEN);
+
+  s_favTitle = label(pg, "Favorites", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(s_favTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
+
+  s_favSearchBtn = lv_button_create(pg);
+  lv_obj_remove_style_all(s_favSearchBtn);
+  lv_obj_set_size(s_favSearchBtn, 56, 52);
+  lv_obj_align(s_favSearchBtn, LV_ALIGN_TOP_RIGHT, 0, PAD_TOP + 44);
+  lv_obj_set_style_radius(s_favSearchBtn, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(s_favSearchBtn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_favSearchBtn, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_add_event_cb(s_favSearchBtn, favSearchBtnCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *sb = label(s_favSearchBtn, LV_SYMBOL_LIST, &lv_font_montserrat_20, JB_TEXT_MUTED);
+  lv_obj_center(sb);
+
+  s_favStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
 
   s_favList = lv_obj_create(pg);
   lv_obj_remove_style_all(s_favList);
-  lv_obj_set_size(s_favList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 90) - PAD_BOT);
-  lv_obj_align(s_favList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
   lv_obj_set_style_bg_opa(s_favList, LV_OPA_TRANSP, 0);
-  // Scrollable: a Favourites list is arbitrarily long and this panel is finite.
   lv_obj_set_scroll_dir(s_favList, LV_DIR_VER);
   lv_obj_set_scrollbar_mode(s_favList, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_scroll_snap_y(s_favList, LV_SCROLL_SNAP_CENTER);
+  lv_obj_add_event_cb(s_favList, favScrollCb, LV_EVENT_SCROLL, nullptr);
+  favLayout(false, true);
+
+  s_favSearchTa = lv_textarea_create(pg);
+  lv_textarea_set_one_line(s_favSearchTa, true);
+  lv_textarea_set_placeholder_text(s_favSearchTa, "Favourite name");
+  lv_obj_set_size(s_favSearchTa, SCREEN_W - RAIL_W - PAD_X * 2, 56);
+  lv_obj_align(s_favSearchTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 106);
+  lv_obj_set_style_bg_color(s_favSearchTa, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_set_style_border_color(s_favSearchTa, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_text_color(s_favSearchTa, lv_color_hex(JB_TEXT), 0);
+  lv_obj_set_style_text_font(s_favSearchTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_radius(s_favSearchTa, JB_R_MD, 0);
+  lv_obj_add_event_cb(s_favSearchTa, favSearchCb, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_add_flag(s_favSearchTa, LV_OBJ_FLAG_HIDDEN);
+
+  s_favAz = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_favAz);
+  lv_obj_set_size(s_favAz, SCREEN_W - RAIL_W - PAD_X * 2, 44);
+  lv_obj_align(s_favAz, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
+  lv_obj_clear_flag(s_favAz, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
+
+  s_favKb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_favKb, SCREEN_W - RAIL_W - PAD_X * 2, 250);
+  lv_obj_align(s_favKb, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_obj_add_flag(s_favKb, LV_OBJ_FLAG_HIDDEN);
 }
 
 // --- Settings -----------------------------------------------------------------------------------
@@ -575,8 +716,11 @@ static void amzBtnCb(lv_event_t *) {
 }
 
 static void refreshNowCb(lv_event_t *) {
+  // One button, both caches: they share the schedule, and a user asking for "refresh" means the
+  // lists they can see, not one of two internal caches they have no reason to distinguish.
   uiSoundPlay(UiSound::Confirm);
   radiocache::requestRefresh();
+  favcache::requestRefresh();
 }
 
 // Device name drives the DHCP hostname, the mDNS name and the OTA name, and all three are derived
@@ -1188,6 +1332,7 @@ void uiInit() {
   // 12 slots x 72x72 RGB565 = ~124 KB of PSRAM. Bounded on purpose: fifty decoded rows would be
   // ~506 KB, as much as the whole LVGL pool, which is what makes an unbounded cache unbuildable.
   artcache::init(72, 12);
+  favcache::start();
   radiocache::start();
 
   showPage(PAGE_NOW);
@@ -1352,8 +1497,9 @@ void uiTick() {
   if (s_cur == PAGE_SETTINGS && s_radioMeta) {
     static String shownMeta;
     String m;
-    if (radiocache::busy())        m = "Refreshing now...";
-    else if (radiocache::ready())  m = String(radiocache::genreCount()) + " genres cached.";
+    if (radiocache::busy() || favcache::busy()) m = "Refreshing now...";
+    else if (radiocache::ready())  m = String(radiocache::genreCount()) + " genres, " +
+                                       String(favcache::count()) + " favorites cached.";
     else                           m = "No station cache yet.";
     if (m != shownMeta) { shownMeta = m; lv_label_set_text(s_radioMeta, m.c_str()); }
   }
@@ -1392,30 +1538,37 @@ void uiTick() {
     }
   }
 
-  // Favorites: render from the cache if it is fresh, otherwise ask once on arrival and poll for the
-  // async result. The browse runs on the net task; takeResults() returns true exactly once when a
-  // new set lands. An empty result is cached too, so a system with no favourites doesn't re-browse
-  // on every visit either.
   if (s_cur == PAGE_FAVORITES) {
-    if (!s_favRendered) {
-      const bool fresh = s_favFetchedMs && (millis() - s_favFetchedMs) < kFavCacheMs;
-      if (fresh) {
-        if (s_favLabels.empty()) lv_label_set_text(s_favStatus, "No favourites on this system");
-        else                       buildFavRows(s_favLabels);
-        s_favRendered = true;
-      } else if (!s_favRequested) {
-        s_favRequested = true;
-        library::requestBrowse("FV:2", library::PLAY_FAVORITE);
-      }
+    // Refresh on entry when the cache has gone stale. This is the one behaviour that differs from
+    // Radio: favourites are edited by the owner in the Sonos app and are expected to show up here
+    // without waiting for the nightly slot or pressing anything.
+    static bool askedThisVisit = false;
+    if (!s_favEntered) { s_favEntered = true; askedThisVisit = false; }
+    if (!askedThisVisit && favcache::stale() && !favcache::busy()) {
+      askedThisVisit = true;
+      favcache::requestRefresh();
     }
-    std::vector<String> labels;
-    if (library::takeResults(labels)) {
-      s_favLabels    = labels;
-      s_favFetchedMs = millis();
-      s_favRendered  = true;
-      if (labels.empty()) lv_label_set_text(s_favStatus, "No favourites on this system");
-      else                buildFavRows(labels);
+    // Repaint when the cache is replaced, or when artwork finishes decoding.
+    const uint32_t gen = favcache::ready() ? (uint32_t)favcache::fetchedAt() : 0;
+    if (gen && gen != s_favShownGen && !favcache::busy() && !s_favSearching) {
+      s_favShownGen = gen;
+      favShowAll();
     }
+    if (!s_favs.empty() && artcache::generation() != s_favArtGen) {
+      s_favArtGen = artcache::generation();
+      favPaintArt();
+    }
+    if (s_favSearchAt && millis() - s_favSearchAt > 220) {
+      s_favSearchAt = 0;
+      favRunSearch(s_favPending);
+    }
+    if (!favcache::ready()) {
+      lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(s_favStatus, favcache::busy() ? "Loading favourites..."
+                                                      : "No favourites cached yet.");
+    }
+  } else {
+    s_favEntered = false;
   }
 
   // Health heartbeat. This unit lost the network after a few minutes and the failure looked like
