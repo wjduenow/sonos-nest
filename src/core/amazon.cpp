@@ -124,20 +124,45 @@ static String post(const String &action, const String &header, const String &bod
   cli.print(req);
   cli.print(env);
 
-  // Skip headers, then read the body. Responses are small (root ~11 KB, a genre ~19 KB).
+  // Read headers AND body with ONE block loop that always yields, then split at the blank line.
+  // Responses are small (root ~11 KB, a genre ~19 KB).
+  //
+  // NEVER use readStringUntil() or any Stream helper on a TLS socket here. Two compounding traps,
+  // which together rebooted this device in a loop:
+  //
+  //   * They read ONE BYTE per call, and on WiFiClientSecure every byte is a full mbedtls_ssl_read
+  //     plus an available() that polls the SSL record layer.
+  //   * Worse, Stream::timedRead() is `do { read(); } while (millis() - start < _timeout)` — a
+  //     BUSY-WAIT WITH NO YIELD. With setTimeout(15000) above, a header line whose next byte has
+  //     not arrived yet spins for up to 15 SECONDS without letting another task run.
+  //
+  // On core 0 at priority 1 that starves IDLE0, so the task watchdog aborts the chip:
+  //   "IDLE0 (CPU 0) did not reset ... CPU 0: radiocache"  ->  SW_CPU_RESET, mid-crawl.
+  //
+  // And it was a REBOOT LOOP, not a one-off: the crawl died before writing the cache, so the next
+  // boot saw !ready(), started another crawl, and tripped again. It presents as a network or memory
+  // fault. Every individual phase measures under 1.5 s (handshake ~0.5-1.4 s, body ~0.4-0.9 s, SD
+  // write ~35 ms), so phase timing does NOT find it — the decoded backtrace does:
+  //   amazon::post -> readStringUntil -> timedRead -> NetworkClientSecure::available -> mbedtls.
   uint32_t deadline = millis() + 20000;
-  while (cli.connected() && millis() < deadline) {
-    String line = cli.readStringUntil('\n');
-    if (line == "\r" || line.length() == 0) break;
-  }
-  String out;
-  out.reserve(24 * 1024);
-  while (cli.connected() && millis() < deadline) {
-    if (!cli.available()) { delay(5); continue; }
-    out += (char)cli.read();
+  String raw;
+  raw.reserve(24 * 1024);
+  uint8_t buf[1024];
+  uint32_t lastYield = millis();
+  while ((cli.connected() || cli.available()) && millis() < deadline) {
+    const int n = cli.read(buf, sizeof buf);
+    if (n <= 0) { delay(5); lastYield = millis(); continue; }
+    raw.concat((const char *)buf, (unsigned int)n);
+    // Even block reads are CPU work: guarantee the idle task a slot on a big response.
+    if (millis() - lastYield >= 50) { delay(1); lastYield = millis(); }
   }
   cli.stop();
-  return out;
+
+  // Drop the headers in place rather than substring()ing: this runs with ~40 KB of internal heap
+  // free during a crawl, and a second copy of a 19 KB body is not worth spending there.
+  const int hdrEnd = raw.indexOf("\r\n\r\n");
+  if (hdrEnd >= 0) raw.remove(0, hdrEnd + 4);
+  return raw;
 }
 
 static String credsHeader() {
