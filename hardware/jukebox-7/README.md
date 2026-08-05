@@ -21,7 +21,7 @@ the **back** from a cable in the wall.
 
 | | |
 |---|---|
-| Face | **230 × 124 mm** (12.5 mm top band carries the keyholes; see [`wall/`](wall/)) |
+| Face | **240 × 132 mm** (see [`wall/`](wall/) for why each dimension is what it is) |
 | Depth | **22.0 mm** — exactly the design system's `--u7-depth` token |
 | Corner radius | 14 mm (design token) |
 | Screen cutout | 155 × 87 mm active area — **exact position pending measurement** |
@@ -56,6 +56,18 @@ SparkFun-pattern **"USB C Breakout"** (silkscreen rev `V10`), red PCB, 6 castell
 
 **Only `VBUS` and `GND` are used** — two wires to the main board's `J10` pin 3 (`+5V_IN`) and pin 4
 (`GND`). No USB-C plug goes inside the case. See the power tree in the board spec.
+
+**J10 is a JST XH 2.54 mm 4-pin**, so the board end needs no soldering — a pre-made XH pigtail
+plugs straight in. Elecrow silkscreens `RX3 / TX3 / +5V / GND` beside it on the **back** of the
+board; the pins run top to bottom 1→4, so **`+5V` is 3rd from the top and `GND` is the bottom
+pin**. Physically it is on the same edge as the two USB-C ports, below both of them, ~20 mm up
+from that corner and ~17 mm above the corner mounting hole.
+
+⚠️ **Do not use `J3` for power.** It is a 2-pin JST PH that looks ideal, but the net is `VBAT` — a
+LiPo battery input feeding the charger. `J4`/`J6` are the speakers.
+
+Its opening faces the **board's edge**, which is why the case carries a 10 mm gap on the left
+(`CLR_LEFT`) — the housing plugs in horizontally and sticks out past the board.
 
 > Note the routing consequence: `J10` is at the **far left** of the front view (front-x ≈ 6.2,
 > y ≈ 19.8) while the control column is on the right, so the power pair crosses the width behind the

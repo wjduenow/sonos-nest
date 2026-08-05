@@ -22,7 +22,7 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 
 | | |
 |---|---|
-| Face | **230 × 132 mm**, R14 corners |
+| Face | **240 × 132 mm**, R14 corners |
 | Depth | **22.0 mm** — lands exactly on the design system's `--u7-depth` token |
 | Screen | 155 × 87 opening, 1 mm rebate onto the black border |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
@@ -40,6 +40,21 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
   19.5  glass front plane         + envelope 16.5  (MEASURED)
   22.0  face plate outer          + face 2.5
 ```
+
+### The left gap exists for the J10 power cable
+
+`CLR` is 0.75 mm on the column side but **`CLR_LEFT` is 10.0 mm**. That is not styling.
+
+**J10** — the JST XH 2.54 that carries `+5V_IN` — is a **right-angle** connector whose opening
+faces the board's edge, and in front view that edge is the **left** one. So the mating housing
+plugs in horizontally and protrudes past the board: roughly 2 mm of housing beyond the shroud,
+plus wire exit and bend radius. At 0.75 mm the cable could not be fitted at all.
+
+This costs **width** (230 → 240), **not depth** — the case is still 22 mm. Notching the wall was
+not an option: the whole wall is only 3.75 mm of material, less than the housing needs.
+
+> The alternative is soldering power wires directly rather than using the connector, which would
+> save the 10 mm. Worth knowing, but the pre-made XH pigtail is the better build.
 
 ### Clearance around the board
 

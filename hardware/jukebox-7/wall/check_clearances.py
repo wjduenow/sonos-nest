@@ -194,6 +194,11 @@ check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOO
       f"pocket floor z={P.MAG_MATE_Z - P.MAG_POCKET_H:.2f}, case floor z={P.FLOOR_Z}")
 
 print("\n== rear-face clearances ==")
+check("left clearance for the J10 cable", P.CLR_LEFT >= 8.0,
+      f"{P.CLR_LEFT:.2f} mm from the PCB's left edge to the wall; the XH housing plugs in "
+      f"horizontally and protrudes past the board")
+check("J10 sits in that gap", P.PCB_X0 + P.J10_X - P.WALL > 8.0,
+      f"J10 at x={P.PCB_X0 + P.J10_X:.2f}, wall inside at {P.WALL}")
 check("PCB clearance in Y (against the magnet blocks)", P.CLR_Y >= 2.0,
       f"{P.CLR_Y:.2f} mm above and below the board")
 check("I2C relief covers J13", 

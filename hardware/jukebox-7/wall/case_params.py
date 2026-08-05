@@ -64,14 +64,20 @@ BOOT_X, BOOT_Y = 172.62, 31.74  # BOOT  (right edge)
 RST_X,  RST_Y  = 172.62, 17.25  # RESET (right edge)
 
 # ---------------------------------------------------------------- case shell
-FACE_W       = 230.0
+FACE_W       = 240.0
 FACE_H       = 132.0
 DEPTH        = 22.0
 CASE_R       = 14.0     # --case-radius token
 WALL         = 3.0      # side wall thickness
 REAR_WALL    = 2.5
 FACE_T       = 2.5
-CLR          = 0.75     # clearance around the PCB in X
+CLR          = 0.75     # clearance around the PCB in X, on the COLUMN side
+# The LEFT side is different. J10 -- the XH2.54 that feeds +5V_IN -- is a right-angle
+# connector whose opening faces the board's edge, and in front view that edge is the LEFT
+# one. So the mating housing plugs in horizontally and sticks out past the board: roughly
+# 2 mm of housing beyond the shroud, plus wire exit and bend. 0.75 mm was nowhere near it.
+# This costs WIDTH (230 -> 240), not depth -- the case is still 22 mm thick.
+CLR_LEFT     = 10.0     # PCB left edge to the inside of the wall, for the J10 cable
 CLR_Y        = 2.75     # ...and in Y. Wider on purpose: at 0.75 the board dropped in but
                         # sat hard against the magnet blocks above and below it, with no
                         # room to get a finger to it. 2 mm added top and bottom.
@@ -92,7 +98,7 @@ BAND_BOT     = 10.0
 BAND_TOP     = FACE_H - BAND_BOT - 2 * CLR_Y - PCB_H   # 12.5
 
 # PCB placement in the face
-PCB_X0       = WALL + CLR                # 3.75
+PCB_X0       = WALL + CLR_LEFT           # 13.0
 PCB_Y0       = BAND_BOT + CLR_Y          # 12.75
 PCB_X1       = PCB_X0 + PCB_W            # 180.65
 PCB_Y1       = PCB_Y0 + PCB_H            # 116.75
@@ -149,7 +155,7 @@ KEY_DROP     = 5.5                       # how far the unit drops to lock. Sized
                                          # head relief stops clear of the PCB: the relief
                                          # sits at z 2.5-5.5 and the PCB's rear components
                                          # start at z 3.0, so it must not reach over them.
-KEY_X        = (45.0, 185.0)             # 140 mm apart
+KEY_X        = (50.0, 195.0)             # 145 mm apart
 KEY_HEAD_CLR = 3.0                       # clear depth kept behind the slot for the head
 
 # ---------------------------------------------------------------- USB-C breakout
@@ -298,11 +304,11 @@ MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
 MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets meet
 
 # Positions: in the two bands, NEVER over the PCB (the block runs the full interior
-# height), and clear of the keyholes at x = 45 / 185.
+# height), and clear of the keyholes.
 # The SPIGOT sets these, not the magnet. It descends to MAG_MATE_Z (15.5), and over the
 # PCB that height is display glass -- so the spigot must stay off the PCB footprint
 # entirely, while still leaving real wall thickness outboard of it.
-MAG_X        = (20.0, 100.0, 218.0)
+MAG_X        = (25.0, 110.0, 228.0)
 # Centred in the material available either side, so the Ø8.6 bore keeps balanced walls:
 #   bottom, y 0..12.75 (wall + band)  -> bore 2.10..10.70,   walls 2.10 / 2.05
 #   top,    y 116.75..132             -> bore 120.10..128.70, walls 3.35 / 3.30
