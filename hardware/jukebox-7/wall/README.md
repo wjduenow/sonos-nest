@@ -48,6 +48,27 @@ The unit sits **flush to the wall**, so pressing a button pushes it *into* the w
 levering it off. The two keyholes only have to stop it sliding and swinging, which 140 mm of
 separation does comfortably. No cleat, no backplate, **0 mm added depth** — which was the brief.
 
+### The USB-C breakout, and why its datum is the rear plane
+
+The board stands **on edge** with the receptacle pointing at the wall, so its 14.5 mm axis runs
+front-to-back:
+
+```
+   0.0  receptacle mouth   flush with the rear plane, against the wall
+  14.5  rear edge of the breakout PCB
+  19.5  face plate inner surface
+        ─────────────────────────────
+   5.0  mm headroom
+```
+
+The receptacle **nests into the 2.5 mm rear wall** rather than competing with it. Seating the board
+on the interior floor instead would recess the mouth 2.5 mm and force the plug's overmold into the
+port cutout before it could seat — the correct datum is `UC_Z0 = 0`, the outer rear plane.
+
+The plug then behaves the way the install wants: its nose travels ~6.5 mm into the receptacle inside
+the case while the **overmold stays in the wall's cable hole**, so the cable pushes back in once
+mated. The wall hole only has to clear the overmold, not the whole connector.
+
 ### Power routing
 
 `J10` (`+5V_IN`) is at the **far left** (front-x ≈ 6.2), the breakout is at the **bottom right** of

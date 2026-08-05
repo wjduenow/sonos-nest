@@ -102,17 +102,18 @@ def build_shell():
     x0, x1 = P.UC_CX - t / 2.0, P.UC_CX + t / 2.0
     y0, y1 = P.UC_CY - P.UC_H / 2.0, P.UC_CY + P.UC_H / 2.0
     rib = 2.5
-    # two ribs forming the slot, running from the rear wall forward
-    adds.append(bx(x0 - rib, y0 - 1.0, P.FLOOR_Z, x0, y1 + 1.0, P.FLOOR_Z + P.UC_D))
-    adds.append(bx(x1, y0 - 1.0, P.FLOOR_Z, x1 + rib, y1 + 1.0, P.FLOOR_Z + P.UC_D))
-    # end stop at the front so the board cannot be pushed past the port
-    adds.append(bx(x0 - rib, y0 - 1.0, P.FLOOR_Z + P.UC_D,
-                   x1 + rib, y1 + 1.0, P.FLOOR_Z + P.UC_D + 2.0))
-    # screw bosses either side of the receptacle
+    # Two ribs forming the slot. They start at the interior floor (the receptacle itself
+    # occupies the rear-wall thickness, nested in the port cutout) and run forward to the
+    # board's rear edge at UC_Z1.
+    adds.append(bx(x0 - rib, y0 - 1.0, P.FLOOR_Z, x0, y1 + 1.0, P.UC_Z1))
+    adds.append(bx(x1, y0 - 1.0, P.FLOOR_Z, x1 + rib, y1 + 1.0, P.UC_Z1))
+    # end stop so the board cannot be pushed forward off the port
+    adds.append(bx(x0 - rib, y0 - 1.0, P.UC_Z1, x1 + rib, y1 + 1.0, P.UC_Z1 + 2.0))
+    # screw bosses either side of the receptacle, at the board's hole depth
     for dy in (-P.UC_HOLE_CC / 2.0, +P.UC_HOLE_CC / 2.0):
         for xb in (x0 - rib, x1):
             adds.append(bx(xb, P.UC_CY + dy - 3.0, P.FLOOR_Z,
-                           xb + rib, P.UC_CY + dy + 3.0, P.FLOOR_Z + P.UC_HOLE_OFF + 3.0))
+                           xb + rib, P.UC_CY + dy + 3.0, P.UC_Z0 + P.UC_HOLE_OFF + 3.0))
 
     # ---- rear port + funnel ----------------------------------------------------
     port = bx(P.UC_CX - P.PORT_W / 2.0, P.UC_CY - P.PORT_H / 2.0, -1.0,

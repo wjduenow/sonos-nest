@@ -124,6 +124,14 @@ KEY_HEAD_CLR = 3.0                       # clear depth kept behind the slot for 
 # SparkFun-pattern "USB C Breakout" v10.  Stands ON EDGE at the bottom of the control
 # column, its PCB plane perpendicular to the wall, receptacle pointing at the wall.
 #   21.4 axis -> vertical (Y) ; 14.5 axis -> depth (Z) ; 4.75 -> thickness (X)
+#
+# DATUM: the receptacle MOUTH sits at z = 0, flush with the rear plane that meets the
+# wall, so the receptacle nests INTO the 2.5 mm rear wall instead of competing with it.
+# The plug's nose then travels ~6.5 mm into the receptacle inside the case while its
+# overmold stays in the wall's cable hole -- which is how the cable "pushes back in".
+# Seating the board on the interior floor instead would recess the mouth 2.5 mm and
+# force the overmold into the port cutout before the plug could seat.
+#   0.0 receptacle mouth -> 14.5 board rear edge -> 19.5 face plate: 5.0 mm spare.
 UC_H         = 21.4     # MEASURED
 UC_D         = 14.5     # MEASURED: receptacle front face -> rear board edge
 UC_T         = 4.75     # MEASURED: overall thickness (PCB + receptacle)
@@ -133,6 +141,9 @@ UC_HOLE_OFF  = 4.2      # VERIFY (photo-scaled): hole centres back from the rece
 UC_CX        = COL_CX   # 204.20
 UC_CY        = 17.0     # clear of the lower button row (which reaches down to 31.3)
 UC_SLOT_CLR  = 0.4      # slot clearance on the board thickness
+UC_Z0        = 0.0      # receptacle mouth plane == rear outer plane (see above)
+UC_Z1        = UC_Z0 + UC_D              # 14.5  board rear edge
+UC_HEADROOM  = GLASS_Z - UC_Z1           #  5.0  spare to the face plate
 
 # Rear port relief: deliberately oversized with an outside funnel, so the hole drilled
 # in the wall does not have to be placed precisely.
