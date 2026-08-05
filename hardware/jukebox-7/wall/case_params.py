@@ -146,15 +146,24 @@ KCAP_LEADIN   = 0.6             # chamfer at the bore mouth, for assembly
 # ---------------------------------------------------------------- keyhole wall mount
 # Two keyholes in the TOP band, spread wide so the unit cannot swing.  The band has
 # no PCB behind it, so the captured screw head has the full interior depth to sit in.
+#
+# *** ORIENTATION: ENTRY HOLE AT THE BOTTOM, SLOT RUNNING UP. ***
+# This was built upside down once, so here is the reasoning. The screw is fixed in the
+# wall. You offer the unit up, pass the screw head through the wide entry hole, then let
+# the unit DOWN -- so relative to the case the screw travels UPWARD, out of the entry hole
+# and into the slot. The slot's closed UPPER end is what bears the weight.
+# Build it the other way and you would have to push the unit up to engage it, and gravity
+# would walk the screw straight back out of the entry hole.
 SCREW_SHANK  = 3.5      # wall screw shank
 SCREW_HEAD   = 7.0      # wall screw head
 KEY_ENTRY_D  = SCREW_HEAD + 0.6          # 7.6  head passes through here
 KEY_SLOT_W   = SCREW_SHANK + 0.5         # 4.0  shank rides in here
-KEY_ENTRY_CY = 125.5                     # entry-hole centre, inside the top band
+KEY_ENTRY_CY = 123.3                     # entry-hole centre; the slot runs UP from here
 KEY_DROP     = 5.5                       # how far the unit drops to lock. Sized so the
                                          # head relief stops clear of the PCB: the relief
                                          # sits at z 2.5-5.5 and the PCB's rear components
                                          # start at z 3.0, so it must not reach over them.
+KEY_SLOT_TOP = KEY_ENTRY_CY + KEY_DROP   # closed, load-bearing end -- ABOVE the entry
 KEY_X        = (50.0, 195.0)             # 145 mm apart
 KEY_HEAD_CLR = 3.0                       # clear depth kept behind the slot for the head
 

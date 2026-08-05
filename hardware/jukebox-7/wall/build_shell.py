@@ -49,11 +49,17 @@ def bx(x0, y0, z0, x1, y1, z1):
 
 
 def keyhole_poly(cx):
-    """Keyhole outline: entry circle at the top, slot running down by KEY_DROP."""
+    """Keyhole outline: entry circle at the BOTTOM, slot running UP by KEY_DROP.
+
+    The unit is lowered onto fixed wall screws, so relative to the case the screw
+    travels upward out of the entry hole into the slot, and the slot's closed upper
+    end carries the load. See the orientation note in case_params.py -- this was
+    built upside down once.
+    """
     from shapely.geometry import Point
     entry = Point(cx, P.KEY_ENTRY_CY).buffer(P.KEY_ENTRY_D / 2.0, resolution=24)
-    slot = sbox(cx - P.KEY_SLOT_W / 2.0, P.KEY_ENTRY_CY - P.KEY_DROP,
-                cx + P.KEY_SLOT_W / 2.0, P.KEY_ENTRY_CY)
+    slot = sbox(cx - P.KEY_SLOT_W / 2.0, P.KEY_ENTRY_CY,
+                cx + P.KEY_SLOT_W / 2.0, P.KEY_SLOT_TOP)
     return unary_union([entry, slot])
 
 

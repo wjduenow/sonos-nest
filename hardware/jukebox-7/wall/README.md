@@ -93,6 +93,24 @@ of board clearance top and bottom (see above) brings the face to 132.
 **Face screws are in the bands, three across each** (`FSCREW_X`), never over the PCB, and clear of
 the keyholes and the USB-C plate. `check_clearances.py` asserts all of it.
 
+### Keyhole orientation — entry hole at the BOTTOM
+
+```
+        ║  ║      ← slot, closed upper end BEARS THE WEIGHT
+        ║  ║
+       ╭─────╮
+       │  ●  │    ← entry hole, screw head passes through here
+       ╰─────╯
+```
+
+The screw is fixed in the wall. You offer the unit up, pass the screw head through the wide entry
+hole, then let the unit **down** — so relative to the case the screw travels **upward** into the
+slot, and the slot's closed upper end carries the load.
+
+This was built upside down once. With the slot below the entry you would have to push the unit
+*up* to engage it, and gravity would walk the screw straight back out and drop the unit off the
+wall. `check_clearances.py` now asserts `KEY_SLOT_TOP > KEY_ENTRY_CY`.
+
 ### Why keyholes, and why they don't rock
 
 The unit sits **flush to the wall**, so pressing a button pushes it *into* the wall rather than

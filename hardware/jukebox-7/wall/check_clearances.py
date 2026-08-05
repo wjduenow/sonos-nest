@@ -144,11 +144,13 @@ check("bottom button row vs USB-C", btn_lo > uc_hi, f"gap {btn_lo - uc_hi:+.2f} 
       tight=(0 < btn_lo - uc_hi < 3))
 
 print("\n== keyholes must stay inside the top band and off the PCB ==")
+check("keyhole slot runs UP from the entry hole", P.KEY_SLOT_TOP > P.KEY_ENTRY_CY,
+      "load-bearing closed end is above the entry -- the unit is lowered onto the screws")
 for kx in P.KEY_X:
-    top = P.KEY_ENTRY_CY + P.KEY_ENTRY_D / 2
-    bot = P.KEY_ENTRY_CY - P.KEY_DROP - 1.5          # incl. head-relief buffer
+    top = P.KEY_SLOT_TOP + 1.5                       # slot end + head-relief buffer
+    bot = P.KEY_ENTRY_CY - P.KEY_ENTRY_D / 2 - 1.5   # entry circle + buffer
     check(f"keyhole x={kx:.0f} top", top <= P.FACE_H - 1.0,
-          f"reaches y={top:.2f} of {P.FACE_H}")
+          f"relief reaches y={top:.2f} of {P.FACE_H}")
     check(f"keyhole x={kx:.0f} bottom", bot >= P.PCB_Y1,
           f"relief reaches y={bot:.2f}, PCB top is {P.PCB_Y1:.2f}",
           tight=(0 <= bot - P.PCB_Y1 < 1.0))
