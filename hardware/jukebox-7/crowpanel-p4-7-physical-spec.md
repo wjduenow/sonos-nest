@@ -205,8 +205,8 @@ Which gives a comfortable case:
 | | |
 |---|---|
 | Layout | Control column **right of the screen**, per the design system's front elevation |
-| Face | **~230 × 112 mm** (3 wall + 0.75 clearance + 176.90 PCB + 46 column + 3 wall) |
-| Depth | **~21 mm** (see above) |
+| Face | **230 × 124 mm** |
+| Depth | **22.0 mm** (exactly the `--u7-depth` token) |
 | Mounting | **Keyhole slots cut into the rear shell** — lowest profile, adds 0 mm |
 | Wall | Unit sits **flush**; no cavity. A small hole passes the USB-C cable, pushed back in once mated |
 | Power | Rear USB-C breakout → 2 wires (VBUS, GND) → **J10**, which sits at the **far LEFT** of the front view |

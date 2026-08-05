@@ -21,8 +21,8 @@ the **back** from a cable in the wall.
 
 | | |
 |---|---|
-| Face | **~230 × 112 mm** (3 wall + 0.75 clearance + 176.90 PCB + 46 column + 3 wall) |
-| Depth | **~21 mm** (electronics envelope is 16.5) |
+| Face | **230 × 124 mm** (12.5 mm top band carries the keyholes; see [`wall/`](wall/)) |
+| Depth | **22.0 mm** — exactly the design system's `--u7-depth` token |
 | Corner radius | 14 mm (design token) |
 | Screen cutout | 155 × 87 mm active area — **exact position pending measurement** |
 | Mounting | Keyhole slots in the rear shell — lowest profile, adds 0 mm |
@@ -74,8 +74,14 @@ y ≈ 96.57 — conveniently on the column side).
 > 0x5D** and an **unidentified device at 0x2F** (see `plans/07-sonos-jukebox.md`). A collision would
 > be silent and painful to diagnose.
 
+## Parts
+
+- **[`wall/`](wall/)** — the flush wall case: `shell.stl` (body + keyhole mount + breakout cradle)
+  and `face.stl` (screen opening + control column). First parametric pass is built.
+
 ## Status
 
-Spec and measurements in progress; no geometry generated yet. Outstanding items are listed at the
-end of [`crowpanel-p4-7-physical-spec.md`](crowpanel-p4-7-physical-spec.md) — the blocker is the
-**active area's position on the PCB**, which sets every bezel dimension.
+Geometry generates and is watertight. The **face plate is provisional**: the lit area's position on
+the PCB is still a centred guess, and it is the only thing that moves the screen opening. Remaining
+items are listed at the end of [`crowpanel-p4-7-physical-spec.md`](crowpanel-p4-7-physical-spec.md)
+and in [`wall/README.md`](wall/README.md).
