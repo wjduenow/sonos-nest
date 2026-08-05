@@ -92,7 +92,11 @@ static String thumbUrl(const String &url, int px) {
 
 static String dir() {
   const char *r = localStorageRoot();
-  return r ? String(r) + "/radio/art" : String();
+  // NOT under /radio: that whole tree is rmTree'd and rename()d by every crawl (radio_cache.cpp).
+  // Living inside it made rmdir() fail, so the swap failed and the crawl never published — and had
+  // it "worked", every daily crawl would have thrown away ~1000 thumbnails and re-downloaded them,
+  // which is the exact network load the cache exists to avoid.
+  return r ? String(r) + "/radioart" : String();
 }
 static String pathOf(const String &key) { return dir() + "/" + key + ".jpg"; }
 

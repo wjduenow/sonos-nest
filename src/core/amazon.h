@@ -39,6 +39,11 @@ struct Station {
 // this needs discovery to have run. Cheap, idempotent, and a no-op once both are known.
 void adopt();
 
+// Drops the pooled keep-alive TLS session. Call when a burst of requests is finished (the crawl
+// does) so an idle socket is not held open on a link with few to spare. Harmless if none is open;
+// the next request simply reconnects.
+void endSession();
+
 // --- Account linking ----------------------------------------------------------------------------
 // Three-step ceremony, owner in the loop once:
 //   1. linkBegin(url)  -> show `url` (or a QR of it) and ask the owner to approve in a browser

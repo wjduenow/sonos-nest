@@ -22,6 +22,17 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   Modulino Knob on the **shared I2C bus via J13**, not the 11-pin GPIO header — see
   `boards/crowpanel_p4_7in/knob.cpp`, and read its phantom-response note before debugging it.
   **Not done**: the 4 transport buttons (a PCF8574 at 0x20, same bus) and the case.
+  > ⚠️ **The Amazon crawl must never restart from zero, and its tree must contain nothing else.**
+  > Two bugs kept this device in a permanent reboot loop. (1) `amazon::post()` skipped HTTP headers
+  > with `readStringUntil()`, and `Stream::timedRead()` is a **busy-wait with no yield** — with a
+  > 15 s timeout it starved IDLE0 and the task watchdog aborted the chip mid-crawl (`CPU 0:
+  > radiocache`). Never use a Stream helper on a TLS socket here; read blocks and yield. Phase
+  > timing will NOT find it (every phase is <1.5 s) — decode the register dump. (2) The artwork
+  > cache lived at `radio/art`, **inside the tree `refresh()` rmTree+renames**, so `rmdir` failed,
+  > the swap failed, and no crawl ever published however often it succeeded. Art now lives at
+  > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
+  > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
+  > instead of 27 connect/handshake/close cycles.
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP

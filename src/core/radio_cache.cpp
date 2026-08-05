@@ -27,6 +27,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -108,13 +110,22 @@ static String field(const String &line, int n) {
 // Tabs and newlines are the record separators, so they can never appear in a value.
 static String clean(String s) { s.replace('\t', ' '); s.replace('\n', ' '); s.replace('\r', ' '); return s; }
 
+// Genuinely recursive, and it has to be. This used to unlink only the flat files it knew it wrote,
+// which is fine right up until something else puts a SUBDIRECTORY in the tree — the artwork cache
+// used to live at radio/art. A surviving subdirectory makes rmdir() fail, so the destination still
+// exists, so the rename() swap below fails with "rename failed — cache left in the temp tree", and
+// the crawl never publishes no matter how many times it succeeds. Recursing also migrates devices
+// that still carry that legacy radio/art directory.
 static void rmTree(const String &dir) {
-  // Flat directory; no recursion needed. Unlink what we know we write, then the dir itself.
-  unlink((dir + "/index.tsv").c_str());
-  unlink((dir + "/all.tsv").c_str());
-  for (int i = 0; i < 64; ++i) {
-    char n[16]; snprintf(n, sizeof n, "/g%02d.tsv", i);
-    unlink((dir + n).c_str());
+  if (DIR *d = opendir(dir.c_str())) {
+    while (struct dirent *e = readdir(d)) {
+      if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+      const String p = dir + "/" + e->d_name;
+      struct stat st;
+      if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) rmTree(p);
+      else                                                  unlink(p.c_str());
+    }
+    closedir(d);
   }
   rmdir(dir.c_str());
 }
@@ -142,6 +153,46 @@ bool     busy()      { return s_busy; }
 void     requestRefresh() { s_wantRefresh = true; }
 
 // --- the crawl --------------------------------------------------------------------------------------
+//
+// RESUMABLE, ACROSS REBOOTS. Each genre lands in its own gNN.tsv in the temp tree as it arrives,
+// and the temp tree is NOT wiped on entry — a run only fetches the genres whose file is missing.
+//
+// This exists because of the ESP-Hosted fault (plans/07): the link dies under sustained crawl load
+// and the firmware reboots to recover. A crawl that restarted from genre 0 every time could never
+// finish, so the cache was never written, so !ready() started another crawl on the next boot — an
+// endless reboot loop that left the device unusable. Resuming converges instead: each pass gets
+// further, and two or three passes complete it.
+//
+// The manifest (genres.tsv) guards the resume. gNN files are keyed by POSITION in the genre list,
+// so if Amazon's list changes between passes the part-built tree is meaningless and is discarded.
+static bool fileHasContent(const String &p) {
+  struct stat st;
+  return stat(p.c_str(), &st) == 0 && st.st_size > 0;
+}
+
+static bool manifestMatches(const String &path, const std::vector<amazon::Genre> &genres) {
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) return false;
+  char buf[512];
+  size_t i = 0;
+  bool ok = true;
+  while (fgets(buf, sizeof buf, f)) {
+    String l(buf); l.trim();
+    if (l.isEmpty()) continue;
+    if (i >= genres.size() || field(l, 2) != clean(genres[i].id)) { ok = false; break; }
+    ++i;
+  }
+  fclose(f);
+  return ok && i == genres.size();
+}
+
+static bool writeManifest(const String &path, const std::vector<amazon::Genre> &genres) {
+  Writer w(path);
+  for (size_t i = 0; i < genres.size(); ++i)
+    w.line(String((int)i) + "\t" + clean(genres[i].title) + "\t" + clean(genres[i].id));
+  return w.close();
+}
+
 bool refresh() {
   if (root().isEmpty()) { Serial.println("[radio ] no storage — cache unavailable"); return false; }
   if (!amazon::linked()) { Serial.println("[radio ] Amazon not linked — cannot crawl"); return false; }
@@ -149,31 +200,47 @@ bool refresh() {
   s_busy = true;
 
   const String tmp = root(true);
-  rmTree(tmp);
   mkdir(tmp.c_str(), 0777);
 
   std::vector<amazon::Genre> genres;
   if (!amazon::genres(genres)) {
     Serial.println("[radio ] genre browse failed");
+    amazon::endSession();
     s_busy = false; return false;
   }
-  Serial.printf("[radio ] crawling %u genres\n", (unsigned)genres.size());
 
-  Writer all(tmp + "/all.tsv");
-  Writer idx(tmp + "/index.tsv");
-  idx.line(String("v1\t") + String((uint32_t)time(nullptr)));
+  // Resume only against an identical genre list; otherwise start clean.
+  const String manifest = tmp + "/genres.tsv";
+  if (!manifestMatches(manifest, genres)) {
+    rmTree(tmp);
+    mkdir(tmp.c_str(), 0777);
+    if (!writeManifest(manifest, genres)) {
+      Serial.println("[radio ] could not write the resume manifest");
+      amazon::endSession();
+      s_busy = false; return false;
+    }
+  }
 
-  int totalStations = 0;
+  int have = 0;
+  for (size_t g = 0; g < genres.size(); ++g)
+    if (fileHasContent(genrePath((int)g, true))) ++have;
+  if (have) Serial.printf("[radio ] resuming: %d of %u genres already cached\n",
+                          have, (unsigned)genres.size());
+  else      Serial.printf("[radio ] crawling %u genres\n", (unsigned)genres.size());
+
+  int fetched = 0;
   for (size_t g = 0; g < genres.size(); ++g) {
-    // PACING IS DELIBERATE. 27 requests back to back is ~500 KB in a burst, which is exactly the
+    if (fileHasContent(genrePath((int)g, true))) continue;      // already have it
+
+    // PACING IS DELIBERATE. Requests back to back are ~500 KB in a burst, which is exactly the
     // sustained-load profile that kills the ESP-Hosted link. A crawl that takes a minute is free;
     // a wedged radio is not.
     vTaskDelay(pdMS_TO_TICKS(kPaceMs));
 
     std::vector<amazon::Station> st;
     if (!amazon::stations(genres[g].id, st)) {
-      Serial.printf("[radio ]   %-24s FAILED — skipping\n", genres[g].title.c_str());
-      continue;   // a genre we cannot read is a gap, not a reason to discard the whole crawl
+      Serial.printf("[radio ]   %-24s FAILED — will retry next pass\n", genres[g].title.c_str());
+      continue;
     }
     // Sorted here so neither the device nor the A-Z strip has to sort later.
     std::sort(st.begin(), st.end(), [](const amazon::Station &a, const amazon::Station &b) {
@@ -181,26 +248,62 @@ bool refresh() {
     });
 
     Writer gf(genrePath((int)g, true));
-    for (const auto &s : st) {
-      gf.line(clean(s.title) + "\t" + clean(s.id) + "\t" + clean(s.artUrl));
-      all.line(clean(s.title) + "\t" + String((int)g) + "\t" + clean(s.id));
-    }
+    for (const auto &s : st) gf.line(clean(s.title) + "\t" + clean(s.id) + "\t" + clean(s.artUrl));
     if (!gf.close()) {
       Serial.printf("[radio ]   %-24s WRITE FAILED\n", genres[g].title.c_str());
+      amazon::endSession();
       s_busy = false; return false;
     }
-    idx.line(String((int)g) + "\t" + clean(genres[g].title) + "\t" + clean(genres[g].id));
-    totalStations += (int)st.size();
+    ++fetched;
     Serial.printf("[radio ]   %-24s %2u stations\n", genres[g].title.c_str(), (unsigned)st.size());
   }
+  amazon::endSession();   // the burst is over; do not hold a socket open on this link
 
-  const bool okAll = all.close();
-  const bool okIdx = idx.close();
-  if (!okAll || !okIdx) {
-    Serial.println("[radio ] index write failed — keeping the previous cache");
+  int missing = 0;
+  for (size_t g = 0; g < genres.size(); ++g)
+    if (!fileHasContent(genrePath((int)g, true))) ++missing;
+
+  // Convergence rule. Still missing genres but we made progress this pass -> keep the temp tree and
+  // finish next time. Missing and NO progress -> nothing more to gain by waiting, so publish with
+  // the gaps rather than never publishing at all.
+  if (missing && fetched) {
+    Serial.printf("[radio ] pass complete: %d fetched, %d still missing — resuming next run\n",
+                  fetched, missing);
     s_busy = false; return false;
   }
+  if (missing) Serial.printf("[radio ] publishing with %d genre(s) unavailable\n", missing);
 
+  // Build the index and the flat search file from what is on the card. Done here, not during the
+  // fetch, so a crawl spread over several passes still produces one consistent pair.
+  int totalStations = 0;
+  {
+    Writer idx(tmp + "/index.tsv");
+    idx.line(String("v1\t") + String((uint32_t)time(nullptr)));
+    for (size_t g = 0; g < genres.size(); ++g)
+      idx.line(String((int)g) + "\t" + clean(genres[g].title) + "\t" + clean(genres[g].id));
+    if (!idx.close()) {
+      Serial.println("[radio ] index write failed — keeping the previous cache");
+      s_busy = false; return false;
+    }
+
+    Writer all(tmp + "/all.tsv");
+    for (size_t g = 0; g < genres.size(); ++g) {
+      FILE *f = fopen(genrePath((int)g, true).c_str(), "rb");
+      if (!f) continue;
+      char buf[512];
+      while (fgets(buf, sizeof buf, f)) {
+        String l(buf); l.trim();
+        if (l.isEmpty()) continue;
+        all.line(field(l, 0) + "\t" + String((int)g) + "\t" + field(l, 1));
+        ++totalStations;
+      }
+      fclose(f);
+    }
+    if (!all.close()) {
+      Serial.println("[radio ] search index write failed — keeping the previous cache");
+      s_busy = false; return false;
+    }
+  }
   // Swap last. Until this point the live cache is untouched, so a crawl that dies partway leaves
   // the previous index intact rather than a half-written one.
   rmTree(root());
@@ -208,6 +311,9 @@ bool refresh() {
     Serial.println("[radio ] rename failed — cache left in the temp tree");
     s_busy = false; return false;
   }
+  // Only now is the resume state safe to discard: dropping it before the swap would mean a failed
+  // rename lost the whole part-built tree and the next pass started from genre 0 again.
+  unlink((root() + "/genres.tsv").c_str());
   s_genreCount = -1;   // force a re-read
   Serial.printf("[radio ] cache built: %d genres, %d stations\n", (int)genres.size(), totalStations);
   s_busy = false;

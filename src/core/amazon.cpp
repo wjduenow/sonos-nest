@@ -101,68 +101,143 @@ static String urlEncode(const String &in) {
 
 // --- transport ----------------------------------------------------------------------------------
 
+// A SINGLE KEEP-ALIVE TLS SESSION, reused across every call.
+//
+// It used to open a fresh WiFiClientSecure per request and send `Connection: close`, so one crawl
+// cost 27 TCP connects, 27 TLS handshakes and 27 closes. Handshakes measured 0.5-1.4 s each, so
+// that alone was most of the crawl's wall clock — and that connect/close churn is the sustained
+// load profile that wedges this board's ESP-Hosted link (plans/07). One session instead.
+//
+// Reuse forces us to know where a response ENDS, which read-to-EOF never had to. Content-Length is
+// honoured and the socket kept; anything else (chunked, or no length at all) falls back to the old
+// read-until-close behaviour and drops the session, so a server that will not do keep-alive is
+// merely no worse than before. Deliberately no de-chunker: it needs a second copy of a ~19 KB body
+// and the crawl runs with ~40 KB of internal heap free.
+static WiFiClientSecure *s_cli = nullptr;
+static uint32_t s_lastUseMs = 0;
+static const uint32_t kIdleDropMs = 30000;   // a session idle this long is presumed dead
+
+static void dropSession() {
+  if (!s_cli) return;
+  s_cli->stop();
+  delete s_cli;
+  s_cli = nullptr;
+}
+
+void endSession() { dropSession(); }
+
+static bool ensureSession() {
+  if (s_cli) {
+    if (s_cli->connected() && (millis() - s_lastUseMs) < kIdleDropMs) return true;
+    dropSession();
+  }
+  s_cli = new WiFiClientSecure();
+  if (!s_cli) return false;
+  s_cli->setInsecure();       // same posture as core/net/updater.cpp — no cert store on device
+  s_cli->setTimeout(15000);
+  if (!s_cli->connect(kHost, 443)) { dropSession(); return false; }
+  return true;
+}
+
+// Reads one complete HTTP response. `keepAlive` reports whether the socket is still in a known
+// state afterwards. False return = the response never arrived.
+//
+// NEVER use readStringUntil() or any Stream helper on a TLS socket here. Two compounding traps,
+// which together rebooted this device in a loop:
+//
+//   * They read ONE BYTE per call, and on WiFiClientSecure every byte is a full mbedtls_ssl_read
+//     plus an available() that polls the SSL record layer.
+//   * Worse, Stream::timedRead() is `do { read(); } while (millis() - start < _timeout)` — a
+//     BUSY-WAIT WITH NO YIELD. With a 15 s timeout, a header line whose next byte has not arrived
+//     yet spins for fifteen seconds without letting another task run.
+//
+// On core 0 at priority 1 that starves IDLE0, so the task watchdog aborts the chip:
+//   "IDLE0 (CPU 0) did not reset ... CPU 0: radiocache"  ->  SW_CPU_RESET, mid-crawl.
+// Every individual phase measures under 1.5 s, so phase timing does NOT find it; the decoded
+// backtrace does. Read blocks, and always yield.
+static bool readResponse(String &out, bool &keepAlive) {
+  const uint32_t deadline = millis() + 20000;
+  uint8_t buf[1024];
+  uint32_t lastYield = millis();
+  keepAlive = false;
+
+  String raw;
+  raw.reserve(24 * 1024);
+  auto pump = [&]() -> bool {                     // one block, yielding; false = socket done
+    if (!s_cli->connected() && !s_cli->available()) return false;
+    const int n = s_cli->read(buf, sizeof buf);
+    if (n <= 0) { delay(5); lastYield = millis(); return true; }
+    raw.concat((const char *)buf, (unsigned int)n);
+    if (millis() - lastYield >= 50) { delay(1); lastYield = millis(); }
+    return true;
+  };
+
+  int hdrEnd = -1;
+  while (millis() < deadline) {
+    hdrEnd = raw.indexOf("\r\n\r\n");
+    if (hdrEnd >= 0) break;
+    if (!pump()) break;
+  }
+  if (hdrEnd < 0) return false;
+
+  String head = raw.substring(0, hdrEnd);
+  head.toLowerCase();
+  raw.remove(0, hdrEnd + 4);                      // in place: raw is now the body so far
+
+  long len = -1;
+  const int cl = head.indexOf("content-length:");
+  if (cl >= 0) len = strtol(head.c_str() + cl + 15, nullptr, 10);
+
+  if (len >= 0) {
+    while ((long)raw.length() < len && millis() < deadline) {
+      if (!pump()) break;
+    }
+    if ((long)raw.length() > len) raw.remove(len);
+    keepAlive = ((long)raw.length() == len) && head.indexOf("connection: close") < 0;
+  } else {
+    while (millis() < deadline) {                 // no length: read until the server closes
+      if (!pump()) break;
+    }
+  }
+  out = raw;
+  return true;
+}
+
 // One SOAP round trip. `header` is the full <s:Header> contents. Returns the body, or "" on
 // transport failure. HTTP status is not distinguished: a SOAP fault arrives as a 500 with a body we
 // still need to read, so the caller inspects the body either way.
 static String post(const String &action, const String &header, const String &body) {
-  WiFiClientSecure cli;
-  cli.setInsecure();          // same posture as core/net/updater.cpp — no cert store on device
-  cli.setTimeout(15000);
-  if (!cli.connect(kHost, 443)) {
-    Serial.println("[amazon] connect failed");
-    return "";
-  }
-  String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-                      "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
-                      "<s:Header>") + header + "</s:Header><s:Body>" + body +
-               "</s:Body></s:Envelope>";
-  String req = String("POST / HTTP/1.1\r\nHost: ") + kHost +
-               "\r\nContent-Type: text/xml; charset=\"utf-8\""
-               "\r\nSOAPAction: \"" + kNs + "#" + action + "\"" +
-               "\r\nUser-Agent: Linux UPnP/1.0 Sonos/84.1-59230"
-               "\r\nConnection: close\r\nContent-Length: " + String(env.length()) + "\r\n\r\n";
-  cli.print(req);
-  cli.print(env);
+  const String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+                            "<s:Header>") + header + "</s:Header><s:Body>" + body +
+                     "</s:Body></s:Envelope>";
+  const String req = String("POST / HTTP/1.1\r\nHost: ") + kHost +
+                     "\r\nContent-Type: text/xml; charset=\"utf-8\""
+                     "\r\nSOAPAction: \"" + kNs + "#" + action + "\"" +
+                     "\r\nUser-Agent: Linux UPnP/1.0 Sonos/84.1-59230"
+                     "\r\nConnection: keep-alive\r\nContent-Length: " + String(env.length()) +
+                     "\r\n\r\n";
 
-  // Read headers AND body with ONE block loop that always yields, then split at the blank line.
-  // Responses are small (root ~11 KB, a genre ~19 KB).
-  //
-  // NEVER use readStringUntil() or any Stream helper on a TLS socket here. Two compounding traps,
-  // which together rebooted this device in a loop:
-  //
-  //   * They read ONE BYTE per call, and on WiFiClientSecure every byte is a full mbedtls_ssl_read
-  //     plus an available() that polls the SSL record layer.
-  //   * Worse, Stream::timedRead() is `do { read(); } while (millis() - start < _timeout)` — a
-  //     BUSY-WAIT WITH NO YIELD. With setTimeout(15000) above, a header line whose next byte has
-  //     not arrived yet spins for up to 15 SECONDS without letting another task run.
-  //
-  // On core 0 at priority 1 that starves IDLE0, so the task watchdog aborts the chip:
-  //   "IDLE0 (CPU 0) did not reset ... CPU 0: radiocache"  ->  SW_CPU_RESET, mid-crawl.
-  //
-  // And it was a REBOOT LOOP, not a one-off: the crawl died before writing the cache, so the next
-  // boot saw !ready(), started another crawl, and tripped again. It presents as a network or memory
-  // fault. Every individual phase measures under 1.5 s (handshake ~0.5-1.4 s, body ~0.4-0.9 s, SD
-  // write ~35 ms), so phase timing does NOT find it — the decoded backtrace does:
-  //   amazon::post -> readStringUntil -> timedRead -> NetworkClientSecure::available -> mbedtls.
-  uint32_t deadline = millis() + 20000;
-  String raw;
-  raw.reserve(24 * 1024);
-  uint8_t buf[1024];
-  uint32_t lastYield = millis();
-  while ((cli.connected() || cli.available()) && millis() < deadline) {
-    const int n = cli.read(buf, sizeof buf);
-    if (n <= 0) { delay(5); lastYield = millis(); continue; }
-    raw.concat((const char *)buf, (unsigned int)n);
-    // Even block reads are CPU work: guarantee the idle task a slot on a big response.
-    if (millis() - lastYield >= 50) { delay(1); lastYield = millis(); }
-  }
-  cli.stop();
+  // Two attempts, but only when the first used a RECYCLED socket: a server that closed an idle
+  // keep-alive connection looks identical to a failure until we try to write to it.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    const bool reused = (s_cli != nullptr);
+    if (!ensureSession()) { Serial.println("[amazon] connect failed"); return ""; }
 
-  // Drop the headers in place rather than substring()ing: this runs with ~40 KB of internal heap
-  // free during a crawl, and a second copy of a 19 KB body is not worth spending there.
-  const int hdrEnd = raw.indexOf("\r\n\r\n");
-  if (hdrEnd >= 0) raw.remove(0, hdrEnd + 4);
-  return raw;
+    s_cli->print(req);
+    s_cli->print(env);
+
+    String out;
+    bool keepAlive = false;
+    if (readResponse(out, keepAlive)) {
+      s_lastUseMs = millis();
+      if (!keepAlive) dropSession();
+      return out;
+    }
+    dropSession();
+    if (!reused) break;        // a brand-new connection failing is a real failure
+  }
+  return "";
 }
 
 static String credsHeader() {
