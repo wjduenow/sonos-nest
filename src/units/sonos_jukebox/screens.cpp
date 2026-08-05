@@ -529,6 +529,8 @@ static void soundCb(lv_event_t *e) {
 }
 
 static lv_obj_t *s_hourLbl = nullptr, *s_radioMeta = nullptr;
+static lv_obj_t *s_amzStatus = nullptr, *s_amzBtn = nullptr, *s_amzBtnLbl = nullptr;
+static lv_obj_t *s_linkPanel = nullptr, *s_linkQr = nullptr, *s_linkMsg = nullptr;
 
 static void hourStep(int delta) {
   int h = (int)settingsRadioRefreshHour() + delta;
@@ -548,6 +550,25 @@ static void scrollSoundCb(lv_event_t *e) {
   settingsSetScrollSound(lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED));
   uiSoundPlay(UiSound::Tick);
 }
+// The ceremony overlay: a QR of the authorisation URL, because a ~250 character link cannot be
+// read off a panel, let alone typed. Everything blocking happens on amazon's own task; this only
+// starts it and reflects state.
+static void linkCloseCb(lv_event_t *) {
+  amazon::linkCancel();
+  lv_obj_add_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
+}
+static void amzBtnCb(lv_event_t *) {
+  if (amazon::linked()) {                 // second press unlinks
+    amazon::unlink();
+    uiSoundPlay(UiSound::Confirm);
+    return;
+  }
+  uiSoundPlay(UiSound::Tick);
+  amazon::linkStart();
+  lv_obj_remove_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_linkMsg, "Requesting a code from Amazon...");
+}
+
 static void refreshNowCb(lv_event_t *) {
   uiSoundPlay(UiSound::Confirm);
   radiocache::requestRefresh();
@@ -1071,6 +1092,53 @@ static void buildSettings() {
   s_radioMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
   lv_obj_align(s_radioMeta, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 462);
 
+  // --- Amazon Music account ---
+  lv_obj_t *al = label(pg, "Amazon Music (for Radio stations)", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_align(al, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 500);
+  s_amzStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_obj_align(s_amzStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 528);
+
+  s_amzBtn = lv_button_create(pg);
+  lv_obj_remove_style_all(s_amzBtn);
+  lv_obj_set_size(s_amzBtn, 200, 52);
+  lv_obj_align(s_amzBtn, LV_ALIGN_TOP_LEFT, 400, PAD_TOP + 496);
+  lv_obj_set_style_radius(s_amzBtn, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(s_amzBtn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_amzBtn, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_add_event_cb(s_amzBtn, amzBtnCb, LV_EVENT_CLICKED, nullptr);
+  s_amzBtnLbl = label(s_amzBtn, "Link account", &lv_font_montserrat_16, JB_ACCENT_INK);
+  lv_obj_center(s_amzBtnLbl);
+
+  // Link overlay, covering the content area so the QR is the only thing to look at.
+  s_linkPanel = panel(pg, SCREEN_W - RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
+  lv_obj_align(s_linkPanel, LV_ALIGN_TOP_LEFT, -PAD_X, -PAD_TOP);
+  lv_obj_add_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *lt = label(s_linkPanel, "Link Amazon Music", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(lt, LV_ALIGN_TOP_MID, 0, 40);
+
+  s_linkQr = lv_qrcode_create(s_linkPanel);
+  lv_qrcode_set_size(s_linkQr, 300);
+  lv_qrcode_set_dark_color(s_linkQr, lv_color_hex(JB_SCREEN_BG));
+  lv_qrcode_set_light_color(s_linkQr, lv_color_hex(JB_TEXT));
+  lv_obj_align(s_linkQr, LV_ALIGN_CENTER, 0, -10);
+  lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
+
+  s_linkMsg = label(s_linkPanel, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  lv_obj_align(s_linkMsg, LV_ALIGN_BOTTOM_MID, 0, -110);
+  lv_obj_set_style_text_align(s_linkMsg, LV_TEXT_ALIGN_CENTER, 0);
+
+  lv_obj_t *lc = lv_button_create(s_linkPanel);
+  lv_obj_remove_style_all(lc);
+  lv_obj_set_size(lc, 160, 52);
+  lv_obj_align(lc, LV_ALIGN_BOTTOM_MID, 0, -40);
+  lv_obj_set_style_radius(lc, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(lc, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(lc, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_add_event_cb(lc, linkCloseCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *lcl = label(lc, "Close", &lv_font_montserrat_16, JB_TEXT);
+  lv_obj_center(lcl);
+
   // Keyboard last so it draws above everything, hidden until the field is focused.
   s_kb = lv_keyboard_create(pg);
   lv_obj_set_size(s_kb, SCREEN_W - RAIL_W - PAD_X * 2, 240);
@@ -1226,6 +1294,54 @@ void uiTick() {
   if (s_cur == PAGE_ROOMS && (s_roomsGen != g_zonesGen || s_roomsActive != p.zoneName)) {
     s_roomsGen = g_zonesGen;
     rebuildRooms();
+  }
+
+  if (s_cur == PAGE_SETTINGS && s_amzStatus) {
+    static amazon::LinkState shownState = (amazon::LinkState)0xFF;
+    static bool shownLinked = false;
+    const bool nowLinked = amazon::linked();
+    if (nowLinked != shownLinked) {
+      shownLinked = nowLinked;
+      lv_label_set_text(s_amzStatus, nowLinked ? "Account linked." : "Not linked.");
+      lv_label_set_text(s_amzBtnLbl, nowLinked ? "Unlink" : "Link account");
+    }
+    const amazon::LinkState st = amazon::linkState();
+    if (st != shownState) {
+      shownState = st;
+      switch (st) {
+        case amazon::LinkState::Starting:
+          lv_label_set_text(s_linkMsg, "Requesting a code from Amazon...");
+          lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
+          break;
+        case amazon::LinkState::Waiting: {
+          const String u = amazon::linkUrl();
+          lv_qrcode_update(s_linkQr, u.c_str(), u.length());
+          lv_obj_remove_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
+          lv_label_set_text(s_linkMsg, "Scan with a phone, then approve in Amazon.");
+          break;
+        }
+        case amazon::LinkState::Linked:
+          lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
+          lv_label_set_text(s_linkMsg, "Linked. Building the station list...");
+          radiocache::requestRefresh();
+          break;
+        case amazon::LinkState::Failed:
+          lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
+          lv_label_set_text(s_linkMsg, "Linking failed or timed out.\nClose and try again.");
+          break;
+        default: break;
+      }
+    }
+    // The countdown is the only thing that changes second to second while waiting.
+    if (st == amazon::LinkState::Waiting) {
+      static uint16_t shownLeft = 0;
+      const uint16_t left = amazon::linkSecondsLeft();
+      if (left / 10 != shownLeft / 10) {
+        shownLeft = left;
+        lv_label_set_text_fmt(s_linkMsg, "Scan with a phone, then approve in Amazon.\n%u:%02u left",
+                              left / 60, left % 60);
+      }
+    }
   }
 
   if (s_cur == PAGE_SETTINGS && s_radioMeta) {

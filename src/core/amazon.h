@@ -45,9 +45,26 @@ void adopt();
 //   2. linkPoll()      -> call every few seconds; true once Amazon hands over the credentials
 //   3. linked()        -> persists across reboots (NVS); nothing else needed until it is revoked
 bool linked();
+void unlink();
+
+// The ceremony runs on its own task: linkBegin() and linkPoll() are blocking HTTPS calls and the
+// UI must never make them. Drive it from the UI with linkStart(), then poll linkState()/linkUrl().
+enum class LinkState : uint8_t {
+  Idle,        // nothing in progress
+  Starting,    // asking Amazon for a code
+  Waiting,     // show linkUrl() and wait for the owner to approve in a browser
+  Linked,      // done; credentials are in NVS
+  Failed,      // could not get a code, or the owner never approved
+};
+void      linkStart();
+void      linkCancel();
+LinkState linkState();
+String    linkUrl();          // valid while Waiting
+uint16_t  linkSecondsLeft();  // counts down the approval window
+
+// Blocking primitives, used by the ceremony task. Call these directly only off the UI task.
 bool linkBegin(String &regUrlOut);
 bool linkPoll();
-void unlink();
 
 // --- Browsing -----------------------------------------------------------------------------------
 // Both return false on transport failure or a fault we cannot recover from. An expired token is

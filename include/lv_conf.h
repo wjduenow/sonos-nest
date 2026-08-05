@@ -61,6 +61,10 @@
 #define LV_FONT_MONTSERRAT_12 1   // badges (design 10), timecodes (12)
 #define LV_FONT_MONTSERRAT_16 1   // status bar room name (15)
 #define LV_FONT_MONTSERRAT_22 1   // artist / album line (22)
+// QR code, for the Amazon DeviceLink ceremony: the authorisation URL is ~250 characters, which is
+// neither readable nor typable off a wall panel. Scoped to this unit — no other board links an
+// account, and the encoder costs flash in every binary that enables it.
+#define LV_USE_QRCODE 1
 #endif
 
 // --- Default theme ---

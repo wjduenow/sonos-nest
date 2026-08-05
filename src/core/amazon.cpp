@@ -246,6 +246,52 @@ bool linkPoll() {
   return true;
 }
 
+// --- the ceremony, on its own task ---------------------------------------------------------------
+// Sonos's own app polls getDeviceAuthToken for up to seven minutes, so that is the window used
+// here. Polling every 3 s is cheap and makes the screen feel responsive when the owner approves.
+static volatile LinkState s_state = LinkState::Idle;
+static String   s_regUrl;
+static volatile uint16_t s_left = 0;
+static TaskHandle_t s_linkTask = nullptr;
+
+LinkState linkState()        { return s_state; }
+String    linkUrl()          { return s_regUrl; }
+uint16_t  linkSecondsLeft()  { return s_left; }
+void      linkCancel()       { if (s_state == LinkState::Waiting || s_state == LinkState::Starting)
+                                 s_state = LinkState::Idle; }
+
+static void linkTask(void *) {
+  for (;;) {
+    if (s_state != LinkState::Starting) { vTaskDelay(pdMS_TO_TICKS(250)); continue; }
+
+    adopt();                          // the household id is required to ask for a code
+    String url;
+    if (!linkBegin(url)) {
+      s_state = LinkState::Failed;
+      continue;
+    }
+    s_regUrl = url;
+    s_left   = 420;                   // seven minutes, matching the official app
+    s_state  = LinkState::Waiting;
+
+    while (s_state == LinkState::Waiting && s_left > 0) {
+      vTaskDelay(pdMS_TO_TICKS(3000));
+      s_left = (s_left > 3) ? (uint16_t)(s_left - 3) : 0;
+      if (s_state != LinkState::Waiting) break;      // cancelled from the UI
+      if (linkPoll()) { s_state = LinkState::Linked; break; }
+    }
+    if (s_state == LinkState::Waiting) s_state = LinkState::Failed;   // window expired
+  }
+}
+
+void linkStart() {
+  if (s_state == LinkState::Starting || s_state == LinkState::Waiting) return;
+  s_regUrl = ""; s_left = 0;
+  s_state = LinkState::Starting;
+  // Core 0 with the network. Created lazily so a device that never links never spawns it.
+  if (!s_linkTask) xTaskCreatePinnedToCore(linkTask, "amzlink", 6144, nullptr, 1, &s_linkTask, 0);
+}
+
 // --- browsing -----------------------------------------------------------------------------------
 
 // Walk <mediaCollection> blocks. Stations arrive as itemType=program inside mediaCollection —
