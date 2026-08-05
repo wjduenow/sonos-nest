@@ -36,6 +36,11 @@
                                                             // bring-up flag is set
 #include "ui_scale.h"
 
+// Two-glyph Lucide subset — see lv_font_lucide_28.c for why and how to regenerate.
+LV_FONT_DECLARE(lv_font_lucide_28);
+#define ICON_HEART "\xEE\x83\xB2"   // U+E0F2
+#define ICON_RADIO "\xEE\x85\x82"   // U+E142
+
 // --- Geometry, from the design's device shell -------------------------------------------------
 // Rail widened from the design's 66 px and its 48 px items scaled 1.5x to 72 px. A DELIBERATE
 // deviation: 48 px is under the design system's own --hit-min of 44 px only on paper — in the hand
@@ -196,15 +201,14 @@ static void buildRail(lv_obj_t *scr) {
   lv_obj_t *line = panel(scr, 1, SCREEN_H, JB_SCREEN_LINE, 0);
   lv_obj_align(line, LV_ALIGN_TOP_LEFT, RAIL_W, 0);
 
-  // Now / Favorites / Radio / Rooms / Settings.
-  //
-  // TODO(icons): these are stand-ins. The design system specifies Lucide, and LVGL's built-in
-  // symbol font has NEITHER a heart (Favorites) NOR a radio glyph — the two this rail most needs.
-  // The fix is converting a two-glyph Lucide subset into an LVGL font, scoped to UNIT_JUKEBOX the
-  // same way the Montserrat sizes already are. Until then: PLAY for Now Playing, LIST for
-  // Favorites, AUDIO for Radio — distinct from each other, but none of them right.
-  const char *icons[PAGE_COUNT] = {LV_SYMBOL_PLAY, LV_SYMBOL_LIST, LV_SYMBOL_AUDIO,
+  // Now / Favorites / Radio / Rooms / Settings. Favorites and Radio use the real Lucide glyphs;
+  // the rest stay on LVGL's built-in symbols, which already match well enough that subsetting more
+  // of Lucide would be flash spent for no gain.
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO,
                                    LV_SYMBOL_VOLUME_MAX, LV_SYMBOL_SETTINGS};
+  const lv_font_t *iconFonts[PAGE_COUNT] = {&lv_font_montserrat_28, &lv_font_lucide_28,
+                                            &lv_font_lucide_28, &lv_font_montserrat_28,
+                                            &lv_font_montserrat_28};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
@@ -214,7 +218,7 @@ static void buildRail(lv_obj_t *scr) {
     lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_BG), 0);
     lv_obj_align(b, LV_ALIGN_TOP_LEFT, (RAIL_W - RAIL_BTN) / 2, PAD_TOP + i * RAIL_STEP);
     lv_obj_add_event_cb(b, railCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_t *l = label(b, icons[i], &lv_font_montserrat_28, JB_TEXT_DIM);
+    lv_obj_t *l = label(b, icons[i], iconFonts[i], JB_TEXT_DIM);
     lv_obj_center(l);
     s_railBtn[i] = b;
     s_railIcon[i] = l;
