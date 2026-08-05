@@ -13,7 +13,7 @@ every value here.
 
 WORLD FRAME (front view, looking at the screen):
     +X  right,  0 .. FACE_W      (230)
-    +Y  up,     0 .. FACE_H      (124)
+    +Y  up,     0 .. FACE_H      (128)
     +Z  toward the VIEWER,  z=0 is the REAR plane that sits against the wall
 
 DEPTH STACK (z):
@@ -65,7 +65,7 @@ RST_X,  RST_Y  = 172.62, 17.25  # RESET (right edge)
 
 # ---------------------------------------------------------------- case shell
 FACE_W       = 230.0
-FACE_H       = 124.0
+FACE_H       = 128.0
 DEPTH        = 22.0
 CASE_R       = 14.0     # --case-radius token
 WALL         = 3.0      # side wall thickness
@@ -80,9 +80,12 @@ COMP_Z       = FLOOR_Z + REAR_CLR        #  3.0  rear-most component plane
 GLASS_Z      = COMP_Z + ENVELOPE         # 19.5  glass front plane
 PCB_BACK_Z   = COMP_Z + REAR_COMP_H      #  8.5  PCB rear face == boss top
 
-# --- bands above/below the PCB.  Asymmetric on purpose: the TOP band carries the
-# --- keyholes and needs room for the entry hole plus real drop travel.
-BAND_BOT     = 6.0
+# --- Bands above/below the PCB.  Both must be thick enough to carry a face-plate screw
+# --- boss, because the boss runs the full interior height and CANNOT pass through the
+# --- PCB.  At BAND_BOT = 6 the free strip below the PCB was only 3.75 mm and the bottom
+# --- edge had no fixing at all for 215 mm.  The TOP band additionally carries the
+# --- keyholes, so it needs the entry hole plus real drop travel on top of that.
+BAND_BOT     = 10.0
 BAND_TOP     = FACE_H - BAND_BOT - 2 * CLR - PCB_H     # 12.5
 
 # PCB placement in the face
@@ -99,14 +102,14 @@ COL_W        = COL_X1 - COL_X0           #  45.60  (--u7-ctrl-col is 46)
 
 DIAL_D       = 36.0     # --knob-dia
 DIAL_CLR     = 1.0      # running clearance around the cap
-DIAL_CY      = 92.0
+DIAL_CY      = 96.0     # column features ride up with the taller face
 
 BTN_D        = 13.0     # --btn-dia
 BTN_CLR      = 0.4
 BTN_GAP      = 9.0      # --btn-gap read as the GAP between caps, not the pitch:
 BTN_PITCH    = BTN_D + BTN_GAP           # 22.0 -- a 9 mm *pitch* is impossible with
                                          # Ø13 caps; the token is self-inconsistent.
-BTN_ROW_Y    = (58.0, 38.0)              # play/rooms on top, prev/next below
+BTN_ROW_Y    = (62.0, 42.0)              # play/rooms on top, prev/next below
 
 # ---------------------------------------------------------------- keyhole wall mount
 # Two keyholes in the TOP band, spread wide so the unit cannot swing.  The band has
@@ -115,8 +118,11 @@ SCREW_SHANK  = 3.5      # wall screw shank
 SCREW_HEAD   = 7.0      # wall screw head
 KEY_ENTRY_D  = SCREW_HEAD + 0.6          # 7.6  head passes through here
 KEY_SLOT_W   = SCREW_SHANK + 0.5         # 4.0  shank rides in here
-KEY_ENTRY_CY = 120.0                     # entry-hole centre (band spans 111.5..124)
-KEY_DROP     = 6.5                       # how far the unit drops to lock
+KEY_ENTRY_CY = 122.8                     # entry-hole centre, inside the top band
+KEY_DROP     = 5.5                       # how far the unit drops to lock. Sized so the
+                                         # head relief stops clear of the PCB: the relief
+                                         # sits at z 2.5-5.5 and the PCB's rear components
+                                         # start at z 3.0, so it must not reach over them.
 KEY_X        = (45.0, 185.0)             # 140 mm apart
 KEY_HEAD_CLR = 3.0                       # clear depth kept behind the slot for the head
 
@@ -182,6 +188,27 @@ KNOB_TIP_Z      = 30.0                            # 8 mm into a 14 mm-proud cap
 KNOB_PCB_Z      = KNOB_TIP_Z - KNOB_STACK_H       # 8.5  standoff top / board front face
 KNOB_STANDOFF_D = 6.0
 
+# ---------------------------------------------------------------- button I/O expander
+# Adafruit PCF8574 I2C GPIO Expander Breakout, STEMMA QT / Qwiic, product 5545.
+# Outline and holes are exact, from Adafruit's own Eagle file:
+#   github.com/adafruit/Adafruit-PCF8574-PCB -- "Adafruit PCF8574 QT.brd"
+# 8 GPIO (we need 4), address 0x20 with A0/A1/A2 jumpers giving 0x20-0x27 -- clear of the
+# GT911 (0x5D), the unidentified 0x2F and the Modulino Knob (0x76).
+# Inputs idle high on a weak (~100 uA) internal source, so the buttons just switch to GND;
+# no external pull-ups. The chip has an INT output if polling ever proves too costly.
+EXP_W        = 25.40    # exact (1.0")
+EXP_H        = 17.78    # exact (0.7")
+EXP_THICK    = 4.60     # incl. the STEMMA QT connectors
+EXP_HOLE_D   = 2.50     # 2x plated
+EXP_HOLE_CC  = 20.32    # centre-to-centre (holes at x 2.54 and 22.86)
+EXP_HOLE_DY  = -6.35    # hole row, relative to the board centre (2.54 up from the bottom)
+EXP_PILOT    = 2.10     # M2.5 self-tap pilot
+# Mounted FLAT on the floor beneath the button grid: the switch bodies hang down from the
+# face plate at z~19.5, the expander lives at z 4.0-8.6, so they share XY but never Z.
+EXP_CX       = COL_CX
+EXP_CY       = sum(BTN_ROW_Y) / 2.0      # midway between the two button rows
+EXP_PCB_Z    = FLOOR_Z + 1.5             # 4.0 -- clearance under the board for wiring
+
 # Rear port relief: deliberately oversized with an outside funnel, so the hole drilled
 # in the wall does not have to be placed precisely.
 PORT_W       = 14.0
@@ -193,7 +220,13 @@ BOSS_OD      = 7.0      # PCB mounting boss
 BOSS_PILOT   = 2.6      # M3 self-tap pilot
 FSCREW_PILOT = 2.6      # face-plate screw pilot
 FSCREW_HEAD  = 5.6
-FSCREW_INSET = 7.0      # face screws, in from the face corners
+FSCREW_BOSS  = 6.5      # slimmer than BOSS_OD so it fits the bands
+# Face screws live in the two bands, NEVER over the PCB -- three across each, clear of the
+# keyholes (x = 45 / 185) and of the USB-C plate at the bottom of the column.
+FSCREW_X     = (20.0, 100.0, 218.0)
+FSCREW_Y_BOT = (WALL + PCB_Y0) / 2.0                 #  6.875
+FSCREW_Y_TOP = (PCB_Y1 + FACE_H - WALL) / 2.0        # 119.875
+FSCREWS      = [(x, y) for y in (FSCREW_Y_BOT, FSCREW_Y_TOP) for x in FSCREW_X]
 
 CABLE_CH_W   = 6.0      # channel across the rear for the J10 power pair
 SEG          = 96       # circle smoothness

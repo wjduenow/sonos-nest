@@ -100,6 +100,12 @@ a.plot([P.UC_CX, jx], [jy, jy], color='#e8892b', lw=2.2)
 a.plot([P.UC_CX, P.UC_CX], [P.UC_CY, jy], color='#e8892b', lw=2.2)
 a.plot(jx, jy, 'o', color='#e8892b', ms=7)
 a.text(jx + 4, jy + 5, "J10  +5V_IN", fontsize=8, color='#e8892b', family='monospace')
+a.add_patch(Rectangle((P.EXP_CX - P.EXP_W / 2, P.EXP_CY - P.EXP_H / 2), P.EXP_W, P.EXP_H,
+                      fc='#2c6b9e', alpha=.18, ec='#2c6b9e', lw=1.1))
+a.text(P.EXP_CX, P.EXP_CY, "PCF8574\n0x20", ha='center', va='center', fontsize=7,
+       color='#22557f', family='monospace')
+for (fx, fy) in P.FSCREWS:
+    a.add_patch(Circle((fx, fy), P.FSCREW_BOSS / 2, fc='#fff', ec='#555', lw=1.0))
 hx0, hy0 = P.PCB_X0 + P.HOLE_INSET, P.PCB_Y0 + P.HOLE_INSET
 for (x, y) in [(hx0, hy0), (hx0 + P.HOLE_DX, hy0),
                (hx0, hy0 + P.HOLE_DY), (hx0 + P.HOLE_DX, hy0 + P.HOLE_DY)]:

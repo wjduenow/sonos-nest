@@ -4,9 +4,14 @@ Two printed parts for the sonos-jukebox 7" unit: a rear **shell** that holds the
 carries the wall mount, and a front **face** plate with the screen opening and the control column.
 
 ```bash
-conda run -n img23d python build_all.py       # -> shell.stl, face.stl
-conda run -n img23d python render_preview.py  # -> assembly_preview.png
+conda run -n img23d python build_all.py         # -> shell.stl, face.stl
+conda run -n img23d python render_preview.py    # -> assembly_preview.png
+conda run -n img23d python check_clearances.py  # asserts nothing collides; exit 1 on failure
 ```
+
+**Run `check_clearances.py` after touching any parameter.** It exists because a face-plate screw
+boss was once sitting on top of the PCB's bottom-left mounting boss — and underneath the PCB
+itself. That is invisible in an STL until you happen to look into the corner.
 
 All geometry comes from [`case_params.py`](case_params.py). Board numbers come from
 [`../crowpanel-p4-7-physical-spec.md`](../crowpanel-p4-7-physical-spec.md).
@@ -17,11 +22,11 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 
 | | |
 |---|---|
-| Face | **230 × 124 mm**, R14 corners |
+| Face | **230 × 128 mm**, R14 corners |
 | Depth | **22.0 mm** — lands exactly on the design system's `--u7-depth` token |
 | Screen | 155 × 87 opening, 1 mm rebate onto the black border |
 | Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
-| Mount | 2 keyholes in the top band, **140 mm apart**, 6.5 mm drop |
+| Mount | 2 keyholes in the top band, **140 mm apart**, 5.5 mm drop |
 | Power | USB-C breakout on edge at the bottom of the column → 2 wires to J10 |
 | Print | Bambu P2S; both parts lie flat, face printed front-face-down |
 
@@ -35,12 +40,19 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
   22.0  face plate outer          + face 2.5
 ```
 
-### Why the face is 124 mm and not 112
+### Why the face is 128 mm and not 112
 
 Only ~3 mm sits behind the PCB, so **nothing that needs depth can go where the board is** — not a
-keyhole's captured screw head, not the 4.75 mm-thick USB-C breakout. Growing the face by 12 mm
-creates a **12.5 mm top band** with no PCB behind it, which is where the keyholes live and where the
-screw heads have the full interior to sit in. The 6 mm bottom band balances it visually.
+keyhole's captured screw head, not the 4.75 mm USB-C breakout, and **not a face-plate screw boss**,
+which runs the full interior height.
+
+The face therefore needs a band above *and* below the PCB. The top band (12.5 mm) carries the two
+keyholes. The bottom band was first drawn at 6 mm, which left only 3.75 mm of free strip — too thin
+for any boss, so the entire bottom edge of the face plate had no fixing for 215 mm, under a 155 mm
+screen opening with a ~7 mm strip beneath it. At **10 mm** it takes proper bosses.
+
+**Face screws are in the bands, three across each** (`FSCREW_X`), never over the PCB, and clear of
+the keyholes and the USB-C plate. `check_clearances.py` asserts all of it.
 
 ### Why keyholes, and why they don't rock
 

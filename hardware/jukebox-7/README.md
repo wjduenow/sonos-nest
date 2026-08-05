@@ -86,8 +86,31 @@ Datasheet mirrored here: [`modulino-knob-ABX00107-datasheet.pdf`](modulino-knob-
 > Note the design system's control-layout spec says "24-detent enc." — the real part is **30
 > detents**. Cosmetic, but it is what the firmware will see per revolution.
 
+### Button I/O expander — **Adafruit PCF8574 breakout**, product `5545`
+STEMMA QT / Qwiic. Outline and holes are **exact**, taken from Adafruit's own Eagle file
+(`Adafruit PCF8574 QT.brd`, [github.com/adafruit/Adafruit-PCF8574-PCB](https://github.com/adafruit/Adafruit-PCF8574-PCB)) rather than the product page.
+
+| | value |
+|---|---|
+| Board | **25.40 × 17.78 mm** (exactly 1.0" × 0.7"), **4.6 mm** tall incl. connectors |
+| Mounting | **2× Ø2.5 plated**, at (2.54, 2.54) and (22.86, 2.54) → **20.32 mm centre-to-centre** |
+| GPIO | **8** (four are used) |
+| **I²C address** | **0x20**, jumpers A0/A1/A2 give **0x20–0x27** |
+
+> ✅ 0x20–0x27 clears the GT911 (0x5D), the unidentified 0x2F and the Knob (0x76).
+> All four bus addresses are now known and distinct.
+
+> Wiring note: PCF8574 inputs idle high on a weak (~100 µA) internal source, so the buttons
+> simply switch to **GND** — no external pull-ups. The chip also has an **INT** output if
+> polling ever proves too costly; poll it from **netTask, never the UI task**, since the bus is
+> shared with the touch controller.
+
+It mounts **flat on the case floor beneath the button grid** — the switch bodies hang down from
+the face plate at z ≈ 19.5 while the expander lives at z 4.0–8.6, so they share the same XY area
+but never collide in Z. That was the only way to fit it: stacking it in the column alongside the
+dial, buttons and USB-C breakout needs ~112 mm of a 122 mm interior, which leaves no usable gaps.
+
 ### Still pending selection
-- **I2C GPIO breakout** with solder pads for the four button wires — outline, holes, **address** TBD.
 - **4× momentary switches** — bodies TBD; the design calls for Ø13 caps on a 9 mm pitch.
 - **1× dial cap** — Ø36, 14 mm proud, knurled, **Ø6 D-bore**.
 

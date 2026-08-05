@@ -79,12 +79,11 @@ def build_shell():
         adds.append(cyl(P.BOSS_OD / 2.0, P.FLOOR_Z, P.PCB_BACK_Z, x, y))
         cuts.append(cyl(P.BOSS_PILOT / 2.0, P.FLOOR_Z - 1.0, P.PCB_BACK_Z, x, y, seg=32))
 
-    # ---- face-plate screw bosses (four corners of the face) --------------------
-    fs = P.FSCREW_INSET
-    fscrews = [(fs, fs), (P.FACE_W - fs, fs),
-               (fs, P.FACE_H - fs), (P.FACE_W - fs, P.FACE_H - fs)]
-    for (x, y) in fscrews:
-        adds.append(cyl(P.BOSS_OD / 2.0, P.FLOOR_Z, P.GLASS_Z, x, y))
+    # ---- face-plate screw bosses ------------------------------------------------
+    # These run the FULL interior height, so they can never sit over the PCB. Three
+    # across each band, clear of the keyholes and of the USB-C plate.
+    for (x, y) in P.FSCREWS:
+        adds.append(cyl(P.FSCREW_BOSS / 2.0, P.FLOOR_Z, P.GLASS_Z, x, y))
         cuts.append(cyl(P.FSCREW_PILOT / 2.0, P.GLASS_Z - 12.0, P.GLASS_Z + 1.0, x, y, seg=32))
 
     # ---- keyhole wall mount ----------------------------------------------------
@@ -122,6 +121,14 @@ def build_shell():
             adds.append(cyl(P.KNOB_STANDOFF_D / 2.0, P.FLOOR_Z, P.KNOB_PCB_Z, x, y))
             cuts.append(cyl(P.KNOB_PILOT / 2.0, P.KNOB_PCB_Z - 9.0, P.KNOB_PCB_Z + 1.0,
                             x, y, seg=32))
+
+    # ---- button I/O expander (Adafruit PCF8574) --------------------------------
+    # Flat on the floor under the button grid; the switches hang down from the face
+    # plate well above it.
+    for dx in (-P.EXP_HOLE_CC / 2.0, +P.EXP_HOLE_CC / 2.0):
+        x, y = P.EXP_CX + dx, P.EXP_CY + P.EXP_HOLE_DY
+        adds.append(cyl(P.EXP_HOLE_D / 2.0 + 1.6, P.FLOOR_Z, P.EXP_PCB_Z, x, y))
+        cuts.append(cyl(P.EXP_PILOT / 2.0, P.EXP_PCB_Z - 6.0, P.EXP_PCB_Z + 1.0, x, y, seg=32))
 
     # ---- rear port + funnel ----------------------------------------------------
     port = bx(P.UC_CX - P.PORT_W / 2.0, P.UC_CY - P.PORT_H / 2.0, -1.0,

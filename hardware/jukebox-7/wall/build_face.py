@@ -68,9 +68,7 @@ def build_face():
                             P.COL_CX + dx, by))
 
     # ---- face screws (countersunk from the front) ------------------------------
-    fs = P.FSCREW_INSET
-    for (x, y) in [(fs, fs), (P.FACE_W - fs, fs),
-                   (fs, P.FACE_H - fs), (P.FACE_W - fs, P.FACE_H - fs)]:
+    for (x, y) in P.FSCREWS:
         cuts.append(cyl(P.FSCREW_PILOT / 2.0 + 0.3, z0 - 1.0, z1 + 1.0, x, y, seg=32))
         # conical countersink under the front surface
         cs = trimesh.creation.cone(radius=P.FSCREW_HEAD / 2.0, height=P.FSCREW_HEAD / 2.0,
