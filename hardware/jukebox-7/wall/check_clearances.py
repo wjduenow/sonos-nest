@@ -154,6 +154,20 @@ for kx in P.KEY_X:
           f"relief reaches y={bot:.2f}, PCB top is {P.PCB_Y1:.2f}",
           tight=(0 <= bot - P.PCB_Y1 < 1.0))
 
+print("\n== USB-C port cutout ==")
+REC_W, REC_H = 8.94, 3.26        # a USB-C receptacle body
+check("port clears the receptacle across", P.PORT_W > REC_W + 1.0,
+      f"Ø{P.PORT_W} vs {REC_W} body -> {(P.PORT_W - REC_W) / 2:.2f} mm each side")
+check("port clears the receptacle along", P.PORT_H > REC_H + 1.0,
+      f"{P.PORT_H} vs {REC_H} body -> {(P.PORT_H - REC_H) / 2:.2f} mm each side",
+      tight=((P.PORT_H - REC_H) / 2 < 1.0))
+check("funnel stays inside the case", P.UC_CX + P.PORT_W / 2 + P.PORT_FUNNEL < P.FACE_W - 3,
+      f"outer opening {P.PORT_W + 2*P.PORT_FUNNEL:.1f} x {P.PORT_H + 2*P.PORT_FUNNEL:.1f}, "
+      f"right edge at x={P.UC_CX + P.PORT_W/2 + P.PORT_FUNNEL:.1f}")
+check("port sits behind the breakout board",
+      abs(P.UC_CY - P.UC_CY) < 0.01 and P.PORT_H < P.UC_H,
+      f"port {P.PORT_H} within the {P.UC_H} mm board height")
+
 print("\n== magnets ==")
 check("spigot wall around the magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.8,
       f"{(P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2:.2f} mm of spigot around the disc")

@@ -93,6 +93,20 @@ the wall.
 > is a deliberate choice rather than a default. `check_clearances.py` asserts at least 12 mm and
 > warns below 18.
 
+The port cutout is sized to the **receptacle body** (8.94 × 3.26), not to the plug — the plug's
+overmold stays out in the wall's cable hole and never enters this opening.
+
+| | |
+|---|---|
+| Across the column (`PORT_W`) | **17.0** — 4.03 mm clear each side, so the board can shift a little at assembly |
+| Along the column (`PORT_H`) | **5.0** — 0.87 mm clear each side; the wall either side is what the receptacle beds against |
+| Funnel (`PORT_FUNNEL`) | **2.5** on the wall side only → outer opening 22.0 × 10.0 |
+
+> The first print had this at 14.0 × 8.0 with a 4.0 funnel, which flared the short axis to 16 mm
+> and read as a far bigger hole than it needed to be. `check_clearances.py` warns (does not fail)
+> that 0.87 mm each side along the short axis is tight — deliberately so. If the receptacle will
+> not bed down, `PORT_H` is one parameter.
+
 The plug then behaves the way the install wants: its nose travels ~6.5 mm into the receptacle inside
 the case while the **overmold stays in the wall's cable hole**, so the cable pushes back in once
 mated. The wall hole only has to clear the overmold, not the whole connector.

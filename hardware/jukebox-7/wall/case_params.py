@@ -246,9 +246,16 @@ EXP_PCB_Z    = FLOOR_Z + 1.5             # 4.0 -- clearance under the board for 
 
 # Rear port relief: deliberately oversized with an outside funnel, so the hole drilled
 # in the wall does not have to be placed precisely.
-PORT_W       = 14.0
-PORT_H       =  8.0
-PORT_FUNNEL  =  4.0     # 45 deg chamfer grown outward on the wall side
+# Sized to the receptacle body (8.94 x 3.26), not to the plug: the plug's overmold stays
+# out in the wall's cable hole and never enters this opening.
+#   X (across the column) is generous, so the board can shift a little at assembly.
+#   Y (along the column) is tight, because the wall either side of it is what the
+#     receptacle beds against.
+PORT_W       = 17.0     # across the column -> 4.03 mm clear each side
+PORT_H       =  5.0     # along the column  -> 0.87 mm clear each side
+PORT_FUNNEL  =  2.5     # 45 deg flare on the WALL side only, to forgive the drilled hole
+                        # -> outer opening 22.0 x 10.0. Was 4.0, which flared the short
+                        # axis to 16 and read as a much bigger hole than it needed to be.
 
 # ---------------------------------------------------------------- assembly
 BOSS_OD      = 7.0      # PCB mounting boss
