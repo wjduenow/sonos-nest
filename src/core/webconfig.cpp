@@ -86,6 +86,11 @@ String webConfigJson() {
   doc["brightness"] = settingsBrightness();   // screen units (nest); the unit applies changes
   doc["playlist"]   = settingsPlaylist();
   doc["volume"]     = settingsVolume();
+  // Radio catalogue refresh. Belongs in the CONFIG document, not the registration payload — that
+  // one is identity only (who and where), and putting settings there means the config page cannot
+  // read back what it just wrote.
+  doc["radio_refresh_hour"] = settingsRadioRefreshHour();
+  doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
   // NVS value — a page showing "" when the router says "sonos-button" would just be wrong.
   doc["deviceName"] = wifiHostname();
@@ -181,9 +186,6 @@ String registrationJson() {
   // NOT localManagerUrl() — that's specifically a *file* manager, which the button lacks even
   // though it serves a config page. Emit null so the portal renders "Open config" disabled.
   const char *cfg = boardConfigUrl();
-  doc["radio_refresh_hour"] = settingsRadioRefreshHour();
-  doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
-
   if (cfg) doc["configUrl"] = cfg;
   else     doc["configUrl"] = (const char *)nullptr;
 

@@ -19,6 +19,7 @@
 #include "pins.h"
 #include "sd_card.h"
 #include "touch.h"
+#include "web_config.h"
 #include "ui_sound.h"
 
 bool boardInit() {
@@ -43,6 +44,9 @@ bool boardInit() {
   // Nor is storage: without a card the Radio page has no cache and says so, but everything that
   // talks to Sonos directly is unaffected. localStorageRoot() returns nullptr and callers skip.
   if (!sdCardInit()) Serial.println("[board ] continuing without SD storage");
+
+  // Config page. Its task waits for WiFi itself, since appBoot() connects after this returns.
+  if (!webConfigServerInit()) Serial.println("[board ] continuing without the config server");
 
   return true;
 }
@@ -73,7 +77,6 @@ int         wakeWordCount()     { return 0; }
 // --- Local files / web UI: none ------------------------------------------------
 const char *localFileUrl(const char *) { return nullptr; }
 const char *localManagerUrl()          { return nullptr; }
-const char *boardConfigUrl()           { return nullptr; }
 void        localTracksRefresh()       {}
 int         localTrackCount()          { return 0; }
 const char *localTrackName(int)        { return nullptr; }
