@@ -79,12 +79,28 @@ def build_shell():
         adds.append(cyl(P.BOSS_OD / 2.0, P.FLOOR_Z, P.PCB_BACK_Z, x, y))
         cuts.append(cyl(P.BOSS_PILOT / 2.0, P.FLOOR_Z - 1.0, P.PCB_BACK_Z, x, y, seg=32))
 
-    # ---- face-plate screw bosses ------------------------------------------------
-    # These run the FULL interior height, so they can never sit over the PCB. Three
-    # across each band, clear of the keyholes and of the USB-C plate.
-    for (x, y) in P.FSCREWS:
-        adds.append(cyl(P.FSCREW_BOSS / 2.0, P.FLOOR_Z, P.GLASS_Z, x, y))
-        cuts.append(cyl(P.FSCREW_PILOT / 2.0, P.GLASS_Z - 12.0, P.GLASS_Z + 1.0, x, y, seg=32))
+    # ---- magnet blocks for the face plate ---------------------------------------
+    # A BLOCK, not a cylinder: the bands are only 7.75 / 10.25 mm of free strip, so a
+    # round boss big enough to wall a 6 mm pocket would run into the PCB. The block
+    # spans the band and merges with the side wall, which backs the pocket outward.
+    # Each block takes the face plate's spigot (registration) over the magnet pocket.
+    for (x, y) in P.MAGNETS:
+        y0, y1 = (P.WALL, P.PCB_Y0) if y < P.FACE_H / 2 else (P.PCB_Y1, P.FACE_H - P.WALL)
+        adds.append(bx(x - P.MAG_BLOCK_HW, y0, P.FLOOR_Z,
+                       x + P.MAG_BLOCK_HW, y1, P.GLASS_Z))
+    for (x, y) in P.MAGNETS:
+        # recess that receives the face plate's spigot
+        cuts.append(cyl((P.MAG_SPIGOT_D + P.MAG_SPIGOT_FIT) / 2.0,
+                        P.MAG_MATE_Z, P.GLASS_Z + 0.01, x, y))
+        # magnet pocket below it -- the disc sits flush at the mating plane
+        cuts.append(cyl(P.MAG_POCKET_D / 2.0,
+                        P.MAG_MATE_Z - P.MAG_POCKET_H, P.MAG_MATE_Z + 0.01, x, y))
+
+    # ---- pry notch --------------------------------------------------------------
+    # Six magnet pairs meeting face to face hold hard; the plate needs a purchase point.
+    # Bottom edge, hidden once the unit is on the wall.
+    cuts.append(bx(P.PRY_X - P.PRY_W / 2.0, -1.0, P.GLASS_Z - 2.5,
+                   P.PRY_X + P.PRY_W / 2.0, P.WALL + 0.5, P.GLASS_Z + 0.01))
 
     # ---- keyhole wall mount ----------------------------------------------------
     # Through the rear wall, plus a shallow relief inside so the captured screw head

@@ -230,15 +230,48 @@ PORT_FUNNEL  =  4.0     # 45 deg chamfer grown outward on the wall side
 # ---------------------------------------------------------------- assembly
 BOSS_OD      = 7.0      # PCB mounting boss
 BOSS_PILOT   = 2.6      # M3 self-tap pilot
-FSCREW_PILOT = 2.6      # face-plate screw pilot
-FSCREW_HEAD  = 5.6
-FSCREW_BOSS  = 6.5      # slimmer than BOSS_OD so it fits the bands
-# Face screws live in the two bands, NEVER over the PCB -- three across each, clear of the
-# keyholes (x = 45 / 185) and of the USB-C plate at the bottom of the column.
-FSCREW_X     = (20.0, 100.0, 218.0)
-FSCREW_Y_BOT = (WALL + PCB_Y0) / 2.0                 #  6.875
-FSCREW_Y_TOP = (PCB_Y1 + FACE_H - WALL) / 2.0        # 119.875
-FSCREWS      = [(x, y) for y in (FSCREW_Y_BOT, FSCREW_Y_TOP) for x in FSCREW_X]
+# ---------------------------------------------------------------- magnetic face plate
+# The face is held on by MAGNETS, not screws -- nothing breaks the front surface.
+#
+# Using the 6 x 2 discs, not the 8 x 2. The bands either side of the PCB are only 7.75 mm
+# and 10.25 mm of free strip, and a pocket for an 8 mm disc leaves no wall at the bottom.
+# Six 6 mm pairs in DIRECT contact hold far harder than eight-through-plastic would.
+#
+# The plate is 2.5 mm thick, so a 2.2 mm pocket sunk into it would leave a 0.3 mm skin.
+# Instead each magnet sits in a SPIGOT that descends MAG_SPIGOT_H below the mating plane
+# into a matching recess in the shell. That buys real material over the magnet (4.3 mm to
+# the front face), lets the two magnets meet FACE TO FACE with no plastic between them,
+# and -- the reason it is worth the complexity -- the six spigots REGISTER the plate, so
+# it cannot slide. Magnets are weak in shear; the spigots take it instead.
+MAG_D          = 6.0     # disc diameter (user has 6x2 and 8x2)
+MAG_T          = 2.0     # disc thickness
+MAG_POCKET_D   = MAG_D + 0.3
+MAG_POCKET_H   = MAG_T + 0.2
+MAG_SPIGOT_H   = 4.0     # how far the face plate's boss drops into the shell
+MAG_SPIGOT_D   = 8.2
+MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving recess
+MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
+MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets meet
+
+# Positions: in the two bands, NEVER over the PCB (the block runs the full interior
+# height), and clear of the keyholes at x = 45 / 185.
+# The SPIGOT sets these, not the magnet. It descends to MAG_MATE_Z (15.5), and over the
+# PCB that height is display glass -- so the spigot must stay off the PCB footprint
+# entirely, while still leaving real wall thickness outboard of it.
+MAG_X        = (20.0, 100.0, 218.0)
+MAG_Y_BOT    = 6.2      # spigot spans 2.10..10.30: 2.10 mm of outer wall, 0.45 off the PCB
+MAG_Y_TOP    = 120.4    # spigot spans 116.30..124.50: 3.50 mm of outer wall, 1.55 off the PCB
+MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
+
+# Pry notch: with six pairs meeting face to face there is real holding force, so the
+# plate needs somewhere to get a fingernail or spudger under. Bottom edge, hidden once
+# the unit is on the wall.
+PRY_W        = 22.0
+PRY_X        = FACE_W / 2.0
+
+# !!! MAGNET POLARITY !!!  Glue ALL shell magnets one way up and ALL face-plate magnets
+# the other, so every pair attracts. Mark one pole with a marker before gluing -- the same
+# rule as hardware/round-nest-2.8/wall/mount_params.py.
 
 CABLE_CH_W   = 6.0      # channel across the rear for the J10 power pair
 SEG          = 96       # circle smoothness

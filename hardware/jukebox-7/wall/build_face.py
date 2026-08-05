@@ -6,7 +6,7 @@ Build face.stl -- the front plate of the sonos-jukebox 7" flush wall case.
   * screen opening over the 155 x 87 lit area, with a rebate that lands on the
     display's black border rather than on the lit area itself
   * control column: Ø36 dial hole + a 2x2 grid of Ø13 button holes
-  * 4 countersunk face screws into the shell's bosses
+  * 6 magnet spigots -- no screws, nothing breaks the front surface
 
   *** The screen opening's POSITION is provisional. *** AA_X0 / AA_Y0 in
   case_params.py are a centred guess until the lit area is measured on the real
@@ -67,17 +67,18 @@ def build_face():
             cuts.append(cyl((P.BTN_D + P.BTN_CLR) / 2.0, z0 - 1.0, z1 + 1.0,
                             P.COL_CX + dx, by))
 
-    # ---- face screws (countersunk from the front) ------------------------------
-    for (x, y) in P.FSCREWS:
-        cuts.append(cyl(P.FSCREW_PILOT / 2.0 + 0.3, z0 - 1.0, z1 + 1.0, x, y, seg=32))
-        # conical countersink under the front surface
-        cs = trimesh.creation.cone(radius=P.FSCREW_HEAD / 2.0, height=P.FSCREW_HEAD / 2.0,
-                                   sections=32)
-        cs.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
-        cs.apply_translation([x, y, z1 - P.FSCREW_HEAD / 2.0 + 0.01])
-        cuts.append(cs)
+    # ---- magnet spigots ---------------------------------------------------------
+    # NOTHING breaks the front surface. Each magnet lives in a boss that drops below the
+    # mating plane, so there is 4.3 mm of material between the disc and the outside, the
+    # two discs touch with no plastic between them, and the six bosses register the plate
+    # against sliding -- which matters, because magnets are weak in shear.
+    spigots = [cyl(P.MAG_SPIGOT_D / 2.0, P.MAG_MATE_Z, z0 + 0.01, x, y)
+               for (x, y) in P.MAGNETS]
+    for (x, y) in P.MAGNETS:
+        cuts.append(cyl(P.MAG_POCKET_D / 2.0, P.MAG_MATE_Z - 0.01,
+                        P.MAG_MATE_Z + P.MAG_POCKET_H, x, y))
 
-    return difference([plate] + cuts)
+    return difference([union([plate] + spigots)] + cuts)
 
 
 if __name__ == "__main__":

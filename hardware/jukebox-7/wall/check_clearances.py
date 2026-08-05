@@ -60,32 +60,36 @@ hx0, hy0 = P.PCB_X0 + P.HOLE_INSET, P.PCB_Y0 + P.HOLE_INSET
 PCB_BOSSES = [(hx0, hy0), (hx0 + P.HOLE_DX, hy0),
               (hx0, hy0 + P.HOLE_DY), (hx0 + P.HOLE_DX, hy0 + P.HOLE_DY)]
 
-print("\n== face screws must clear the PCB entirely (their bosses run full height) ==")
-for i, (x, y) in enumerate(P.FSCREWS):
-    r = P.FSCREW_BOSS / 2.0
-    clear = not any(in_rect(p, PCB_RECT) for p in
-                    [(x - r, y - r), (x + r, y - r), (x - r, y + r), (x + r, y + r)])
-    check(f"face screw {i} ({x:.1f},{y:.1f})", clear,
-          "outside the PCB footprint" if clear else "OVERLAPS THE PCB")
+print("\n== magnet SPIGOTS must clear the PCB (they descend into display-glass space) ==")
+for i, (x, y) in enumerate(P.MAGNETS):
+    r = P.MAG_SPIGOT_D / 2.0
+    over = (P.PCB_X0 - r < x < P.PCB_X1 + r) and (P.PCB_Y0 - r < y < P.PCB_Y1 + r)
+    margin = min(abs(y - P.PCB_Y0), abs(y - P.PCB_Y1)) - r
+    check(f"magnet spigot {i} ({x:.1f},{y:.1f})", not over,
+          f"{margin:+.2f} mm off the PCB edge" if not over else "OVERLAPS THE PCB",
+          tight=(0 <= margin < 0.4))
+    outer = y - r if y < P.FACE_H / 2 else P.FACE_H - (y + r)
+    check(f"magnet spigot {i} outer wall", outer >= 1.5, f"{outer:.2f} mm of wall outboard",
+          tight=(1.5 <= outer < 2.0))
 
-print("\n== face screws vs PCB mounting bosses ==")
-for i, f in enumerate(P.FSCREWS):
+print("\n== magnet blocks vs PCB mounting bosses ==")
+for i, f in enumerate(P.MAGNETS):
     for j, b in enumerate(PCB_BOSSES):
         if ((f[0] - b[0]) ** 2 + (f[1] - b[1]) ** 2) ** 0.5 < 40:
-            circles(f"face screw {i}", f, P.FSCREW_BOSS, f"PCB boss {j}", b, P.BOSS_OD)
+            circles(f"magnet block {i}", f, (2 * P.MAG_BLOCK_HW), f"PCB boss {j}", b, P.BOSS_OD)
 
-print("\n== face screws vs keyholes ==")
-for i, f in enumerate(P.FSCREWS):
+print("\n== magnet blocks vs keyholes ==")
+for i, f in enumerate(P.MAGNETS):
     for kx in P.KEY_X:
         # widest part of the keyhole cut, plus the head-relief buffer
-        circles(f"face screw {i}", f, P.FSCREW_BOSS,
+        circles(f"magnet block {i}", f, (2 * P.MAG_BLOCK_HW),
                 f"keyhole x={kx:.0f}", (kx, P.KEY_ENTRY_CY), P.KEY_ENTRY_D + 3.0)
 
-print("\n== face screws vs every mounted board ==")
-for i, f in enumerate(P.FSCREWS):
+print("\n== magnet blocks vs every mounted board ==")
+for i, f in enumerate(P.MAGNETS):
     for name, r in board_rects().items():
         if abs(f[0] - (r[0] + r[2]) / 2) < 60 and abs(f[1] - (r[1] + r[3]) / 2) < 60:
-            circle_vs_rect(f"face screw {i}", f, P.FSCREW_BOSS, name, r)
+            circle_vs_rect(f"magnet block {i}", f, (2 * P.MAG_BLOCK_HW), name, r)
 
 print("\n== boards must not overlap each other in XY unless they differ in Z ==")
 rs = board_rects()
@@ -132,6 +136,14 @@ for kx in P.KEY_X:
     check(f"keyhole x={kx:.0f} bottom", bot >= P.PCB_Y1,
           f"relief reaches y={bot:.2f}, PCB top is {P.PCB_Y1:.2f}",
           tight=(0 <= bot - P.PCB_Y1 < 1.0))
+
+print("\n== magnets ==")
+check("spigot wall around the magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.8,
+      f"{(P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2:.2f} mm of spigot around the disc")
+check("material over the magnet", P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H) >= 2.0,
+      f"{P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H):.2f} mm from disc to the front face")
+check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOOR_Z,
+      f"pocket floor z={P.MAG_MATE_Z - P.MAG_POCKET_H:.2f}, case floor z={P.FLOOR_Z}")
 
 print("\n== depth ==")
 check("USB-C headroom", P.UC_Z1 <= P.GLASS_Z, f"board rear edge z={P.UC_Z1}, face inner z={P.GLASS_Z}")

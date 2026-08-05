@@ -105,8 +105,11 @@ a.add_patch(Rectangle((P.EXP_CX - P.EXP_W / 2, P.EXP_CY - P.EXP_H / 2), P.EXP_W,
                       fc='#2c6b9e', alpha=.18, ec='#2c6b9e', lw=1.1))
 a.text(P.EXP_CX, P.EXP_CY, "PCF8574\n0x20", ha='center', va='center', fontsize=7,
        color='#22557f', family='monospace')
-for (fx, fy) in P.FSCREWS:
-    a.add_patch(Circle((fx, fy), P.FSCREW_BOSS / 2, fc='#fff', ec='#555', lw=1.0))
+for (fx, fy) in P.MAGNETS:
+    a.add_patch(Circle((fx, fy), P.MAG_SPIGOT_D / 2, fc='#f6e9c9', ec='#a07b1f', lw=1.0))
+    a.add_patch(Circle((fx, fy), P.MAG_D / 2, fc='#d9b44a', ec='#a07b1f', lw=0.8))
+a.text(P.MAG_X[1], P.MAG_Y_BOT - 6, f"6x Ø{P.MAG_D:.0f}x{P.MAG_T:.0f} magnet", ha='center',
+       va='top', fontsize=7.5, color='#8a6a15', family='monospace')
 hx0, hy0 = P.PCB_X0 + P.HOLE_INSET, P.PCB_Y0 + P.HOLE_INSET
 for (x, y) in [(hx0, hy0), (hx0 + P.HOLE_DX, hy0),
                (hx0, hy0 + P.HOLE_DY), (hx0 + P.HOLE_DX, hy0 + P.HOLE_DY)]:
