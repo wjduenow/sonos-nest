@@ -89,6 +89,10 @@ String webConfigJson() {
   // Radio catalogue refresh. Belongs in the CONFIG document, not the registration payload — that
   // one is identity only (who and where), and putting settings there means the config page cannot
   // read back what it just wrote.
+  // On-device sound. uiSound is the master level (0 = off); scrollSound gates the carousel
+  // detents only and is meaningless while the master is 0 — the page reflects that by disabling it.
+  doc["uiSound"]     = settingsUiSound();
+  doc["scrollSound"] = settingsScrollSound();
   doc["radio_refresh_hour"] = settingsRadioRefreshHour();
   doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
@@ -215,6 +219,16 @@ bool webConfigApply(const String &field, const String &value, String &err) {
 
   // board with a config UI gets it identically; boards without one simply never call this.
 
+  if (field == "uiSound") {
+    long v = 0;                                   // parsePct takes a long&, like the other levels
+    if (!parsePct(value, v)) { err = "uiSound must be a number 0..100"; return false; }
+    settingsSetUiSound((uint8_t)v);
+    return true;
+  }
+  if (field == "scrollSound") {
+    settingsSetScrollSound(value == "1" || value == "true" || value == "on");
+    return true;
+  }
   if (field == "radio_refresh_hour") {
 
     const int h = value.toInt();

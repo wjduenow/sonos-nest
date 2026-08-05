@@ -50,8 +50,9 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
 - Music services + the Radio feature: **`plans/08-music-service-integration.md`** — Part 1 is the
-  implementation plan (rename the current "Radio" page to **Favorites**, add a real **Radio** page
-  over Amazon Prime Stations backed by an SD cache); Part 2 is the research record.
+  feature **as built** (Favorites + a real Radio page over Amazon Prime Stations, both backed by SD
+  caches with artwork, A-Z jump, search and scroll detents); Part 2 is the research record. Read
+  Part 1's *four things that would have broken it* before touching the artwork or token paths.
   **OAuth services (YouTube Music, Spotify accounts) cannot be browsed** — closed question, don't
   re-open: the favourite id is an opaque account-scoped token, the household's OAuth token is on the
   player but write-only, and the cloud Control API has no browse path. Favourites (`FV:2`) are the

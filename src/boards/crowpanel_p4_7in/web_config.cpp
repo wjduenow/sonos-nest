@@ -40,7 +40,7 @@ section{background:var(--elev);border:1px solid var(--line);border-radius:14px;
 h2{font-size:15px;margin:0 0 14px;color:var(--mut);font-weight:600;
    text-transform:uppercase;letter-spacing:.08em}
 label{display:block;margin:14px 0 6px;font-size:14px;color:var(--mut)}
-select,input[type=text],input[type=number]{width:100%;padding:11px 12px;border-radius:10px;
+select,input[type=text],input[type=number],input[type=range]{width:100%;padding:11px 12px;border-radius:10px;
   border:1px solid var(--line);background:var(--elev2);color:var(--text);font-size:16px}
 .row{display:flex;gap:12px;align-items:center}
 .row>*{flex:1}
@@ -68,6 +68,16 @@ button.ghost{background:var(--elev2);color:var(--text)}
     <select id="hour"></select>
     <button class="ghost" id="now" type="button">Refresh now</button>
   </div>
+</section>
+
+<section>
+  <h2>Sound</h2>
+  <label for="snd">Feedback level <span id="sndv" style="color:var(--text)"></span></label>
+  <input type="range" id="snd" min="0" max="100" step="5">
+  <p style="color:var(--dim);font-size:13px;margin:6px 0 0">0 turns all feedback off.</p>
+  <div class="sw" style="margin-top:14px">
+    <label for="scroll" style="margin:0">Clicks while scrolling</label>
+    <input type="checkbox" id="scroll"></div>
 </section>
 
 <section>
@@ -107,8 +117,14 @@ async function load(){
     o.value=h; o.textContent=String(h).padStart(2,'0')+':00';
     if(h===c.radio_refresh_hour)o.selected=true; hs.append(o)}
   $('#auto').checked=!!c.radio_auto_refresh;
+  $('#snd').value=c.uiSound??40; $('#sndv').textContent=($('#snd').value)+'%';
+  $('#scroll').checked=!!c.scrollSound; $('#scroll').disabled=Number(c.uiSound)===0;
   $('#name').value=c.deviceName||''; $('#bright').value=c.brightness??100;
 }
+$('#snd').oninput=e=>$('#sndv').textContent=e.target.value+'%';
+$('#snd').onchange=e=>{put('uiSound',e.target.value);
+  $('#scroll').disabled=Number(e.target.value)===0};
+$('#scroll').onchange=e=>put('scrollSound',e.target.checked?'1':'0');
 $('#room').onchange=e=>put('room',e.target.value);
 $('#hour').onchange=e=>put('radio_refresh_hour',e.target.value);
 $('#auto').onchange=e=>put('radio_auto_refresh',e.target.checked?'1':'0');

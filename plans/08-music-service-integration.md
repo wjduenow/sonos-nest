@@ -1,488 +1,150 @@
 # 08 — music services: the Radio feature, and the research behind it
 
-**Part 1 is the implementation plan. Part 2 is the research record** that establishes what is and
+**Part 1 describes the feature as built. Part 2 is the research record** that establishes what is and
 isn't possible — read Part 2's *Verdict table* if you want the one-screen summary of which services
 can be browsed and which cannot.
 
-The short version: **Sonos favourites are not radio.** The jukebox's current "Radio" page lists
-`FV:2` favourites, which is a different thing wearing the wrong name. Amazon's Prime Stations *are*
-radio, they enumerate in full over SMAPI DeviceLink (proven on hardware), and they are what the new
-Radio page will show.
+The short version: **Sonos favourites are not radio.** The page that used to be called "Radio"
+listed `FV:2` favourites — a different thing wearing the wrong name — so it is Favorites now, and
+Radio is Amazon Prime Stations, enumerated over SMAPI DeviceLink and cached to the SD card. Both are
+built and running.
 
 ---
 
-# Part 1 — Implementation plan: Favorites + Radio
+# Part 1 — The Radio + Favorites feature, as built
 
-## What changes
+**Status: built, flashed and running.** Everything below is on the device. What has NOT happened is
+a proper look at it: the caches, memory, endpoints and playback are verified, but almost nothing
+visual has been seen by a human — see *What is not verified* at the end, and treat it as the real
+outstanding item.
 
-| | now | after |
-|---|---|---|
-| rail slot 2 | **Radio** (`LV_SYMBOL_LIST`) — actually lists `FV:2` favourites | **Favorites**, heart icon — same content, honest name |
-| rail slot 3 | — | **Radio**, radio icon — Amazon Prime Stations, hierarchical |
-| rail | 4 items | **5 items** |
+## What it does
 
-Nothing about the favourites page's behaviour changes; it is a rename plus an icon. The new Radio
-page is the actual work.
+The rail is five items: Now Playing · **Favorites** · **Radio** · Rooms · Settings. The page that
+used to be called "Radio" listed Sonos favourites — a different thing wearing the wrong name — so it
+is Favorites now, and Radio is Amazon Prime Stations.
 
-## Scope decision: Amazon Prime Stations, exclusively
+Both list pages work the same way: a **snapping carousel with artwork tiles**, an **A-Z jump strip**,
+**global type-to-filter**, and a **detent click as each row snaps past centre**. Radio has two levels
+(26 genres → up to 50 stations); Favorites is flat. Both read from a cache on the SD card, so opening
+either is instant and survives a dead link or a reboot.
 
-The Radio page shows **Amazon Prime Stations and nothing else.** The anonymous-SMAPI route (TuneIn,
-SomaFM, NTS — 32 credential-free services, fully proven in Part 2) stays documented as a **fallback**,
-not a second source. Mixing catalogues would mean reconciling two id schemes, two auth models and two
-cache shapes for a list the user experiences as one thing. If the Amazon route ever fails — token
-revoked, tier downgraded, API change — Part 2 has everything needed to swap the backend without
-touching the UI.
+## Architecture
 
-## UX
-
-### The rail grows to five
-
-`RAIL_BTN` is 72 px on an 86 px pitch, so five items occupy 430 px of the 600 px panel height —
-fits with room to spare. No geometry change needed beyond `PAGE_COUNT`.
-
-> ⚠️ **Icon problem, and it needs deciding before the UI work starts. LVGL's built-in symbol font has
-> neither a heart nor a radio glyph.** The current icons are `AUDIO / LIST / VOLUME_MAX / SETTINGS`,
-> i.e. "Radio" is a *list* icon today. Two options:
->
-> - **(a) Convert a two-glyph Lucide subset** (`heart`, `radio`) into an LVGL font. This is what the
->   design system actually specifies — `screens.cpp` already carries a TODO admitting the Lucide →
->   `LV_SYMBOL_*` substitution is a deviation. Costs a few KB of flash, scoped to `UNIT_JUKEBOX` the
->   same way the Montserrat sizes already are. **Recommended.**
-> - **(b) Interim fallback:** Favorites keeps `LV_SYMBOL_LIST`, Radio takes `LV_SYMBOL_AUDIO`. Ugly
->   and ambiguous against Now Playing, but unblocks the rest.
-
-### The list rolls — it is a drum, not a page of rows
-
-The Radio list should read like a jukebox mechanism: a **rolling drum** you spin, with one entry
-selected at the centre, at every level.
-
-**DECIDED: a snapping tile carousel with artwork per row** (option B in the mockup). Reviewed against
-an interactive mock at the panel's true 1024x600 with real station names and real artwork; the tile
-carousel reads closer to a physical jukebox — title cards you flip through — and artwork turned out to
-be real, cheap and per-station.
-
-```
-+----------------------------------------------------------+
-| < Jazz                                          [search]  |
-|  50 stations                                              |
-|  +------+  Smooth Jazz                                    |
-|  | art  |  Prime Station                                  |
-|  +------+                                                 |
-| ++------+ SMOOTH JAZZ  <- snapped, amber outline          |
-| || art  | Prime Station                                   |
-| ++------+                                                 |
-|  +------+  Cool Jazz                                      |
-|  | art  |  Prime Station                                  |
-|  +------+                                                 |
-|  A B C D E F G H ... Z                                    |
-+----------------------------------------------------------+
-```
-
-A normal LVGL list with `lv_obj_set_scroll_snap_y(LV_SCROLL_SNAP_CENTER)` — the centred row takes the
-accent outline, and a tap plays it directly (no intermediate detail panel; the favourites page already
-plays on tap and this matches it).
-
-> ### ⚠️ What B costs, and the one thing that will break it
->
-> **Decoded artwork does not fit in the LVGL pool if it is unbounded.** An 84x84 tile in RGB565 is
-> **14,112 B decoded**. Fifty rows would be **~705 KB** — larger than the entire 512 KB pool. The row
-> objects themselves are the small part (~1 KB each, ~50 KB total); **the images are the problem.**
->
-> **A bounded, recycling image cache is therefore mandatory, not an optimisation.** Two ways:
->
-> - **Register a TJpg-backed LVGL image decoder** so tiles can be `lv_image` widgets pointing at SD
->   paths, and let LVGL's own cache (`LV_CACHE_DEF_SIZE`) bound and evict. Cleanest, and it makes the
->   cache budget a single tunable number.
-> - **Hand-rolled ring of reusable RGB565 buffers** — decode only rows intersecting the viewport plus
->   a row or two of headroom, reuse buffers on scroll. More code, total control.
->
-> Budget either way: a ~6-row viewport plus headroom is **~10 buffers = ~141 KB** of pool. That fits
-> the 512 KB comfortably. **Unbounded does not.** Whichever route, cap it explicitly and log the
-> high-water mark, exactly as the Radio row-count cap already does.
->
-> **Scroll-driven fetching needs the same discipline.** Fetch art as rows approach the viewport, but
-> debounce so a fast flick does not queue fifty HTTPS requests, and drop requests for rows that have
-> already scrolled past. After the first visit the art is on SD, so this is a one-time cost per
-> station — but the first browse of a genre is 50 fetches if unthrottled, which is exactly the
-> sustained-load profile that kills the ESP-Hosted link.
->
-> **This is meaningfully more work than option A.** A (a text `lv_roller` plus one large card, one
-> image in flight, no recycling) remains fully specced in the mockup and in this document's history —
-> if the tile list proves too heavy on the pool or too slow to scroll, falling back is a UI-only
-> change. The crawler, the SD cache and the art pipeline are identical for both.
-
-### Scroll audio — a detent per row, not a tick per event
-
-A carousel that snaps needs to *sound* like a mechanism. The jukebox already has the hardware and the
-plumbing (`boards/crowpanel_p4_7in/ui_sound.cpp`, NS4168 → two onboard speakers, cues rendered on a
-board-owned task), so this is a small addition — but four details decide whether it feels like a
-detent or like a fault.
-
-**1. Fire on the snapped index changing, never on `LV_EVENT_SCROLL`.** The centred row is already
-computed for the accent outline; emit a cue when that index *changes*. Scroll events fire far more
-often than rows cross, and driving audio from them produces a smear rather than clicks.
-
-**2. Add `UiSound::Detent` — do not reuse `Tick`.** `Tick` is a control-moved click (14 ms, decay 9.0,
-lowpass 0.55) and a run of them reads as a burst of button presses. A detent wants to be shorter,
-tighter and quieter — roughly 8 ms with a faster decay at ~60% amplitude — so a fast scroll reads as
-one mechanism turning.
-
-> **Safe to add.** The enum lives in `core/board.h`, but `crowpanel_rotary`, `es3c28p` and
-> `esp32s3cam` all implement `void uiSoundPlay(UiSound) {}` — parameter unnamed, ignored — so no board
-> breaks. Only the jukebox's `render()` switch gains a case, and since that switch has no `default:`,
-> the compiler will point at anything that ever needs updating.
-
-**3. Rate-limit explicitly. Do not rely on the queue overflowing.** A fast flick crosses rows faster
-than the task can render 8 ms of audio, and the cue queue is depth 4 and drops when full. Dropping is
-the right behaviour — a late click is worse than a missing one — but *relying* on overflow to do it is
-accidental design. Put a floor of **~45–60 ms between detents** in the unit and drop the rest; past
-roughly 20/s the clicks blur into noise anyway, so thinning them out sounds better, not worse.
-
-**4. Arm the amp on touch-down, not on the first detent.** This is the subtle one. `ampPower(true)`
-carries a `delay(5)` settle and the amp drops after 1.5 s idle, so the **first** detent of a scroll —
-precisely the one that establishes the feel — arrives clipped. Arm on `LV_EVENT_PRESSED` on the list,
-before any row has crossed, and let the existing idle timeout power down when scrolling stops.
-
-That needs one new optional HAL entry point:
-
-```c
-// --- UI feedback (optional; no-op on boards without a speaker) ---
-void uiSoundArm();   // wake the amp ahead of imminent cues; safe to call repeatedly
-```
-
-No-op on the three boards without speakers, same as `uiSoundPlay`. If the extra API is not wanted, the
-fallback is to accept a soft first detent — but it is the one the user notices most.
-
-**5. Scroll audio gets its own toggle — DECIDED.** Wanting button feedback without scroll noise is a
-reasonable preference, and a 50-row flick makes far more sound than any button press.
-
-```c
-// core/settings.h — alongside settingsUiSound()
-bool settingsScrollSound();
-void settingsSetScrollSound(bool on);
-```
-```c
-// core/settings.cpp — NVS keys are capped at 15 chars; "scrsnd" matches the "uisnd"/"btnvol" style
-bool settingsScrollSound()          { return s_prefs.getUChar("scrsnd", 1) != 0; }
-void settingsSetScrollSound(bool on){ s_prefs.putUChar("scrsnd", on ? 1 : 0); }
-```
-
-- **Precedence: the master gates the toggle.** `settingsUiSound() == 0` silences everything including
-  detents; `settingsScrollSound()` only has meaning when the master level is non-zero. The Settings
-  row should render disabled/dimmed while the UI-sound slider sits at 0, so the relationship is
-  visible rather than mysterious.
-- **Default ON.** The detent is the point of the carousel, not a novelty bolted onto it — shipping it
-  off would mean nobody experiences the design as intended. It is one NVS byte to flip if that proves
-  wrong.
-- **Enforce it in the UNIT, not the board.** The unit checks `settingsScrollSound()` before calling
-  `uiSoundPlay(UiSound::Detent)`. This matters for layering: `Detent` is a generic cue, and another
-  unit might legitimately use it for something that is not scrolling — a board silently swallowing it
-  on a *scroll* preference would be wrong. The board keeps reading `settingsUiSound()` for level, as
-  `board.h` already documents; it just never learns why a cue was or wasn't requested.
-- **UI:** an `lv_switch` row directly beneath the existing UI-sound slider on Settings, so the
-  dependency reads at a glance.
-
-**Do not let audio gate the UI.** Already true by construction — `uiSoundPlay()` posts to a queue and
-returns — but it matters more here than anywhere else, because detents fire from the scroll handler
-on the UI task while `LV_DISPLAY_RENDER_MODE_DIRECT` is painting into the live scan-out buffer.
-
-### Levels
-
-```
-L1  genres        26 entries, rolls        ‹ back = Radio root is top
-L2  stations      up to 50 tiles, snap-scrolls   ‹ back to genres
-    tap a tile    plays immediately
-```
-
-Rolling behaviour is identical at both levels; drilling in replaces the roller's contents rather than
-building a new screen. A header chevron is the back affordance — the nest's long-press-to-go-back is a
-rotary idiom and does not belong on a 7" touch panel. Nav stack depth never exceeds 2.
-
-### Filtering — two mechanisms, both needed
-
-**1. Type-to-filter (on-screen keyboard).** A search affordance in the header opens an
-`lv_textarea` + `lv_keyboard` — the unit already has both wired for the device-name field in
-Settings, so this is reuse, not new machinery. Typing filters the roller live.
-
-- **Scope:** search is **global across all ~1,300 stations**, not just the current genre. Someone
-  hunting "Miles Davis" should not have to know he is under Jazz.
-- **Cap results at ~100.** A roller's options are one newline-joined string held in the LVGL pool; at
-  ~25 B per entry the full 1,300 is ~32 KB, which fits the 512 KB pool but is wasteful to rebuild on
-  every keystroke. Capping bounds both the allocation and the rebuild cost.
-- **Debounce ~200 ms** so a fast typist does not trigger a rebuild per character.
-- The keyboard occupies roughly the lower half of a 1024×600 panel; slide it over the detail panel and
-  keep the roller visible, so results update where the user is looking.
-
-**2. A-Z jump strip.** A vertical column of letters down the side. Tapping a letter rolls to the first
-entry beginning with it — the phone-contacts idiom, and much faster than dragging through 50 entries.
-
-- Requires each genre's stations **sorted by title**, plus a 26-entry offset table (letter → first
-  index). Both are produced at crawl time, not on device — see the cache section.
-- Letters with no entries render dimmed and ignore taps.
-
-## Artwork — every station has it, and the resize op is load-bearing
-
-**RUN-VERIFIED, and it overturns an earlier claim in this document.** 1044/1044 station rows across
-all 26 genres carry a populated `albumArtURI`. Zero without.
-
-> ### The false negative, recorded because it will bite the firmware parser too
->
-> The element **never appears bare**. In one Jazz response: `<albumArtURI>` occurs **0** times,
-> `<albumArtURI requiresAuthentication="false">` occurs **50** times. A regex or literal match on
-> `<albumArtURI>` finds nothing and reports "no art". Stations are also `mediaCollection` with
-> `itemType=program` — **never** `mediaMetadata` — so a parser scoped to `mediaMetadata` sees no items
-> at all.
->
-> **`didl.cpp`-style tag scraping must match the opening tag as `<name` followed by `>` or whitespace,
-> not `<name>`.** This is exactly how the research got it wrong.
->
-> ### It happened three times. Treat this as a parser spec, not an anecdote.
->
-> | what bit us | why a naive regex missed it |
-> |---|---|
-> | `<albumArtURI requiresAuthentication="false">` | **attributes** on the opening tag |
-> | `<ns:authToken>` in a `TokenRefreshRequired` fault | **namespace prefix** on the tag |
-> | `<r:resMD>` containing a nested `<item>…</item>` | **nesting** — a non-greedy `<item>.*?</item>` stops at the INNER close and silently truncates the record |
->
-> All three produced *plausible wrong answers* rather than errors: "stations have no artwork", "the
-> refresh fault carries no credentials", "this favourite has no metadata". Every one cost a cycle.
-> **The firmware parser must tolerate attributes, namespace prefixes, and nested same-name elements**
-> — and where a field is expected, its absence should be logged loudly rather than defaulted to
-> empty.
-
-A complete station item — these five children are the *entire* record:
-
-```xml
-<mediaCollection>
-  <id>catalog/stations/A15MU3EQ4XZ3Y5/#chunk-kKRW16vjSke5rJmIh-L8rQ</id>
-  <itemType>program</itemType>
-  <title>Worship Now Radio</title>
-  <canPlay>true</canPlay><canEnumerate>true</canEnumerate>
-  <albumArtURI requiresAuthentication="false">https://m.media-amazon.com/images/G/01/MusicProgramming/2024_US_WorshipNowRadio_ST_TD_Tile_2400x2400.png</albumArtURI>
-</mediaCollection>
-```
-
-### The `._SL<N>_.jpg` rewrite is not optional
-
-Native art is **2400×2400, 250 KB – 6.7 MB, and ~40% of it is PNG — which TJpg cannot decode.**
-Unusable raw. Amazon's image server accepts a resize op appended to the filename, **and it transcodes
-PNG → baseline JPEG**:
-
-```
-re.sub(r'\.(jpg|jpeg|png)$', '._SL128_.jpg', url, flags=I)     # ops stack harmlessly
-```
-
-Measured on the item above: **1,422,804 B PNG → 1,988 B baseline JPEG.** Across 60 distinct URLs:
-60/60 HTTP 200, 60/60 baseline JPEG (SOF0), median latency 0.11 s.
-
-| `._SL<N>_` | median | max |
-|---|---|---|
-| 96 | 2.9 KB | 4.2 KB |
-| **128** | **4.6 KB** | 6.7 KB |
-| 200 | 9.7 KB | 15.9 KB |
-
-`._SL128_.jpg` is the recommendation: baseline JPEG, feeds the existing `core/album_art.cpp` TJpg path
-unchanged.
-
-### Facts that shape the cache
-
-- **HTTPS only.** Plain HTTP is **403** on both hosts, native or resized. That is a real cost here —
-  an mbedTLS session against a ~70–100 KB internal-SRAM idle budget. **One connection, keep-alive,
-  reused across the visible tiles**, and never concurrent with an album-art fetch.
-- **Two hosts:** `images-na.ssl-images-amazon.com` and `m.media-amazon.com`. Normalise everything to
-  `m.media-amazon.com`, which serves the `images-na` paths too — one host, one TLS session.
-- **The art URL is STABLE; the `#chunk-` is not.** Re-browsing Jazz minutes later returned
-  **50/50 identical `albumArtURI` and 0/50 identical `#chunk-`.** So art is a property of the station:
-  **key the SD image cache by STATION KEY**, normalising any `._AA500`-style op off first.
-- **The catalogue is smaller than assumed: 840 distinct stations** across 1044 rows (174 appear in
-  more than one genre). Genres are **not** uniformly 50 — Holiday 19, International 28, Soundtracks
-  32, K-Pop 1, Miscellaneous 2, Recently Played 3.
-- **Genre containers have art, but it is useless.** All 26 carry an `albumArtURI`, but there are only
-  **two distinct URLs** — generic 1.6 KB gray placeholders. **Level 1 stays text/icon**; spend the
-  artwork budget on level 2 where it is real. (This is the "genres don't, stations do" split — the
-  inverse of what was anticipated.)
-- **`/getaa` still cannot serve station art**, and now there is a mechanism: it is a
-  `getMediaMetadata` proxy, and Amazon rejects a container id — *"did not contain a TrackInstance"*.
-  Re-tested on freshly minted ids with a known-good track as a positive control (200, byte-identical
-  on two speakers) so the 404 is meaningful.
-- **`getExtendedMetadata` returns the same URL** — so it works, but it is a wasted round-trip.
-  `getMetadata` already carries the art during the crawl you are doing anyway.
-
-### Two constraints from the imagery itself
-
-1. **The station name is rendered into the artwork.** At 96–128 px that text is decorative, not
-   legible — **keep the text label in the row**; the tile is not a substitute for it.
-2. Tiles are busy and high-contrast. They need padding and corner rounding, not edge-to-edge.
-
-## The SD cache
-
-### Why cache at all
-
-Browsing live costs one HTTPS SOAP round-trip per level at ~0.6 s, over the ESP-Hosted link that is
-documented to die under sustained load. Caching makes browsing instant, survives a dead link, and
-keeps the radio traffic to one scheduled burst instead of a request per tap.
-
-### Layout
-
-**One file per genre plus an index**, not a single blob:
-
-```
-/radio/index.tsv      version, fetchedAt, serviceId, accountSerial, then one line per genre:
-                      <genreIdx>\t<title>\t<container id>
-/radio/g00.tsv .. g25.tsv    one line per station, SORTED BY TITLE:
-                      <title>\t<full item id>
-/radio/g00.azx .. g25.azx    26 bytes-per-entry offset table: letter -> first line index
-/radio/all.tsv        flat cross-genre search index, sorted by title:
-                      <title>\t<genreIdx>\t<full item id>
-```
-
-**Sort at crawl time, not on device.** The device must never sort 1,300 strings — the crawler writes
-each genre file already ordered by title and emits the A-Z offset table alongside it. `all.tsv`
-exists so global type-to-filter is a single linear scan of one file rather than 26 opens.
-
-TSV, not JSON: no parser, no allocator, read a line at a time. A page render touches exactly one
-small file and never parses the whole catalogue.
-
-> **Cache the station's full item id verbatim** — `catalog/stations/<KEY>/#chunk-<token>`. Do **not**
-> store key and chunk separately and recombine, and do **not** attempt to mint a chunk. Chunks are
-> server-minted per response but **never expire** (a years-old favourite is still playable), so a
-> cached id stays good indefinitely. See Part 2 for the evidence.
-
-### Refresh job
-
-- A low-priority task on core 0, or a step folded into netTask's idle path — **never** the UI task.
-- Triggered on boot when the index is older than N days, plus a manual **Refresh** in Settings.
-- **Weekly is ample.** The genre list is static and station rosters move slowly.
-- **Pace it: one request every 1–2 s, not 27 back to back.** The ESP-Hosted fault correlates with
-  sustained load, and a 500 KB burst is exactly that profile.
-- Write to a temp file and rename on success, so a failed crawl never leaves a half-written index.
-
-## Measured budget — the answer to "can we afford this?"
-
-**Yes, comfortably. Bandwidth is not the constraint.** Measured against the live service:
-
-| | measured |
+| piece | what it is |
 |---|---|
-| Prime Stations root | **11,278 B**, 26 containers, 0.60 s |
-| One genre (Jazz / Rock / Country, all sampled) | **~19.2 KB**, exactly **50** stations, 0.60 s |
-| Per station, on the wire | **~382 B** |
-| **Full crawl** | **27 requests · ~499 KB · ~16 s** |
-| **SD index** | **~150–250 KB** for 1044 rows (adds an art-URL column: +56 KB with host prefixes stripped, +106 KB without) |
-| Art, lazy per tile | `._SL128_.jpg`, median **4.6 KB**, ~0.11 s |
-| Art cache if fully populated | 840 stations x ~4.6 KB = **~3.8 MB** on SD |
-| Decoded tile in LVGL pool | 84x84 RGB565 = **14,112 B** — bounded cache required (see *What B costs*) |
+| `core/amazon.{h,cpp}` | SMAPI client: DeviceLink ceremony, genre/station browse, URI + DIDL construction |
+| `core/radio_cache.{h,cpp}` | Crawls the station catalogue to SD; readers for the UI; the daily schedule |
+| `core/fav_cache.{h,cpp}` | Same for `FV:2`, with a different refresh policy (below) |
+| `core/art_cache.{h,cpp}` | Bounded, recycling tile artwork — PSRAM slots + a disk cache |
+| `core/board.h` → `localStorageRoot()` | New HAL entry: a writable root, or nullptr |
+| `boards/crowpanel_p4_7in/sd_card.cpp` | Mounts the card; the shipping counterpart of the probe |
+| `boards/crowpanel_p4_7in/web_config.cpp` | Config page + JSON API on port 80 |
+| `units/sonos_jukebox/lv_font_lucide_28.c` | Three-glyph Lucide subset: heart, radio, speaker |
 
-A weekly refresh is ~500 KB/week. Peak RAM is a single response (~20 KB) if parsed streaming —
-the catalogue is never held in memory. Genres cap at exactly 50, so no paging is needed.
+## Decisions that differ from the original plan, and why
 
-**The three real constraints, none of which are bandwidth:**
+**Dropped the `.azx` letter-offset files.** The A-Z strip needs a letter→row map, but the carousel has
+already read the whole genre file into RAM — the offsets are a linear pass over data that is right
+there. A file would be a second thing to keep in sync for nothing.
 
-1. ~~The SD card is blocked~~ **MEASURED — and it comfortably beats the network, with one hard rule.**
+**Dropped the global sort of `all.tsv`.** Sorting 1,044 Strings at once costs ~150 KB of heap on a
+board where internal SRAM is the scarce resource, and search scans linearly anyway — match quality
+orders results, not file order. Each genre is still sorted, which is what actually gets displayed.
 
-   | | measured on a clean Windows FAT32 volume |
-   |---|---|
-   | 156,800 B (one 280x280 cover) write, **4 KB chunks** | **162 ms = 967 KB/s** |
-   | same, read | **216 ms = 725 KB/s** |
-   | 4 KB round-trip | byte-exact |
-   | the network path it replaces | 228 KB / 1353 ms = **~168 KB/s** |
+**The A-Z strip runs along the bottom, not down the side.** The phone idiom is a vertical rail, but 26
+letters in a 450 px column is 17 px each — well under the design system's own 44 px minimum touch
+target. Horizontal gives each letter ~34 × 44.
 
-   **The card is ~4-6x faster than the C6 link. The caching design is validated.**
+**Search is global, not scoped to the current genre.** Someone hunting a station should not have to
+know which genre it was filed under. Debounced 220 ms (each run rebuilds up to 60 rows), capped at 60
+results (~1 KB of LVGL pool per row plus a tile), two-character minimum (one letter matches most of
+the catalogue).
 
-   > ### ⚠️ WRITE IN 4 KB CHUNKS. Anything larger fails immediately.
-   >
-   > 32 KB chunks fail on the first write, from PSRAM **and** from internal RAM, with and without a
-   > raised `command_timeout_ms`:
-   > ```
-   > sdmmc_send_cmd_num_of_written_blocks: sdmmc_send_app_cmd returned 0x107   (TIMEOUT)
-   > sdmmc_write_sectors_dma: ... returned 0x109                              (INVALID_RESPONSE)
-   > sdmmc_write_sectors_dma: sdmmc_send_cmd returned 0x107, status 0x400d00
-   > ```
-   > `0x400d00` decodes to **CURRENT_STATE = 6 (rcv)** with **ILLEGAL_COMMAND set** — the card is
-   > stuck mid-receive and rejecting the next command, and ACMD22 (how many blocks actually landed)
-   > times out. It is a multi-block write that never terminates cleanly.
-   >
-   > **Not a card fault, and not the sector-size bug.** Raw `sdmmc_write_sectors` was verified
-   > byte-exact at 128 blocks (64 KB) on this same card. The failure is specific to the FATFS write
-   > path at >4 KB.
-   >
-   > **Second limit: sustained writing fails past ~300 KB even at 4 KB chunks.** A 2 MB sequential
-   > write died after 303,104 B. Consistent with the card's internal buffer filling and a long
-   > programming pause outrunning the driver's patience.
-   >
-   > **Neither limit touches this feature** — every file it writes is well clear: art ~4.6 KB,
-   > per-genre index 10-20 KB, `all.tsv` ~157 KB. But **the crawler must cap any single file at
-   > ~256 KB** and split beyond that, and must never raise the write chunk above 4 KB. Both are
-   > cheap rules; discovering them the hard way is not.
-   >
-   > Untested hypothesis for anyone who wants the limit gone: insert a short pause every N KB and see
-   > whether sustained writes recover. Two lines, and it would distinguish "driver impatience" from
-   > "card limitation".
-2. **Internal SRAM and TLS.** An mbedTLS session costs tens of KB of internal RAM and the jukebox
-   idles at only ~70–100 KB free. Crawl with **one connection at a time**, and never concurrently
-   with an album-art fetch.
-3. **The ESP-Hosted link dies under load** — the one unresolved fault on this board. Pace the crawl,
-   make it resumable, and treat a failure as "try again next boot" rather than retrying hard.
+**Favourites refresh on a different trigger to stations.** A station catalogue is a thousand entries
+Amazon controls and that move slowly, so a daily crawl is the whole story. Favourites are forty-odd
+entries the owner edits in the Sonos app and expects to see immediately — so the page requests a
+refresh **on entry whenever the cache is over five minutes old**, on top of the shared daily slot and
+the manual button. It self-heals without anyone pressing anything.
 
-## Open questions
+**The schedule is a fixed local hour, not an age timer.** A 24-hour timer set at 9pm crawls at 9pm all
+week; ~500 KB over the ESP-Hosted link belongs at 4am. "Already ran today" is derived from the cache's
+own `fetchedAt`, so rebooting at 04:30 does not trigger a second crawl.
 
-- ~~Station artwork~~ **RESOLVED: every station has artwork.** See *Artwork* below. The earlier
-  "empty on all 150 sampled" claim in this document was **a parser bug of mine, not a property of the
-  service**.
-- ~~Token lifetime and refresh~~ **RESOLVED — and fault-parsing is the ONLY path.** The token expires
-  in well under an hour. The failing call returns SOAP fault `Client.TokenRefreshRequired` with
-  replacement credentials in the fault body, under **namespaced** tags:
-  `<detail><ns:refreshAuthTokenResult><ns:authToken>…</ns:authToken><ns:privateKey>…</ns:privateKey>`.
-  **Calling `refreshAuthToken` as a standalone operation returns HTTP 404 `Received unsupported
-  operation name`** — Amazon's endpoint does not implement it, despite it being in the WSDL. So the
-  crawler *must* parse the fault, persist to NVS and retry; there is no alternative. RUN-VERIFIED.
-- **Where the DeviceLink ceremony lives.** The token belongs in NVS, but obtaining it needs a
-  browser. Settings can show the `regUrl` (a QR code would be kinder on a wall panel).
-  **Gotcha:** `linkDeviceId` is per-request and required to redeem the code — capture it with the
-  `linkCode` or the user has to authorise twice.
-- **Does a browsed URI actually play?** The one untested leg. Cheapest test costs nothing new: play an
-  existing Amazon station favourite, which also settles the outstanding UPnP 402 question.
-- **Prime vs Unlimited.** Station *playback* may require Music Unlimited rather than plain Prime.
+**Scroll audio has its own toggle**, gated by the master level. Wanting button clicks without scroll
+noise is reasonable, and a 50-row flick makes far more sound than a button press.
 
-## Build order
+## The four things that would have broken it
 
-1. ~~Unblock the SD card~~ **DONE** — FAT32 from a PC, throughput measured (see above). Note the
-   probe's raw-sector write tests are now behind `-DSD_ALLOW_RAW_WRITE`, **off by default**: they
-   overwrite LBA 2048, which is exactly where a Windows-aligned partition puts its FAT32 boot sector,
-   and they destroyed a freshly formatted card twice before that was noticed. Raw *reads* still run.
-2. ~~One playback test~~ **DONE — both tests pass. The feature is proven end to end.**
+**Decoded artwork does not fit the LVGL pool.** A 72×72 tile in RGB565 is 10,368 bytes; fifty rows
+would be ~506 KB, as much as the entire pool. `art_cache` keeps a fixed ring of **12 PSRAM slots
+(~121 KB)** handed to LVGL as `lv_image_dsc_t` pointing at our own memory, so decoded tiles never
+enter the pool at all — measured: the pool sits at ~465 KB free with the cache running.
 
-   Run on *Master Bonus* (192.168.68.114, standalone), restored to its prior state afterwards.
+**`TJpgDec` is a global singleton** — one callback pointer, one scale factor. Album art decoding on
+artTask and tile decoding on the cache worker would have overwritten each other's state mid-frame, a
+corruption that would have looked like random glitches and been very hard to attribute. There is now
+a shared `jpegLock()`/`jpegUnlock()` in `album_art`, and `album_art` re-asserts its own callback after
+taking it.
 
-   | | result |
-   |---|---|
-   | **T1** — existing station favourite, URI + `r:resMD` verbatim | **PLAYS.** `TRANSITIONING` → `PLAYING`, position advancing, "Where Did Our Love Go" |
-   | **T6** — **fully constructed** URI + hand-built DIDL, station never played on this household | **PLAYS.** `PLAYING` at +4 s, "Viagem (Se Eu Soubesse)" — Leo Gandelman |
+**Amazon's originals are unusable raw** — 2400×2400, up to 6.7 MB, and ~40% PNG, which TJpg cannot
+decode at all. The `._SL<N>_.jpg` rewrite both resizes and transcodes: a 1,422,804 B PNG becomes a
+1,988 B baseline JPEG. Favourite art comes from other hosts, so the rewrite is now per-host —
+googleusercontent takes `=sN`, ytimg takes `mqdefault`, Spotify swaps its size prefix, unknown hosts
+fall through unchanged.
 
-   **The UPnP 402 concern is dead.** A raw `x-sonosapi-radio:` URI goes straight to
-   `SetAVTransportURI` with no `getMediaURI` resolve step, exactly as `core/library.cpp` already does
-   for favourites. **And the tier question is answered** — this household's Amazon subscription plays
-   stations.
+**Amazon's token expires in under an hour and can only be refreshed in-band.** The failing call
+returns SOAP fault `Client.TokenRefreshRequired` with replacement credentials inside the fault body,
+under namespaced tags. Calling `refreshAuthToken` as an operation returns **404 unsupported** — so
+parsing the fault is not the convenient path, it is the only one. Handled inside `request()` so no
+caller has to think about it.
 
-   T6 is the important one: browse via DeviceLink → take the station id → build
-   `x-sonosapi-radio:<urlencoded id>?sid=201&flags=8300&sn=6` plus a DIDL with `item id="100c206c" +
-   id`, `parentID="10082064" + genre id`, class `audioBroadcast`, desc `SA_RINCON51463_X_#Svc51463-0-Token`
-   → play. **That is the whole Radio feature, validated on hardware.**
-3. **Rename Radio → Favorites**, add the fifth rail slot, convert the two Lucide glyphs.
-4. **Cache writer** — crawl + sorted SD index + A-Z offset tables + `all.tsv`, token hardcoded for
-   bring-up. Testable entirely off-device against the files it produces.
-5. **Radio browse UI** — L1 genre list (text/icon), L2 snapping tile carousel with artwork.
-   **Do the bounded image cache first**, before the list looks right — it is the part that decides
-   whether this design is viable at all.
-6. **Filtering** — A-Z jump strip first (cheap, no keyboard), then type-to-filter over `all.tsv`.
-   Scroll detents land with the carousel in step 5; they are ~20 lines once `UiSound::Detent` and
-   `uiSoundArm()` exist.
-7. **DeviceLink ceremony in Settings** + NVS token + `refreshAuthToken` handling.
+## Measured on hardware
 
-Steps 1–2 are prerequisites and both need someone at the device. Step 4 produces files that step 5
-consumes, so those are ordered; 3 is independent of everything. Step 6 splits cleanly — the A-Z strip
-is worth having even if type-to-filter slips, since it makes 50 entries navigable on its own.
+| | |
+|---|---|
+| Full station crawl | **26 genres, 1045 stations**, ~500 KB, paced 1.5 s/request |
+| SD write / read (4 KB chunks) | **967 KB/s / 725 KB/s** — the network path it replaces is ~168 KB/s |
+| Favourites cached | 40 of 42 (two have no `<res>` and are skipped, and the log says so) |
+| Art tile | ~4.6 KB, ~0.11 s; disk-cached after first fetch |
+| Min internal heap | **102 KB** (was 41 KB before the FV:2 page size dropped 50 → 20) |
+| LVGL pool free | ~465 KB of 512 KB |
+| PSRAM free | ~30 MB |
 
----
+**Two SD write rules, measured and enforced in code**, not folklore: **≤ 4 KB per write call** (larger
+fails immediately — the card sticks in RCV state and rejects the next command) and **keep any single
+file under ~256 KB** (sustained writing dies past ~300 KB). Every writer goes through a buffered
+helper rather than trusting callers to remember.
+
+## Admin surfaces
+
+**On screen** (Settings): brightness, device name, sound level, scroll clicks, daily-refresh switch
+and hour, Refresh now, cache status, and the Amazon account row — which opens a **QR of the
+DeviceLink URL**, because the authorisation link is ~250 characters and cannot be read off a panel,
+let alone typed.
+
+**On the web** (`http://<device>/`, port 80): room, sound level and scroll clicks, radio schedule with
+Refresh now, favourites Refresh now, device name, brightness. Everything goes through `core/webconfig`
+— the board's server does sockets and routing only, exactly as CLAUDE.md requires.
+
+## What is not verified
+
+- **Almost nothing visual.** Caches, memory, endpoints, playback and link-up are all confirmed; the
+  carousel, tiles, A-Z strip, search, QR and the Settings page layout have never been looked at. The
+  Settings page in particular now carries name, sound, scroll, schedule and Amazon rows on a 600 px
+  panel, with the Amazon row at `PAD_TOP + 500` — it may well overflow.
+- **No soak.** The scheduled 4am crawl has never actually fired on its own; every crawl so far was
+  manual or first-boot.
+- **The link fault** (plans/07) is unchanged and untested under this new traffic. Note the C6 now
+  reports slave firmware **2.12.11 matching the host**, where plans/07 recorded a 2.3.0 slave — that
+  gap was one of the two leading suspects, so the fault may have changed character.
+
+## What is left
+
+- Walk the UI and fix what the mock could not predict.
+- The genre-level artwork stays a text grid on purpose — the service ships only two grey placeholder
+  images for all 26 genres.
+- A soak, per plans/07 open item 1, now that there is real periodic traffic to soak.
 
 # Part 2 — Research record
 
