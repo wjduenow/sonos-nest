@@ -3,10 +3,12 @@
 // What this board HAS: 1024x600 MIPI-DSI panel (EK79007), GT911 touch, two speakers on an NS4168
 // amp, a PDM mic, a microSD slot, and Wi-Fi via an ESP32-C6 over SDIO.
 //
-// What it does NOT have, hence the neutral stubs below: any rotary encoder or push buttons. The
-// design system's Ø36 dial and 4× Ø13 transport caps are external hardware to be wired to the
-// 11-pin header; see plans/07-sonos-jukebox.md for the buttonCount/buttonPoll/buttonName HAL
-// sketch for when they arrive. Until then this unit is touch-only.
+// What it does NOT have on-board: any rotary encoder or push buttons. The design system's Ø36 dial
+// and 4× Ø13 transport caps are external hardware. They do NOT hang off the 11-pin GPIO header as
+// once planned — both go on the **shared I2C bus** via J13 (Crowtail), which is why there is no
+// PCNT/encoder pin here: the dial is an Arduino Modulino Knob at 0x76 (see knob.cpp) and the
+// buttons will be a PCF8574 at 0x20. See plans/07-sonos-jukebox.md for the buttonCount/buttonPoll/
+// buttonName HAL sketch, still to be written.
 //
 // Wi-Fi note: nothing here configures ESP-Hosted. The C6's SDIO pins — including the reset line
 // that took a while to find — come from variants/crowpanel_p4_7in/pins_arduino.h. Do not add a
@@ -16,6 +18,8 @@
 
 #include "core/board.h"
 #include "display.h"
+#include "i2c_bus.h"
+#include "knob.h"
 #include "pins.h"
 #include "sd_card.h"
 #include "touch.h"
@@ -29,6 +33,7 @@ bool boardInit() {
   // Shared I2C bus: GT911 touch, and whatever else is on the Crowtail connectors. (An
   // unidentified device also answers at 0x2F — not in Elecrow's documentation, harmless so far.)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  i2cBusInit();   // before ANY driver touches the bus — see i2c_bus.h
 
   if (!displayInit()) {
     Serial.println("[board ] display init FAILED — see the [display] line above");
@@ -40,6 +45,10 @@ bool boardInit() {
 
   // Nor is audio: silent feedback is a downgrade, not a failure.
   if (!uiSoundInit()) Serial.println("[board ] continuing without UI tones");
+
+  // Nor is the dial. knobInit() returning false only means it is not plugged in *yet* — its task
+  // keeps rescanning the bus, so the dial can be connected later without a reflash.
+  knobInit();
 
   // Nor is storage: without a card the Radio page has no cache and says so, but everything that
   // talks to Sonos directly is unaffected. localStorageRoot() returns nullptr and callers skip.
@@ -53,11 +62,7 @@ bool boardInit() {
 
 // backlightSet() lives in display.cpp, next to the LEDC setup it depends on.
 
-// --- Rotary input: none on this board -----------------------------------------
-int32_t   encoderDelta() { return 0; }
-KnobEvent knobEvent()    { return KnobEvent::None; }
-bool      knobPressed()  { return false; }
-bool      knobDown()     { return false; }
+// --- Rotary input lives in knob.cpp (I2C, not GPIO) ---------------------------
 
 // --- Local audio: no SD-backed media playback on this unit --------------------
 // The board DOES have speakers, but this contract means "play a file off local storage", which

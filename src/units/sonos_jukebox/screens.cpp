@@ -129,6 +129,21 @@ static void playCb(lv_event_t *) {
   if (stateLock()) { g_pending.setPlay = s_wasPlaying ? 0 : 1; stateUnlock(); }
 }
 
+// --- Physical dial ----------------------------------------------------------------------------
+// The Modulino Knob on the I2C bus (boards/crowpanel_p4_7in/knob.cpp). The board only reports
+// motion and press events; what they MEAN is decided here, exactly as wake-word phrases work on
+// the sleep-machine — a board must never reach into g_pending itself.
+//
+// Bindings are global rather than per-page: twist = volume, press = play/pause, from anywhere.
+// A jukebox dial that changed meaning depending on which page happened to be showing would be a
+// worse physical control, and volume is the thing you reach for without looking.
+static lv_obj_t *s_volToast = nullptr, *s_volToastFill = nullptr;
+static lv_obj_t *s_volToastPct = nullptr, *s_volToastIcon = nullptr;
+static uint32_t  s_volToastUntil = 0;
+
+static const lv_coord_t VT_W = 300, VT_H = 84, VT_BAR_W = 210;
+static const uint32_t   VT_HOLD_MS = 1400;
+
 // --- Small builders ---------------------------------------------------------------------------
 static lv_obj_t *panel(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, uint32_t bg, lv_coord_t r) {
   lv_obj_t *o = lv_obj_create(parent);
@@ -147,6 +162,40 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
   lv_obj_set_style_text_font(l, font, 0);
   lv_obj_set_style_text_color(l, lv_color_hex(colour), 0);
   return l;
+}
+
+// Volume readout for dial turns made away from Now Playing, which has no volume bar of its own.
+// Built once and shown/hidden — never created per turn, which would churn the LVGL pool.
+// It lives on the top layer so it floats over whichever page is up.
+static void buildVolToast() {
+  s_volToast = panel(lv_layer_top(), VT_W, VT_H, JB_SCREEN_ELEV, JB_R_LG);
+  lv_obj_set_style_border_width(s_volToast, 1, 0);
+  lv_obj_set_style_border_color(s_volToast, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_align(s_volToast, LV_ALIGN_BOTTOM_MID, 0, -46);
+  lv_obj_add_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
+
+  s_volToastIcon = label(s_volToast, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, JB_TEXT);
+  lv_obj_align(s_volToastIcon, LV_ALIGN_LEFT_MID, 22, -12);
+
+  s_volToastPct = label(s_volToast, "0", &lv_font_montserrat_22, JB_TEXT);
+  lv_obj_align(s_volToastPct, LV_ALIGN_RIGHT_MID, -22, -12);
+
+  lv_obj_t *track = panel(s_volToast, VT_BAR_W, 6, JB_SCREEN_ELEV_2, 3);
+  lv_obj_align(track, LV_ALIGN_BOTTOM_MID, 0, -20);
+  s_volToastFill = panel(track, 0, 6, JB_ACCENT, 3);
+  lv_obj_align(s_volToastFill, LV_ALIGN_LEFT_MID, 0, 0);
+}
+
+static void showVolToast(int vol) {
+  if (!s_volToast) return;
+  lv_obj_set_width(s_volToastFill, VT_BAR_W * vol / 100);
+  char b[8];
+  snprintf(b, sizeof(b), "%d", vol);
+  lv_label_set_text(s_volToastPct, b);
+  lv_label_set_text(s_volToastIcon, vol == 0 ? LV_SYMBOL_MUTE
+                                  : (vol < 50 ? LV_SYMBOL_VOLUME_MID : LV_SYMBOL_VOLUME_MAX));
+  lv_obj_remove_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
+  s_volToastUntil = lv_tick_get() + VT_HOLD_MS;
 }
 
 // Round transport control. `solid` is the design's accent-filled primary — reserved for
@@ -1327,6 +1376,7 @@ void uiInit() {
   buildRadio();
   buildRooms();
   buildSettings();
+  buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
   // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
   // Started here rather than in appStartTasks() so the S3 units never spawn it.
   // 12 slots x 72x72 RGB565 = ~124 KB of PSRAM. Bounded on purpose: fifty decoded rows would be
@@ -1342,6 +1392,67 @@ void uiInit() {
 static void fmtTime(char *out, size_t n, uint32_t sec, bool negative) {
   snprintf(out, n, "%s%lu:%02lu", negative ? "-" : "", (unsigned long)(sec / 60),
            (unsigned long)(sec % 60));
+}
+
+// Drains the dial. Called from uiTick BEFORE anything renders, and it mutates the caller's
+// PlayerState snapshot so a turn paints on the same frame it arrived on rather than a tick later.
+// encoderDelta()/knobEvent() are cheap non-blocking reads of state the board's poll task keeps —
+// no I2C happens on this task.
+static void handleDial(PlayerState &p) {
+  const int32_t   d  = encoderDelta();
+  const KnobEvent ev = knobEvent();
+  if (d == 0 && ev == KnobEvent::None) return;
+
+  if (d != 0) {
+    // Acceleration, matching the nest's curve: a slow hunt trims 1% per click, a fast spin crosses
+    // the range without needing a dozen revolutions.
+    static uint32_t s_lastTurn = 0;
+    const uint32_t now = lv_tick_get();
+    const uint32_t dt  = now - s_lastTurn;
+    s_lastTurn = now;
+    const int mult = (dt < 35) ? 6 : (dt < 70) ? 3 : (dt < 130) ? 2 : 1;
+
+    int v = (int)p.volume + (int)d * mult;
+    v = v < 0 ? 0 : (v > 100 ? 100 : v);
+
+    if (stateLock()) {
+      // Optimistic. netTask confirms the real level on its ~1 Hz poll; waiting for that would make
+      // the dial feel like it was dropping most of the turns.
+      g_player.volume        = (uint8_t)v;
+      g_pending.targetVolume = v;
+      stateUnlock();
+    }
+    p.volume = (uint8_t)v;
+
+    // Now Playing already carries a live volume bar — a toast over the top of it is just noise.
+    if (s_cur != PAGE_NOW) showVolToast(v);
+
+    // A detent is a scroll, so it obeys the scroll-sound toggle rather than the general UI level.
+    // Rate-limited: at 6x acceleration the clicks would otherwise smear into one tone.
+    static uint32_t s_lastClick = 0;
+    if (settingsScrollSound() && (now - s_lastClick) >= 50) {
+      s_lastClick = now;
+      uiSoundPlay(UiSound::Tick);
+    }
+  }
+
+  if (ev == KnobEvent::Short) {
+    // The same decision playCb() makes, from the same source of truth, so the dial and the
+    // on-screen button can never disagree about what a press means.
+    uiSoundPlay(UiSound::Tick);
+    bool wasPlaying = false;
+    if (stateLock()) {
+      wasPlaying = (g_player.transport == TransportState::Playing);
+      g_pending.setPlay  = wasPlaying ? 0 : 1;
+      g_player.transport = wasPlaying ? TransportState::Paused : TransportState::Playing;
+      stateUnlock();
+    }
+    p.transport = wasPlaying ? TransportState::Paused : TransportState::Playing;
+  }
+
+  // KnobEvent::Long is reported by the board but deliberately left unbound. There is no obvious
+  // second action for a press here, and picking one before the dial can be held in the hand would
+  // be guesswork — see plans/07 for the list-scrolling idea that wants real hardware to judge.
 }
 
 void uiTick() {
@@ -1365,6 +1476,13 @@ void uiTick() {
     p = g_player;
     g_player.dirty = false;
     stateUnlock();
+  }
+
+  // The physical dial, before any rendering: it edits `p` so a turn lands on this frame.
+  handleDial(p);
+  if (s_volToast && !lv_obj_has_flag(s_volToast, LV_OBJ_FLAG_HIDDEN) &&
+      (int32_t)(lv_tick_get() - s_volToastUntil) >= 0) {
+    lv_obj_add_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));

@@ -583,9 +583,19 @@ card before trusting it with a cache.
    that was read from a memory audit, **not measured on the live device**. Measure it.
 5. **Favourites rows have no artwork.** Deferred; needs a per-row art fetch strategy that doesn't
    reintroduce the download storm.
-6. **External dial + 4 transport buttons.** Hardware first (11-pin GPIO header / Crowtail), then a
-   generic HAL — mirroring how wake-word phrases work, where the board reports *which* input fired
-   and the unit decides what it means:
+6. **External dial — WRITTEN, awaiting hardware.** It does **not** use the 11-pin GPIO header as
+   planned here: both controls go on the **shared I2C bus via J13** (Crowtail), so there is no PCNT
+   or encoder pin. `boards/crowpanel_p4_7in/knob.cpp` drives an Arduino Modulino Knob (0x76/0x74,
+   4-byte read, byte 0 is the pinstrap and NOT data); `units/sonos_jukebox/screens.cpp` binds twist
+   to volume and press to play/pause globally. Two things it exposed that outlived it:
+   `i2c_bus.{h,cpp}` (whole-transaction lock — the GT911's repeated-start read is not atomic under
+   TwoWire's per-call mutex) and a **phantom all-zero I2C response** after any failed transaction,
+   which made the driver "find" a dial on an empty bus. Unverified until the cable lands:
+   `kCountsPerDetent`, and whether a real Modulino's pinstrap byte is ever 0.
+
+   **4 transport buttons** still to do — a PCF8574 at 0x20 on the same bus, and it must take the
+   i2c_bus lock. Still wants a generic HAL, mirroring how wake-word phrases work, where the board
+   reports *which* input fired and the unit decides what it means:
 
    ```c
    // --- Momentary buttons (optional; 0 on boards without any) ---

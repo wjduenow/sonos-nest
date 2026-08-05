@@ -7,28 +7,38 @@
 #include <Wire.h>
 #include <lvgl.h>
 
+#include "i2c_bus.h"
 #include "pins.h"
 
 // GT911 registers are 16-bit, big-endian on the wire.
 static const uint16_t REG_STATUS = 0x814E;   // bit7 = data ready, low nibble = touch count
 static const uint16_t REG_POINT1 = 0x8150;
 
+// The lock spans the repeated-start pair, NOT each Wire call — that gap is precisely what another
+// task's transaction can fall into. See i2c_bus.h for the bug this fixes.
 static bool readReg(uint16_t reg, uint8_t *buf, size_t len) {
+  if (!i2cBusLock()) return false;
   Wire.beginTransmission(GT911_ADDR_LOW);
   Wire.write((uint8_t)(reg >> 8));
   Wire.write((uint8_t)(reg & 0xFF));
-  if (Wire.endTransmission(false) != 0) return false;    // repeated start
+  if (Wire.endTransmission(false) != 0) {                // repeated start
+    i2cBusUnlock();
+    return false;
+  }
   size_t got = Wire.requestFrom((int)GT911_ADDR_LOW, (int)len);
   for (size_t i = 0; i < got && i < len; i++) buf[i] = Wire.read();
+  i2cBusUnlock();
   return got == len;
 }
 
 static void writeReg(uint16_t reg, uint8_t val) {
+  if (!i2cBusLock()) return;
   Wire.beginTransmission(GT911_ADDR_LOW);
   Wire.write((uint8_t)(reg >> 8));
   Wire.write((uint8_t)(reg & 0xFF));
   Wire.write(val);
   Wire.endTransmission();
+  i2cBusUnlock();
 }
 
 // The GT911 latches its I2C address from the INT pin level as RESET is released: INT low -> 0x5D,

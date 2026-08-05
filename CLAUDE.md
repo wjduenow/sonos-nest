@@ -17,8 +17,11 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
   discovery/switching, transport, album art, OTA, portal registration, UI click feedback on the
   onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). `core/` runs
-  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. **Not done**: the dial and
-  4 transport buttons (**not on this board** — external hardware on the 11-pin header), and the case.
+  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. The **rotary dial** is
+  written but **not yet verified on hardware** (awaiting the adapter cable): it is an Arduino
+  Modulino Knob on the **shared I2C bus via J13**, not the 11-pin GPIO header — see
+  `boards/crowpanel_p4_7in/knob.cpp`, and read its phantom-response note before debugging it.
+  **Not done**: the 4 transport buttons (a PCF8574 at 0x20, same bus) and the case.
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
