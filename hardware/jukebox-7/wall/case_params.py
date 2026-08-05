@@ -276,13 +276,21 @@ BOSS_PILOT   = 2.6      # M3 self-tap pilot
 # the front face), lets the two magnets meet FACE TO FACE with no plastic between them,
 # and -- the reason it is worth the complexity -- the six spigots REGISTER the plate, so
 # it cannot slide. Magnets are weak in shear; the spigots take it instead.
-MAG_D          = 6.0     # disc diameter (user has 6x2 and 8x2)
-MAG_T          = 2.0     # disc thickness
-MAG_POCKET_D   = MAG_D + 0.3
+# TWO SIZES, on purpose. The shell's bore has to be wide enough to swallow the face
+# plate's spigot anyway, so putting a 6 mm disc down there left a stepped hole: you had to
+# drop the magnet 4 mm through a Ø8.6 recess and hope it found a Ø6.3 pocket at the bottom.
+# An 8 mm disc fills that same bore, so the shell side is now ONE straight Ø8.6 hole --
+# drop the magnet in, it lands flat at the bottom, glue it. The face plate keeps a 6 mm
+# disc, because its spigot is only Ø8.2 and cannot wall anything larger.
+MAG_D_SHELL    = 8.0     # in the shell -- fills the bore, no step
+MAG_D_FACE     = 6.0     # in the face plate's spigot
+MAG_T          = 2.0     # both are 2 mm thick
+MAG_POCKET_D   = MAG_D_FACE + 0.3        # face-plate pocket
 MAG_POCKET_H   = MAG_T + 0.2
 MAG_SPIGOT_H   = 4.0     # how far the face plate's boss drops into the shell
 MAG_SPIGOT_D   = 8.2
-MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving recess
+MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving bore
+MAG_BORE_D     = MAG_SPIGOT_D + MAG_SPIGOT_FIT   # 8.6 -- ONE diameter, top to bottom
 MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
 MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets meet
 
@@ -292,8 +300,11 @@ MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets
 # PCB that height is display glass -- so the spigot must stay off the PCB footprint
 # entirely, while still leaving real wall thickness outboard of it.
 MAG_X        = (20.0, 100.0, 218.0)
-MAG_Y_BOT    = 6.2      # spigot spans 2.10..10.30: 2.10 mm of outer wall, 0.45 off the PCB
-MAG_Y_TOP    = 120.4    # spigot spans 116.30..124.50: 3.50 mm of outer wall, 1.55 off the PCB
+# Centred in the material available either side, so the Ø8.6 bore keeps balanced walls:
+#   bottom, y 0..10.75 (wall + band)  -> bore 1.10..9.70,   walls 1.10 / 1.05
+#   top,    y 114.75..128             -> bore 117.10..125.70, walls 2.35 / 2.30
+MAG_Y_BOT    = 5.4
+MAG_Y_TOP    = 121.4
 MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
 
 # Pry notch: with six pairs meeting face to face there is real holding force, so the

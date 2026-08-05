@@ -89,12 +89,10 @@ def build_shell():
         adds.append(bx(x - P.MAG_BLOCK_HW, y0, P.FLOOR_Z,
                        x + P.MAG_BLOCK_HW, y1, P.GLASS_Z))
     for (x, y) in P.MAGNETS:
-        # recess that receives the face plate's spigot
-        cuts.append(cyl((P.MAG_SPIGOT_D + P.MAG_SPIGOT_FIT) / 2.0,
-                        P.MAG_MATE_Z, P.GLASS_Z + 0.01, x, y))
-        # magnet pocket below it -- the disc sits flush at the mating plane
-        cuts.append(cyl(P.MAG_POCKET_D / 2.0,
-                        P.MAG_MATE_Z - P.MAG_POCKET_H, P.MAG_MATE_Z + 0.01, x, y))
+        # ONE straight bore, top to bottom: the upper part receives the face plate's
+        # spigot, the 8 mm disc fills the bottom of the same hole. No step to glue into.
+        cuts.append(cyl(P.MAG_BORE_D / 2.0,
+                        P.MAG_MATE_Z - P.MAG_T, P.GLASS_Z + 0.01, x, y))
 
     # ---- pry notch --------------------------------------------------------------
     # Six magnet pairs meeting face to face hold hard; the plate needs a purchase point.

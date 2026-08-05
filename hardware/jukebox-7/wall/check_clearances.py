@@ -68,9 +68,8 @@ for i, (x, y) in enumerate(P.MAGNETS):
     check(f"magnet spigot {i} ({x:.1f},{y:.1f})", not over,
           f"{margin:+.2f} mm off the PCB edge" if not over else "OVERLAPS THE PCB",
           tight=(0 <= margin < 0.4))
-    outer = y - r if y < P.FACE_H / 2 else P.FACE_H - (y + r)
-    check(f"magnet spigot {i} outer wall", outer >= 1.5, f"{outer:.2f} mm of wall outboard",
-          tight=(1.5 <= outer < 2.0))
+    # NB: wall thickness is set by the BORE, not by the spigot -- the spigot is part of
+    # the face plate and removes nothing. Checked under "magnets" below.
 
 print("\n== magnet blocks vs PCB mounting bosses ==")
 for i, f in enumerate(P.MAGNETS):
@@ -177,8 +176,18 @@ check("port sits behind the breakout board",
       f"port {P.PORT_H} within the {P.UC_H} mm board height")
 
 print("\n== magnets ==")
-check("spigot wall around the magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.8,
-      f"{(P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2:.2f} mm of spigot around the disc")
+check("spigot wall around the face magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.8,
+      f"{(P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2:.2f} mm of spigot around the Ø{P.MAG_D_FACE} disc")
+check("shell bore is a single diameter", P.MAG_BORE_D > P.MAG_D_SHELL,
+      f"Ø{P.MAG_BORE_D} bore takes the Ø{P.MAG_D_SHELL} disc with "
+      f"{(P.MAG_BORE_D - P.MAG_D_SHELL) / 2:.2f} mm a side -- no step to glue into")
+for i, (x, y) in enumerate(P.MAGNETS):
+    r = P.MAG_BORE_D / 2.0
+    inner = (P.PCB_Y0 - (y + r)) if y < P.FACE_H / 2 else ((y - r) - P.PCB_Y1)
+    outer = (y - r) if y < P.FACE_H / 2 else (P.FACE_H - (y + r))
+    check(f"magnet bore {i} walls", min(inner, outer) >= 1.0,
+          f"{outer:.2f} mm outboard, {inner:.2f} mm inboard",
+          tight=(1.0 <= min(inner, outer) < 1.2))
 check("material over the magnet", P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H) >= 2.0,
       f"{P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H):.2f} mm from disc to the front face")
 check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOOR_Z,

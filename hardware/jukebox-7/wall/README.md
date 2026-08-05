@@ -153,31 +153,39 @@ correct themselves.
 Standoffs are on the datasheet's **32 × 16 mm** pattern, centred on the dial. The 41 mm board fits
 the 45.6 mm column with 2.3 mm either side.
 
-## The magnet mount has two bore levels, on purpose
+## Magnets: two sizes, and why the shell bore is one straight hole
 
-Looking into a magnet post you see a **stepped hole**, not a plain magnet pocket:
+**Shell takes the Ø8 discs, face plate takes the Ø6.** That is not arbitrary.
 
 ```
   19.5 ┬──────────────┬  mating plane / top of the post
-       │   Ø8.6       │  receives the face plate's SPIGOT   (4.0 deep)
-  15.5 ├───┬──────┬───┤  magnets meet here, face to face
-       │   │ Ø6.3 │   │  the magnet itself                  (2.2 deep)
-  13.3 ┴───┴──────┴───┴
+       │              │
+       │    Ø8.6      │  ONE diameter, 6.0 deep
+  15.5 │  ─ ─ ─ ─ ─   │  ← magnet faces meet here
+       │  ▓ Ø8 disc ▓ │  fills the bottom of the same bore
+  13.5 ┴──────────────┴
 ```
 
-The wide upper bore is not slop around the magnet — it is a **socket for the face plate**.
+The bore has to be Ø8.6 regardless, because it doubles as the **socket for the face plate's
+spigot**. Putting a 6 mm disc at the bottom of it left a stepped hole — you had to drop the
+magnet 4 mm down a wide bore and hope it found a small pocket. An **8 mm disc fills that same
+bore**, so it is now a single straight hole: drop it in, it lands flat, glue it.
 
-The face plate is 2.5 mm thick, so a 2.2 mm magnet pocket sunk into it would leave a
-**0.3 mm skin** on the visible front surface. Instead the plate's magnet sits in a boss that
-drops 4 mm below the mating plane, and the shell has to receive that boss. Three things fall
-out of it: 4.3 mm of material over the disc instead of 0.3, the two discs meet **face to face
-with no plastic in the gap** (roughly double the pull of a through-plastic pair), and the six
-spigots **register the plate** so it cannot slide — which matters because magnets are weak in
+Why the spigot exists at all: the face plate is 2.5 mm thick, so a 2.2 mm pocket sunk into it
+would leave a **0.3 mm skin** on the visible front surface. Its magnet therefore rides in a boss
+that drops 4 mm below the mating plane. Three things follow — 4.3 mm of material over the disc
+instead of 0.3, the two discs meet **face to face with no plastic between them**, and the six
+spigots **register the plate** so it cannot slide, which matters because magnets are weak in
 shear and this one hangs on a wall.
 
-If you would rather have a plain single-diameter pocket, the cost is: `FACE_T` 2.5 → 3.5 (so
-the case gets 1 mm deeper, 22 → 23), magnets separated by ~1.2 mm of plastic instead of
-touching, and separate locating pins to replace the lost registration. Say the word.
+The face plate keeps a 6 mm disc because its spigot is only Ø8.2 and cannot wall anything larger.
+
+> **You need 6 of each size.** Glue ALL shell magnets one way up and ALL face-plate magnets the
+> other, so every pair attracts — mark one pole before gluing.
+
+> `check_clearances.py` warns that the bottom bores have ~1.05 mm of wall each side. That is the
+> geometric maximum: only 10.75 mm of material exists between the case's outer face and the PCB
+> edge, and the bore is 8.6 of it. Nothing loads that wall.
 
 ## Knob cap — `build_knob_cap.py`
 
