@@ -193,6 +193,21 @@ check("material over the magnet", P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H) >= 2
 check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOOR_Z,
       f"pocket floor z={P.MAG_MATE_Z - P.MAG_POCKET_H:.2f}, case floor z={P.FLOOR_Z}")
 
+print("\n== rear-face clearances ==")
+check("PCB clearance in Y (against the magnet blocks)", P.CLR_Y >= 2.0,
+      f"{P.CLR_Y:.2f} mm above and below the board")
+check("I2C relief covers J13", 
+      P.I2C_RELIEF_Y0 < P.PCB_Y0 + P.J13_Y < P.I2C_RELIEF_Y1,
+      f"J13 at y={P.PCB_Y0 + P.J13_Y:.2f}, relief spans {P.I2C_RELIEF_Y0}..{P.I2C_RELIEF_Y1}")
+check("I2C relief leaves rear wall", P.REAR_WALL - P.I2C_RELIEF_D >= 0.8,
+      f"{P.REAR_WALL - P.I2C_RELIEF_D:.2f} mm of wall under the relief")
+check("I2C clearance after relief", P.REAR_CLR + P.I2C_RELIEF_D >= 1.5,
+      f"{P.REAR_CLR + P.I2C_RELIEF_D:.2f} mm from the connector to the floor there",
+      tight=(P.REAR_CLR + P.I2C_RELIEF_D < 2.5))
+check("relief clears the keyholes",
+      all(abs(kx - (P.PCB_X0 + P.J13_X)) > P.I2C_RELIEF_HW + 5 for kx in P.KEY_X),
+      "keyholes are clear of the relief pocket in X")
+
 print("\n== depth ==")
 check("USB-C headroom", P.UC_Z1 <= P.GLASS_Z, f"board rear edge z={P.UC_Z1}, face inner z={P.GLASS_Z}")
 check("knob shaft engagement", P.KNOB_TIP_Z > P.DEPTH + 5,

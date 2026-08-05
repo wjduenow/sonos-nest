@@ -22,7 +22,7 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 
 | | |
 |---|---|
-| Face | **230 × 128 mm**, R14 corners |
+| Face | **230 × 132 mm**, R14 corners |
 | Depth | **22.0 mm** — lands exactly on the design system's `--u7-depth` token |
 | Screen | 155 × 87 opening, 1 mm rebate onto the black border |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
@@ -41,7 +41,29 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
   22.0  face plate outer          + face 2.5
 ```
 
-### Why the face is 128 mm and not 112
+### Clearance around the board
+
+`CLR` is **0.75 mm in X** but **`CLR_Y` is 2.75 mm**. At 0.75 the board dropped onto its posts
+but sat hard against the magnet blocks above and below, with no room to get a finger to it. Two
+millimetres were added top and bottom, which is where 128 → 132 came from. It also widened the
+magnet bore walls from ~1.05 mm to ~2.05 mm, since there is more material either side now.
+
+### The Crowtail I2C connector needs a relief, not a deeper case
+
+`J13` is on the PCB's **rear** face and is the tallest thing back there — it is what set the
+measured 16.5 mm envelope. That leaves only `REAR_CLR` (0.5 mm) between it and the interior
+floor, which is nothing once a plug is in it.
+
+Deepening the whole case for one connector would be the wrong trade, so the floor is **relieved
+locally**: a 28 × 16.5 mm pocket 1.5 mm deep over J13 and the plug's exit path toward the PCB's
+top edge. Clearance there goes **0.5 → 2.0 mm**, the rear wall keeps 1.0 mm under the pocket, and
+the case depth stays at 22.
+
+> ⚠️ **2.0 mm is a first pass.** Measure how far your plugged Crowtail cable stands above the PCB's
+> rear face; if it is more than ~2 mm, `I2C_RELIEF_D` is one parameter. Going past 1.7 mm starts
+> eating the rear wall, at which point the honest fix is `REAR_CLR`.
+
+### Why the face is 132 mm and not 112
 
 Only ~3 mm sits behind the PCB, so **nothing that needs depth can go where the board is** — not a
 keyhole's captured screw head, not the 4.75 mm USB-C breakout, and **not a face-plate screw boss**,
@@ -50,7 +72,8 @@ which runs the full interior height.
 The face therefore needs a band above *and* below the PCB. The top band (12.5 mm) carries the two
 keyholes. The bottom band was first drawn at 6 mm, which left only 3.75 mm of free strip — too thin
 for any boss, so the entire bottom edge of the face plate had no fixing for 215 mm, under a 155 mm
-screen opening with a ~7 mm strip beneath it. At **10 mm** it takes proper bosses.
+screen opening with a ~7 mm strip beneath it. At **10 mm** it takes proper bosses. A further 2 mm
+of board clearance top and bottom (see above) brings the face to 132.
 
 **Face screws are in the bands, three across each** (`FSCREW_X`), never over the PCB, and clear of
 the keyholes and the USB-C plate. `check_clearances.py` asserts all of it.

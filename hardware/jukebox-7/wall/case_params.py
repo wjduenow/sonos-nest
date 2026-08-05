@@ -65,13 +65,16 @@ RST_X,  RST_Y  = 172.62, 17.25  # RESET (right edge)
 
 # ---------------------------------------------------------------- case shell
 FACE_W       = 230.0
-FACE_H       = 128.0
+FACE_H       = 132.0
 DEPTH        = 22.0
 CASE_R       = 14.0     # --case-radius token
 WALL         = 3.0      # side wall thickness
 REAR_WALL    = 2.5
 FACE_T       = 2.5
-CLR          = 0.75     # clearance around the PCB in its pocket
+CLR          = 0.75     # clearance around the PCB in X
+CLR_Y        = 2.75     # ...and in Y. Wider on purpose: at 0.75 the board dropped in but
+                        # sat hard against the magnet blocks above and below it, with no
+                        # room to get a finger to it. 2 mm added top and bottom.
 REAR_CLR     = 0.5      # gap behind the tallest rear component
 
 # derived z planes
@@ -86,13 +89,13 @@ PCB_BACK_Z   = COMP_Z + REAR_COMP_H      #  8.5  PCB rear face == boss top
 # --- edge had no fixing at all for 215 mm.  The TOP band additionally carries the
 # --- keyholes, so it needs the entry hole plus real drop travel on top of that.
 BAND_BOT     = 10.0
-BAND_TOP     = FACE_H - BAND_BOT - 2 * CLR - PCB_H     # 12.5
+BAND_TOP     = FACE_H - BAND_BOT - 2 * CLR_Y - PCB_H   # 12.5
 
 # PCB placement in the face
 PCB_X0       = WALL + CLR                # 3.75
-PCB_Y0       = BAND_BOT + CLR            # 6.75
+PCB_Y0       = BAND_BOT + CLR_Y          # 12.75
 PCB_X1       = PCB_X0 + PCB_W            # 180.65
-PCB_Y1       = PCB_Y0 + PCB_H            # 110.75
+PCB_Y1       = PCB_Y0 + PCB_H            # 116.75
 
 # ---------------------------------------------------------------- control column
 COL_X0       = PCB_X1 + CLR              # 181.40
@@ -101,7 +104,7 @@ COL_CX       = (COL_X0 + COL_X1) / 2.0   # 204.20
 COL_W        = COL_X1 - COL_X0           #  45.60  (--u7-ctrl-col is 46)
 
 DIAL_D       = 36.0     # --knob-dia: the CAP diameter, which sits proud ON the face
-DIAL_CY      = 96.0     # column features ride up with the taller face
+DIAL_CY      = 98.0     # column features ride up with the taller face
 # The face hole only has to clear the encoder's Ø7.0 BUSHING -- not the cap. Sizing it to
 # the cap (Ø37) left a 37 mm hole you could see into, with the Ø36 cap floating inside it.
 # At Ø9 the cap overhangs by 13.5 mm all round and hides the opening completely.
@@ -112,7 +115,7 @@ BTN_CLR      = 0.4
 BTN_GAP      = 9.0      # --btn-gap read as the GAP between caps, not the pitch:
 BTN_PITCH    = BTN_D + BTN_GAP           # 22.0 -- a 9 mm *pitch* is impossible with
                                          # Ø13 caps; the token is self-inconsistent.
-BTN_ROW_Y    = (62.0, 42.0)              # play/rooms on top, prev/next below
+BTN_ROW_Y    = (64.0, 44.0)              # play/rooms on top, prev/next below
 
 # ---------------------------------------------------------------- printed knob cap
 # For the Bourns PEC11J-9215F-S0015: Ø6.0 shaft, D-flat over the last 5 mm at 4.5 across.
@@ -141,7 +144,7 @@ SCREW_SHANK  = 3.5      # wall screw shank
 SCREW_HEAD   = 7.0      # wall screw head
 KEY_ENTRY_D  = SCREW_HEAD + 0.6          # 7.6  head passes through here
 KEY_SLOT_W   = SCREW_SHANK + 0.5         # 4.0  shank rides in here
-KEY_ENTRY_CY = 122.8                     # entry-hole centre, inside the top band
+KEY_ENTRY_CY = 125.5                     # entry-hole centre, inside the top band
 KEY_DROP     = 5.5                       # how far the unit drops to lock. Sized so the
                                          # head relief stops clear of the PCB: the relief
                                          # sits at z 2.5-5.5 and the PCB's rear components
@@ -301,10 +304,10 @@ MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets
 # entirely, while still leaving real wall thickness outboard of it.
 MAG_X        = (20.0, 100.0, 218.0)
 # Centred in the material available either side, so the Ø8.6 bore keeps balanced walls:
-#   bottom, y 0..10.75 (wall + band)  -> bore 1.10..9.70,   walls 1.10 / 1.05
-#   top,    y 114.75..128             -> bore 117.10..125.70, walls 2.35 / 2.30
-MAG_Y_BOT    = 5.4
-MAG_Y_TOP    = 121.4
+#   bottom, y 0..12.75 (wall + band)  -> bore 2.10..10.70,   walls 2.10 / 2.05
+#   top,    y 116.75..132             -> bore 120.10..128.70, walls 3.35 / 3.30
+MAG_Y_BOT    = 6.4
+MAG_Y_TOP    = 124.4
 MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
 
 # Pry notch: with six pairs meeting face to face there is real holding force, so the
@@ -316,6 +319,17 @@ PRY_X        = FACE_W / 2.0
 # !!! MAGNET POLARITY !!!  Glue ALL shell magnets one way up and ALL face-plate magnets
 # the other, so every pair attracts. Mark one pole with a marker before gluing -- the same
 # rule as hardware/round-nest-2.8/wall/mount_params.py.
+
+# ---------------------------------------------------------------- I2C connector relief
+# J13 (Crowtail I2C) is on the PCB's REAR face and is the tallest thing back there -- it
+# is what set the measured 16.5 mm envelope. That leaves only REAR_CLR (0.5 mm) between
+# it and the interior floor, which is nothing once a plug is in it. Rather than deepen the
+# whole case for one connector, the floor is relieved locally over J13 and the plug's exit
+# path toward the PCB's top edge.
+I2C_RELIEF_D  = 1.5     # into the floor -> 2.0 mm total clearance, 1.0 mm of wall left
+I2C_RELIEF_HW = 14.0    # half-width in X, around J13
+I2C_RELIEF_Y0 = 102.0   # from below the connector...
+I2C_RELIEF_Y1 = 118.5   # ...out past the PCB's top edge, where the plug and cable go
 
 CABLE_CH_W   = 6.0      # channel across the rear for the J10 power pair
 SEG          = 96       # circle smoothness
