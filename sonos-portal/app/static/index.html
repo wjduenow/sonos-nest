@@ -56,10 +56,14 @@
     .badge.nest   { --c: #6366f1; }   /* indigo */
     .badge.sleep  { --c: #0ea5a3; }   /* teal   */
     .badge.button { --c: #d97706; }   /* amber  */
+    .badge.jukebox{ --c: #e11d48; }   /* rose — the jukebox's own accent is amber, which the
+                                         button already owns, so it takes the design system's
+                                         coral/rose alternate instead */
     @media (prefers-color-scheme: dark) {
       .badge.nest   { --c: #a5b4fc; }
       .badge.sleep  { --c: #5eead4; }
       .badge.button { --c: #fbbf24; }
+      .badge.jukebox{ --c: #fda4af; }
     }
     .meta { color: var(--muted); font-size: 13px; display: grid; gap: 5px; }
     .meta code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
@@ -111,7 +115,8 @@
     // /api/hassio_ingress/<token>/ prefix without knowing the base path.
     const API = (p) => new URL(p, document.baseURI).toString();
 
-    const UNIT_LABEL = { nest: "Nest (round)", sleep: "Sleep Machine", button: "Button", unknown: "Unknown" };
+    const UNIT_LABEL = { nest: "Nest (round)", sleep: "Sleep Machine", button: "Button",
+                         jukebox: "Jukebox (7\")", unknown: "Unknown" };
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

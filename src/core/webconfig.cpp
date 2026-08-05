@@ -175,6 +175,8 @@ String registrationJson() {
   doc["unit"] = "nest";    doc["board"] = "crowpanel_rotary";
 #elif defined(UNIT_SLEEP)
   doc["unit"] = "sleep";   doc["board"] = "es3c28p";
+#elif defined(UNIT_JUKEBOX)
+  doc["unit"] = "jukebox"; doc["board"] = "crowpanel_p4_7in";
 #elif defined(HEADLESS)
   doc["unit"] = "button";  doc["board"] = "esp32s3cam";
 #else
