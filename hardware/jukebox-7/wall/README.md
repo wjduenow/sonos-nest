@@ -96,16 +96,22 @@ the wall.
 The port cutout is sized to the **receptacle body** (8.94 × 3.26), not to the plug — the plug's
 overmold stays out in the wall's cable hole and never enters this opening.
 
+**Which axis is which** — this was wrong twice, so it is spelled out. The board stands **on edge**,
+its plane perpendicular to the wall, i.e. the plane containing Y and Z. The receptacle is mounted on
+that face, so its **long axis (8.94) lies in the board's plane and runs ALONG the column (Y)**. Its
+short axis (3.26) is the board's normal, **across** the column (X).
+
 | | |
 |---|---|
-| Across the column (`PORT_W`) | **17.0** — 4.03 mm clear each side, so the board can shift a little at assembly |
-| Along the column (`PORT_H`) | **5.0** — 0.87 mm clear each side; the wall either side is what the receptacle beds against |
-| Funnel (`PORT_FUNNEL`) | **2.5** on the wall side only → outer opening 22.0 × 10.0 |
+| Across the column (`PORT_W`) | **5.0** — clears the 3.26 depth, 0.87 mm each side |
+| Along the column (`PORT_H`) | **17.0** — clears the 8.94 length, 4.03 mm each side |
+| Funnel (`PORT_FUNNEL`) | **2.5** on the wall side only → outer opening 10.0 × 22.0 |
 
-> The first print had this at 14.0 × 8.0 with a 4.0 funnel, which flared the short axis to 16 mm
-> and read as a far bigger hole than it needed to be. `check_clearances.py` warns (does not fail)
-> that 0.87 mm each side along the short axis is tight — deliberately so. If the receptacle will
-> not bed down, `PORT_H` is one parameter.
+> The first print had 14.0 × 8.0 with a 4.0 funnel — sized to the *plug*, and with the receptacle's
+> orientation transposed. `check_clearances.py` now asserts `PORT_H > PORT_W`, so the long axis
+> cannot silently end up across the column again. It warns (does not fail) that 0.87 mm each side on
+> the short axis is tight — deliberately so. If the receptacle will not bed down, `PORT_W` is one
+> parameter.
 
 The plug then behaves the way the install wants: its nose travels ~6.5 mm into the receptacle inside
 the case while the **overmold stays in the wall's cable hole**, so the cable pushes back in once

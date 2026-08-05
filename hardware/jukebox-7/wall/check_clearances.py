@@ -155,15 +155,23 @@ for kx in P.KEY_X:
           tight=(0 <= bot - P.PCB_Y1 < 1.0))
 
 print("\n== USB-C port cutout ==")
-REC_W, REC_H = 8.94, 3.26        # a USB-C receptacle body
-check("port clears the receptacle across", P.PORT_W > REC_W + 1.0,
-      f"Ø{P.PORT_W} vs {REC_W} body -> {(P.PORT_W - REC_W) / 2:.2f} mm each side")
-check("port clears the receptacle along", P.PORT_H > REC_H + 1.0,
-      f"{P.PORT_H} vs {REC_H} body -> {(P.PORT_H - REC_H) / 2:.2f} mm each side",
-      tight=((P.PORT_H - REC_H) / 2 < 1.0))
-check("funnel stays inside the case", P.UC_CX + P.PORT_W / 2 + P.PORT_FUNNEL < P.FACE_W - 3,
+# The board stands on edge, so the receptacle's LONG axis runs ALONG the column (Y) and
+# its short axis (the board's normal) runs ACROSS it (X). Getting this backwards is what
+# produced the first wrong cutout, so the mapping is asserted explicitly.
+REC_LONG, REC_SHORT = 8.94, 3.26        # a USB-C receptacle body
+check("port clears the receptacle across (short axis)", P.PORT_W > REC_SHORT + 1.0,
+      f"{P.PORT_W} vs {REC_SHORT} -> {(P.PORT_W - REC_SHORT) / 2:.2f} mm each side",
+      tight=((P.PORT_W - REC_SHORT) / 2 < 1.0))
+check("port clears the receptacle along (long axis)", P.PORT_H > REC_LONG + 1.0,
+      f"{P.PORT_H} vs {REC_LONG} -> {(P.PORT_H - REC_LONG) / 2:.2f} mm each side")
+check("port's long axis follows the board's plane", P.PORT_H > P.PORT_W,
+      "long axis along the column, as the on-edge board requires")
+check("funnel stays inside the case",
+      P.UC_CX + P.PORT_W / 2 + P.PORT_FUNNEL < P.FACE_W - 3 and
+      P.UC_CY - P.PORT_H / 2 - P.PORT_FUNNEL > P.WALL,
       f"outer opening {P.PORT_W + 2*P.PORT_FUNNEL:.1f} x {P.PORT_H + 2*P.PORT_FUNNEL:.1f}, "
-      f"right edge at x={P.UC_CX + P.PORT_W/2 + P.PORT_FUNNEL:.1f}")
+      f"spans x to {P.UC_CX + P.PORT_W/2 + P.PORT_FUNNEL:.1f}, "
+      f"y from {P.UC_CY - P.PORT_H/2 - P.PORT_FUNNEL:.1f}")
 check("port sits behind the breakout board",
       abs(P.UC_CY - P.UC_CY) < 0.01 and P.PORT_H < P.UC_H,
       f"port {P.PORT_H} within the {P.UC_H} mm board height")

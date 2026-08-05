@@ -248,13 +248,16 @@ EXP_PCB_Z    = FLOOR_Z + 1.5             # 4.0 -- clearance under the board for 
 # in the wall does not have to be placed precisely.
 # Sized to the receptacle body (8.94 x 3.26), not to the plug: the plug's overmold stays
 # out in the wall's cable hole and never enters this opening.
-#   X (across the column) is generous, so the board can shift a little at assembly.
-#   Y (along the column) is tight, because the wall either side of it is what the
-#     receptacle beds against.
-PORT_W       = 17.0     # across the column -> 4.03 mm clear each side
-PORT_H       =  5.0     # along the column  -> 0.87 mm clear each side
+#
+# WHICH AXIS IS WHICH -- this was wrong once, so it is spelled out. The board stands ON
+# EDGE, its plane perpendicular to the wall, i.e. the plane containing Y and Z. The
+# receptacle is mounted on that face, so its LONG axis (8.94) lies in the board's plane
+# and therefore runs ALONG the column (Y). Its short axis (3.26) is the board's normal,
+# across the column (X).
+PORT_W       =  5.0     # across the column (X) -> clears the 3.26 depth, 0.87 mm a side
+PORT_H       = 17.0     # along  the column (Y) -> clears the 8.94 length, 4.03 mm a side
 PORT_FUNNEL  =  2.5     # 45 deg flare on the WALL side only, to forgive the drilled hole
-                        # -> outer opening 22.0 x 10.0. Was 4.0, which flared the short
+                        # -> outer opening 10.0 x 22.0. Was 4.0, which flared the short
                         # axis to 16 and read as a much bigger hole than it needed to be.
 
 # ---------------------------------------------------------------- assembly
