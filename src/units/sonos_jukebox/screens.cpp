@@ -28,6 +28,7 @@
                               // on this board the radio is a co-processor and those are blocking
                               // RPCs, so a UI-task caller freezes rendering when the link dies.
 #include "core/amazon.h"
+#include "core/art_cache.h"
 #include "core/radio_cache.h"
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
@@ -595,9 +596,12 @@ static String s_radioGenreId, s_radioGenreName;
 static std::vector<radiocache::Station> s_radioStations;
 static uint32_t s_radioShownGen = UINT32_MAX;   // cache generation actually rendered
 static int  s_radioSnapped = -1;                // centred row, for the detent cue
+static std::vector<lv_obj_t *> s_radioTiles;    // per-row image widget, parallel to s_radioStations
+static uint32_t s_artGen = 0;                   // last artcache generation we painted
 
 static void radioShowGenres();
 static void radioShowStations(int genreIdx);
+static void radioPaintArt();
 
 // Tap a station: play it on the active room's coordinator, exactly as a favourite would be.
 static void radioPlayCb(lv_event_t *e) {
@@ -637,6 +641,7 @@ static void radioScrollCb(lv_event_t *e) {
     const int32_t d  = abs(cy - mid);
     if (d < bd) { bd = d; best = (int)i; }
   }
+  radioPaintArt();      // scrolling brings new rows into range; ask for their art
   if (best < 0 || best == s_radioSnapped) return;
   s_radioSnapped = best;
   static uint32_t lastTick = 0;
@@ -649,7 +654,28 @@ static void radioScrollCb(lv_event_t *e) {
 static void radioClear() {
   if (s_radioList) lv_obj_clean(s_radioList);
   s_radioStations.clear();
+  s_radioTiles.clear();
   s_radioSnapped = -1;
+}
+
+// Fill in any tile whose artwork has finished decoding. Only rows near the viewport are asked for,
+// so a 50-row genre queues a handful of fetches rather than fifty — the cache is bounded and would
+// evict the early ones before they were ever seen anyway.
+static void radioPaintArt() {
+  if (s_radioLevel != 1 || s_radioTiles.empty()) return;
+  const int32_t top = lv_obj_get_scroll_y(s_radioList);
+  const int32_t bot = top + lv_obj_get_height(s_radioList);
+  for (size_t i = 0; i < s_radioTiles.size(); i++) {
+    lv_obj_t *tile = s_radioTiles[i];
+    if (!tile) continue;
+    const int32_t y = lv_obj_get_y(tile);
+    if (y + 200 < top || y - 200 > bot) continue;      // a screen of headroom either way
+    const String key = artcache::keyOf(s_radioStations[i].id);
+    const lv_image_dsc_t *d = artcache::get(key, s_radioStations[i].artUrl);
+    if (!d) continue;
+    if (lv_image_get_src(tile) == d) continue;
+    lv_image_set_src(tile, d);
+  }
 }
 
 static void radioShowGenres() {
@@ -705,12 +731,15 @@ static void radioShowStations(int genreIdx) {
     lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
     lv_obj_add_event_cb(row, radioPlayCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-    // Art tile placeholder. The bounded image cache lands next; until then the glyph keeps the
-    // row geometry honest so the carousel is laid out for what it will hold.
+    // Art tile. The backing panel stays as the placeholder the image draws over, so a row that has
+    // not decoded yet still reads as a row rather than a gap.
     lv_obj_t *tile = panel(row, 72, 72, JB_SCREEN_ELEV_2, JB_R_MD);
     lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
-    lv_obj_t *g = label(tile, LV_SYMBOL_AUDIO, &lv_font_montserrat_20, JB_TEXT_DIM);
-    lv_obj_center(g);
+    lv_obj_t *img = lv_image_create(tile);
+    lv_obj_set_size(img, 72, 72);
+    lv_obj_center(img);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    s_radioTiles.push_back(img);
 
     lv_obj_t *t = label(row, s_radioStations[i].title.c_str(), &lv_font_montserrat_22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
@@ -719,6 +748,7 @@ static void radioShowStations(int genreIdx) {
     lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
   }
+  radioPaintArt();
   lv_mem_monitor_t mon; lv_mem_monitor(&mon);
   Serial.printf("[ui    ] radio: %s, %u stations, lvgl_free=%uKB\n", gname.c_str(),
                 (unsigned)s_radioStations.size(), (unsigned)(mon.free_size / 1024));
@@ -899,6 +929,9 @@ void uiInit() {
   buildSettings();
   // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
   // Started here rather than in appStartTasks() so the S3 units never spawn it.
+  // 12 slots x 72x72 RGB565 = ~124 KB of PSRAM. Bounded on purpose: fifty decoded rows would be
+  // ~506 KB, as much as the whole LVGL pool, which is what makes an unbounded cache unbuildable.
+  artcache::init(72, 12);
   radiocache::start();
 
   showPage(PAGE_NOW);
@@ -1035,6 +1068,11 @@ void uiTick() {
     if (msg != shownRadio) { shownRadio = msg; lv_label_set_text(s_radioStatus, msg.c_str()); }
     if (msg.isEmpty()) lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
     else               lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+
+    if (s_radioLevel == 1 && artcache::generation() != s_artGen) {
+      s_artGen = artcache::generation();
+      radioPaintArt();
+    }
 
     // Populate once the cache exists, and repopulate after a refresh replaces it.
     const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;

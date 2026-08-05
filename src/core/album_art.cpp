@@ -58,7 +58,16 @@ static bool tjpgCb(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitma
   return true;
 }
 
+static SemaphoreHandle_t s_jpegMutex = nullptr;
+
+bool jpegLock(uint32_t timeoutMs) {
+  if (!s_jpegMutex) s_jpegMutex = xSemaphoreCreateMutex();
+  return s_jpegMutex && xSemaphoreTake(s_jpegMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+void jpegUnlock() { if (s_jpegMutex) xSemaphoreGive(s_jpegMutex); }
+
 bool albumArtInit() {
+  if (!s_jpegMutex) s_jpegMutex = xSemaphoreCreateMutex();
   s_jpeg   = (uint8_t *)heap_caps_malloc(JPEG_MAX, MALLOC_CAP_SPIRAM);
   s_buf[0] = (uint16_t *)heap_caps_malloc(ART_MAX * ART_MAX * 2, MALLOC_CAP_SPIRAM);
   s_buf[1] = (uint16_t *)heap_caps_malloc(ART_MAX * ART_MAX * 2, MALLOC_CAP_SPIRAM);
@@ -91,8 +100,10 @@ bool albumArtFetch(const String &url) {
   if (got < 100) { Serial.printf("[art] short read (%u bytes)\n", (unsigned)got); return false; }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
+  if (!jpegLock()) { Serial.println("[art] decoder busy"); return false; }
   uint16_t w = 0, h = 0;
   if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) {
+    jpegUnlock();
     Serial.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
     return false;
   }
@@ -103,7 +114,9 @@ bool albumArtFetch(const String &url) {
   s_decH = min((int)(h / scale), ART_MAX);
 
   memset(s_buf[s_front ^ 1], 0, ART_MAX * ART_MAX * 2);
+  TJpgDec.setCallback(tjpgCb);      // re-assert: another decoder may have pointed it elsewhere
   JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
+  jpegUnlock();
   if (jr != JDR_OK) {
     Serial.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
                   (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
