@@ -219,7 +219,9 @@ bool webConfigApply(const String &field, const String &value, String &err) {
 
     const int h = value.toInt();
 
-    if (h < 0 || h > 23) return false;
+    // Fill err: the page renders it verbatim, and "Could not save:" with nothing after it
+    // is worse than no message at all.
+    if (h < 0 || h > 23) { err = "hour must be 0-23"; return false; }
 
     settingsSetRadioRefreshHour((uint8_t)h);
 
