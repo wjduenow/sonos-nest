@@ -598,10 +598,17 @@ static uint32_t s_radioShownGen = UINT32_MAX;   // cache generation actually ren
 static int  s_radioSnapped = -1;                // centred row, for the detent cue
 static std::vector<lv_obj_t *> s_radioTiles;    // per-row image widget, parallel to s_radioStations
 static uint32_t s_artGen = 0;                   // last artcache generation we painted
+static lv_obj_t *s_azStrip = nullptr;           // A-Z jump strip (level 2 only)
+static lv_obj_t *s_searchBtn = nullptr, *s_searchTa = nullptr, *s_radioKb = nullptr;
+static std::vector<radiocache::Hit> s_searchHits;
+static String   s_searchPending;                // last text seen, debounced in uiTick
+static uint32_t s_searchAt = 0;
 
 static void radioShowGenres();
 static void radioShowStations(int genreIdx);
 static void radioPaintArt();
+static void radioShowSearch();
+static void radioRunSearch(const String &q);
 
 // Tap a station: play it on the active room's coordinator, exactly as a favourite would be.
 static void radioPlayCb(lv_event_t *e) {
@@ -651,9 +658,21 @@ static void radioScrollCb(lv_event_t *e) {
   }
 }
 
+// The list shares the page with a search field (above) and the A-Z strip (below), both of which
+// appear only at certain levels. Geometry lives here so the three can never overlap — laying it out
+// at each call site is exactly how a row ends up hidden behind the strip.
+static void radioLayout(bool withSearch, bool withAz) {
+  const lv_coord_t w   = SCREEN_W - RAIL_W - PAD_X * 2;
+  const lv_coord_t top = PAD_TOP + 106 + (withSearch ? 68 : 0);
+  const lv_coord_t bot = PAD_BOT + (withAz ? 54 : 0);
+  lv_obj_set_size(s_radioList, w, SCREEN_H - top - bot);
+  lv_obj_align(s_radioList, LV_ALIGN_TOP_LEFT, 0, top);
+}
+
 static void radioClear() {
   if (s_radioList) lv_obj_clean(s_radioList);
   s_radioStations.clear();
+  s_searchHits.clear();
   s_radioTiles.clear();
   s_radioSnapped = -1;
 }
@@ -681,6 +700,10 @@ static void radioPaintArt() {
 static void radioShowGenres() {
   radioClear();
   s_radioLevel = 0; s_radioGenre = -1;
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
+  radioLayout(false, false);
   lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
   lv_label_set_text(s_radioTitle, "Radio");
   lv_obj_remove_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
@@ -707,6 +730,97 @@ static void radioShowGenres() {
   }
 }
 
+// One carousel row. `artUrl` empty means "show art only if it is already decoded" — used by search
+// results, whose flat index deliberately omits the art URL to keep all.tsv small.
+static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
+                          lv_event_cb_t cb) {
+  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
+  lv_obj_t *row = lv_button_create(s_radioList);
+  lv_obj_remove_style_all(row);
+  lv_obj_set_size(row, w, h);
+  lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 10)));
+  lv_obj_set_style_radius(row, JB_R_LG, 0);
+  lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+  lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+  lv_obj_t *tile = panel(row, 72, 72, JB_SCREEN_ELEV_2, JB_R_MD);
+  lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
+  lv_obj_t *img = lv_image_create(tile);
+  lv_obj_set_size(img, 72, 72);
+  lv_obj_center(img);
+  lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
+  s_radioTiles.push_back(img);
+  const lv_image_dsc_t *d = artcache::get(artcache::keyOf(id), artUrl);
+  if (d) lv_image_set_src(img, d);
+
+  lv_obj_t *t = label(row, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+  lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(t, w - 120);
+  lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
+  lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
+  return row;
+}
+
+// Play a search hit. Its parentID needs the genre's OBJECT id, which the flat index stores only as
+// an index — so resolve it here rather than widening every row of all.tsv to carry it.
+static void radioHitCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= (int)s_searchHits.size()) return;
+  uiSoundPlay(UiSound::Confirm);
+  String gname, gid;
+  if (!radiocache::genre(s_searchHits[i].genreIdx, gname, gid)) return;
+  amazon::Station st;
+  st.title = s_searchHits[i].title;
+  st.id    = s_searchHits[i].id;
+  if (stateLock()) {
+    g_pending.playUri  = amazon::playUri(st);
+    g_pending.playMeta = amazon::playMeta(st, gid);
+    stateUnlock();
+  }
+}
+
+// --- A-Z jump strip -------------------------------------------------------------------------------
+// Stations arrive already sorted by title (the crawler sorts, not the device), so the letter -> row
+// mapping is a linear pass over data that is in RAM anyway. That is why there is no offsets file.
+static void radioAzJump(lv_event_t *e) {
+  const char c = (char)(intptr_t)lv_event_get_user_data(e);
+  for (size_t i = 0; i < s_radioStations.size(); i++) {
+    char f = s_radioStations[i].title.length() ? s_radioStations[i].title[0] : 0;
+    if (f >= 'a' && f <= 'z') f -= 32;
+    if (f == c) {
+      lv_obj_scroll_to_y(s_radioList, (lv_coord_t)(i * 106), LV_ANIM_ON);
+      uiSoundPlay(UiSound::Tick);
+      return;
+    }
+  }
+}
+
+static void radioBuildAz() {
+  lv_obj_clean(s_azStrip);
+  bool have[26] = {false};
+  for (const auto &st : s_radioStations) {
+    char f = st.title.length() ? st.title[0] : 0;
+    if (f >= 'a' && f <= 'z') f -= 32;
+    if (f >= 'A' && f <= 'Z') have[f - 'A'] = true;
+  }
+  // 26 targets across the content width. Letters with no stations are dimmed and inert rather than
+  // hidden, so the strip keeps a stable shape a thumb can learn.
+  const lv_coord_t step = (SCREEN_W - RAIL_W - PAD_X * 2) / 26;
+  for (int i = 0; i < 26; i++) {
+    lv_obj_t *b = lv_button_create(s_azStrip);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, step, 44);
+    lv_obj_set_pos(b, i * step, 0);
+    char t[2] = {(char)('A' + i), 0};
+    lv_obj_t *l = label(b, t, &lv_font_montserrat_16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
+    lv_obj_center(l);
+    if (have[i]) lv_obj_add_event_cb(b, radioAzJump, LV_EVENT_CLICKED, (void *)(intptr_t)('A' + i));
+  }
+}
+
 static void radioShowStations(int genreIdx) {
   String gname, gid;
   if (!radiocache::genre(genreIdx, gname, gid)) return;
@@ -719,40 +833,69 @@ static void radioShowStations(int genreIdx) {
   lv_label_set_text(s_radioTitle, gname.c_str());
   lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_CENTER);
 
-  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
-  for (size_t i = 0; i < s_radioStations.size(); i++) {
-    lv_obj_t *row = lv_button_create(s_radioList);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, w, h);
-    lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 10)));
-    lv_obj_set_style_radius(row, JB_R_LG, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
-    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
-    lv_obj_add_event_cb(row, radioPlayCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-
-    // Art tile. The backing panel stays as the placeholder the image draws over, so a row that has
-    // not decoded yet still reads as a row rather than a gap.
-    lv_obj_t *tile = panel(row, 72, 72, JB_SCREEN_ELEV_2, JB_R_MD);
-    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
-    lv_obj_t *img = lv_image_create(tile);
-    lv_obj_set_size(img, 72, 72);
-    lv_obj_center(img);
-    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    s_radioTiles.push_back(img);
-
-    lv_obj_t *t = label(row, s_radioStations[i].title.c_str(), &lv_font_montserrat_22, JB_TEXT);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(t, w - 120);
-    lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
-    lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
-    lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
-  }
+  for (size_t i = 0; i < s_radioStations.size(); i++)
+    radioRow(i, s_radioStations[i].title, s_radioStations[i].id, s_radioStations[i].artUrl,
+             radioPlayCb);
+  radioBuildAz();
+  lv_obj_remove_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
+  radioLayout(false, true);
   radioPaintArt();
   lv_mem_monitor_t mon; lv_mem_monitor(&mon);
   Serial.printf("[ui    ] radio: %s, %u stations, lvgl_free=%uKB\n", gname.c_str(),
                 (unsigned)s_radioStations.size(), (unsigned)(mon.free_size / 1024));
 }
+
+// Search is GLOBAL across all ~1,045 stations, not scoped to the current genre: someone hunting a
+// specific station should not have to know which genre it was filed under.
+static void radioRunSearch(const String &q) {
+  radioClear();
+  s_radioLevel = 2;
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  if (q.length() < 2) {                       // one character matches most of the catalogue
+    lv_label_set_text(s_radioStatus, "Type at least two letters.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  // Capped: each row is ~1 KB of LVGL pool plus a tile, and nobody scrolls 500 results.
+  const int n = radiocache::search(q, s_searchHits, 60);
+  if (!n) {
+    lv_label_set_text(s_radioStatus, "No stations match.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  for (size_t i = 0; i < s_searchHits.size(); i++)
+    radioRow(i, s_searchHits[i].title, s_searchHits[i].id, "", radioHitCb);
+  // The status line sits where the first result now is, and the list needs the space the keyboard
+  // was using — but the keyboard stays up, since refining the query is the common next action.
+  radioLayout(true, false);
+  Serial.printf("[ui    ] radio search \"%s\": %d hit(s)\n", q.c_str(), n);
+}
+
+static void radioSearchCb(lv_event_t *) {
+  // Debounced in uiTick rather than acted on per keystroke: each run rebuilds up to 60 rows.
+  s_searchPending = String(lv_textarea_get_text(s_searchTa));
+  s_searchAt = millis();
+}
+
+static void radioShowSearch() {
+  uiSoundPlay(UiSound::Tick);
+  s_radioLevel = 2;
+  radioClear();
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_radioTitle, "Search");
+  lv_obj_remove_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
+  radioLayout(true, false);
+  lv_keyboard_set_textarea(s_radioKb, s_searchTa);
+  lv_textarea_set_text(s_searchTa, "");
+  lv_label_set_text(s_radioStatus, "Type at least two letters.");
+  lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+}
+static void radioSearchBtnCb(lv_event_t *) { radioShowSearch(); }
 
 static void buildRadio() {
   lv_obj_t *pg = s_page[PAGE_RADIO];
@@ -770,7 +913,7 @@ static void buildRadio() {
   lv_obj_align(s_radioTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
 
   s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
-  lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 100);
+  lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
 
   s_radioList = lv_obj_create(pg);
   lv_obj_remove_style_all(s_radioList);
@@ -781,6 +924,46 @@ static void buildRadio() {
   lv_obj_set_scrollbar_mode(s_radioList, LV_SCROLLBAR_MODE_AUTO);
   lv_obj_add_event_cb(s_radioList, radioScrollCb, LV_EVENT_SCROLL, nullptr);
   lv_obj_add_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
+
+  // Search entry point, top-right of the page.
+  s_searchBtn = lv_button_create(pg);
+  lv_obj_remove_style_all(s_searchBtn);
+  lv_obj_set_size(s_searchBtn, 56, 52);
+  lv_obj_align(s_searchBtn, LV_ALIGN_TOP_RIGHT, 0, PAD_TOP + 44);
+  lv_obj_set_style_radius(s_searchBtn, JB_R_MD, 0);
+  lv_obj_set_style_bg_opa(s_searchBtn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_searchBtn, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_add_event_cb(s_searchBtn, radioSearchBtnCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *sb = label(s_searchBtn, LV_SYMBOL_LIST, &lv_font_montserrat_20, JB_TEXT_MUTED);
+  lv_obj_center(sb);
+
+  s_searchTa = lv_textarea_create(pg);
+  lv_textarea_set_one_line(s_searchTa, true);
+  lv_textarea_set_placeholder_text(s_searchTa, "Station name");
+  lv_obj_set_size(s_searchTa, SCREEN_W - RAIL_W - PAD_X * 2, 56);
+  lv_obj_align(s_searchTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 106);
+  lv_obj_set_style_bg_color(s_searchTa, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_set_style_border_color(s_searchTa, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_text_color(s_searchTa, lv_color_hex(JB_TEXT), 0);
+  lv_obj_set_style_text_font(s_searchTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_radius(s_searchTa, JB_R_MD, 0);
+  lv_obj_add_event_cb(s_searchTa, radioSearchCb, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+
+  // A-Z strip along the bottom. Horizontal, not the phone-style vertical rail: 26 letters down a
+  // 450 px column is 17 px each, well under the design system's 44 px minimum touch target.
+  s_azStrip = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_azStrip);
+  lv_obj_set_size(s_azStrip, SCREEN_W - RAIL_W - PAD_X * 2, 44);
+  lv_obj_align(s_azStrip, LV_ALIGN_BOTTOM_LEFT, 0, -PAD_BOT);
+  lv_obj_clear_flag(s_azStrip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+
+  // Keyboard last so it draws over the list.
+  s_radioKb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_radioKb, SCREEN_W - RAIL_W - PAD_X * 2, 250);
+  lv_obj_align(s_radioKb, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void buildSettings() {
@@ -1069,7 +1252,13 @@ void uiTick() {
     if (msg.isEmpty()) lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
     else               lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
 
-    if (s_radioLevel == 1 && artcache::generation() != s_artGen) {
+    // Debounced search: rebuilding up to 60 rows per keystroke would stutter badly.
+    if (s_searchAt && millis() - s_searchAt > 220) {
+      s_searchAt = 0;
+      radioRunSearch(s_searchPending);
+    }
+
+    if (s_radioLevel != 0 && artcache::generation() != s_artGen) {
       s_artGen = artcache::generation();
       radioPaintArt();
     }
