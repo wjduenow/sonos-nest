@@ -110,9 +110,32 @@ the face plate at z ≈ 19.5 while the expander lives at z 4.0–8.6, so they sh
 but never collide in Z. That was the only way to fit it: stacking it in the column alongside the
 dial, buttons and USB-C breakout needs ~112 mm of a 122 mm interior, which leaves no usable gaps.
 
+### Bus cable — **Adafruit `4528`**, Grove → STEMMA QT / Qwiic / JST-SH, 100 mm
+<https://www.adafruit.com/product/4528>
+
+**The two ends are different connectors, and this is easy to miss.** `J13` on the CrowPanel is
+**Crowtail — 4-pin, 2.0 mm pitch** (Eagle package `CONNECTOR_4P-SMD-2.0`), which is the Grove
+standard. Both control boards are **Qwiic / STEMMA QT — 4-pin JST-SH, 1.0 mm**. Nothing plugs into
+anything else without this adapter.
+
+| | value |
+|---|---|
+| Ends | Grove 4P 2.0 mm ↔ JST-SH 4P 1.0 mm |
+| Length | **100 mm** — ample; J13 is at front-x ≈ 137, the column starts at ≈ 180 |
+| Wires | **black GND · red V+ · blue SDA · yellow SCL** |
+
+> ⚠️ **Do not splice your own.** The two standards run their pins in **opposite order** — Crowtail
+> is SCL/SDA/3V3/GND, Qwiic is GND/3V3/SDA/SCL — so a straight-through 4-wire cable lands 3V3 on
+> SDA and GND on SCL. The Adafruit cable maps by wire colour and gets this right; a hand-made one
+> only does if you deliberately reverse it. Worth a continuity check either way.
+
+One cable is enough for both boards: it reaches `J13` → **Knob**, and the second Qwiic socket on
+the Knob daisy-chains to the **PCF8574** with an ordinary Qwiic–Qwiic cable.
+
 ### Still pending selection
 - **4× momentary switches** — bodies TBD; the design calls for Ø13 caps on a 9 mm pitch.
 - **1× dial cap** — Ø36, 14 mm proud, knurled, **Ø6 D-bore**.
+- **1× Qwiic–Qwiic cable** for the Knob → PCF8574 hop (any length ≥ 50 mm).
 
 Both I2C boards **daisy-chain into `J13`**, the board's Crowtail I2C connector (front-x ≈ 136.9,
 y ≈ 96.57 — conveniently on the column side).
