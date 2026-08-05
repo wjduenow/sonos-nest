@@ -60,8 +60,9 @@ def build_face():
                       z0 - 1.0, z0 + 1.0))
 
     # ---- control column: dial + 4 buttons --------------------------------------
-    cuts.append(cyl((P.DIAL_D + P.DIAL_CLR) / 2.0, z0 - 1.0, z1 + 1.0,
-                    P.COL_CX, P.DIAL_CY))
+    # Only the encoder's Ø7 bushing passes through here; the Ø36 cap sits proud on top
+    # and overhangs the opening by 13.5 mm all round.
+    cuts.append(cyl(P.DIAL_HOLE_D / 2.0, z0 - 1.0, z1 + 1.0, P.COL_CX, P.DIAL_CY))
     for by in P.BTN_ROW_Y:
         for dx in (-P.BTN_PITCH / 2.0, +P.BTN_PITCH / 2.0):
             cuts.append(cyl((P.BTN_D + P.BTN_CLR) / 2.0, z0 - 1.0, z1 + 1.0,

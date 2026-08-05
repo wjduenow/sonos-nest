@@ -110,8 +110,25 @@ check("knob board width", P.COL_CX - P.KNOB_W / 2 >= P.COL_X0 and
       P.COL_CX + P.KNOB_W / 2 <= P.COL_X1,
       f"{P.KNOB_W} mm board in a {P.COL_W:.1f} mm column "
       f"({P.COL_CX - P.KNOB_W/2:.1f}..{P.COL_CX + P.KNOB_W/2:.1f})")
-check("dial hole", P.COL_CX - (P.DIAL_D + P.DIAL_CLR) / 2 >= P.COL_X0,
-      f"Ø{P.DIAL_D + P.DIAL_CLR} at x={P.COL_CX:.1f}")
+check("dial bushing hole", P.COL_CX - P.DIAL_HOLE_D / 2 >= P.COL_X0,
+      f"Ø{P.DIAL_HOLE_D} at x={P.COL_CX:.1f}")
+check("knob cap fits the column", P.COL_CX - P.KCAP_D / 2 >= P.COL_X0 and
+      P.COL_CX + P.KCAP_D / 2 <= P.COL_X1,
+      f"Ø{P.KCAP_D} cap spans {P.COL_CX - P.KCAP_D/2:.1f}..{P.COL_CX + P.KCAP_D/2:.1f}")
+check("knob cap clears the top button row",
+      P.DIAL_CY - P.KCAP_D / 2 > max(P.BTN_ROW_Y) + P.BTN_D / 2,
+      f"gap {P.DIAL_CY - P.KCAP_D/2 - (max(P.BTN_ROW_Y) + P.BTN_D/2):+.2f} mm")
+check("cap overhangs the face hole", P.KCAP_D > P.DIAL_HOLE_D + 6,
+      f"{(P.KCAP_D - P.DIAL_HOLE_D) / 2:.1f} mm of overhang all round")
+check("cap bore engages the shaft", P.KNOB_TIP_Z - (P.DEPTH + P.KCAP_GAP) >= 6.0,
+      f"{P.KNOB_TIP_Z - (P.DEPTH + P.KCAP_GAP):.1f} mm of shaft in a {P.KCAP_BORE_H} mm bore")
+check("cap bore is not bottomed out by the shaft",
+      P.KCAP_BORE_H > P.KNOB_TIP_Z - (P.DEPTH + P.KCAP_GAP),
+      f"{P.KCAP_BORE_H - (P.KNOB_TIP_Z - (P.DEPTH + P.KCAP_GAP)):.1f} mm of air above the tip")
+check("bore round section covers the shaft's round part",
+      P.KCAP_ROUND_H >= (P.KNOB_TIP_Z - P.KNOB_SHAFT_FLAT) - (P.DEPTH + P.KCAP_GAP),
+      f"round for {P.KCAP_ROUND_H} mm; shaft is round for "
+      f"{(P.KNOB_TIP_Z - P.KNOB_SHAFT_FLAT) - (P.DEPTH + P.KCAP_GAP):.1f} mm above the cap's underside")
 for by in P.BTN_ROW_Y:
     check(f"button row y={by}", P.COL_CX - P.BTN_PITCH / 2 - P.BTN_D / 2 >= P.COL_X0,
           f"pitch {P.BTN_PITCH} spans "

@@ -25,6 +25,7 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 | Face | **230 × 128 mm**, R14 corners |
 | Depth | **22.0 mm** — lands exactly on the design system's `--u7-depth` token |
 | Screen | 155 × 87 opening, 1 mm rebate onto the black border |
+| Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
 | Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
 | Mount | 2 keyholes in the top band, **140 mm apart**, 5.5 mm drop |
 | Power | USB-C breakout on edge at the bottom of the column → 2 wires to J10 |
@@ -131,6 +132,59 @@ correct themselves.
 
 Standoffs are on the datasheet's **32 × 16 mm** pattern, centred on the dial. The 41 mm board fits
 the 45.6 mm column with 2.3 mm either side.
+
+## The magnet mount has two bore levels, on purpose
+
+Looking into a magnet post you see a **stepped hole**, not a plain magnet pocket:
+
+```
+  19.5 ┬──────────────┬  mating plane / top of the post
+       │   Ø8.6       │  receives the face plate's SPIGOT   (4.0 deep)
+  15.5 ├───┬──────┬───┤  magnets meet here, face to face
+       │   │ Ø6.3 │   │  the magnet itself                  (2.2 deep)
+  13.3 ┴───┴──────┴───┴
+```
+
+The wide upper bore is not slop around the magnet — it is a **socket for the face plate**.
+
+The face plate is 2.5 mm thick, so a 2.2 mm magnet pocket sunk into it would leave a
+**0.3 mm skin** on the visible front surface. Instead the plate's magnet sits in a boss that
+drops 4 mm below the mating plane, and the shell has to receive that boss. Three things fall
+out of it: 4.3 mm of material over the disc instead of 0.3, the two discs meet **face to face
+with no plastic in the gap** (roughly double the pull of a through-plastic pair), and the six
+spigots **register the plate** so it cannot slide — which matters because magnets are weak in
+shear and this one hangs on a wall.
+
+If you would rather have a plain single-diameter pocket, the cost is: `FACE_T` 2.5 → 3.5 (so
+the case gets 1 mm deeper, 22 → 23), magnets separated by ~1.2 mm of plastic instead of
+touching, and separate locating pins to replace the lost registration. Say the word.
+
+## Knob cap — `build_knob_cap.py`
+
+![knob cap](knob_cap_preview.png)
+
+Ø36 × 14 mm, knurled rim, **no set screw and no hardware** — a D-bore keys it directly to the
+encoder shaft.
+
+**The bore is stepped, and that step is load-bearing.** Only the top 5 mm of the Bourns shaft is
+flatted; below that it is round Ø6. A D-bore running the full depth would jam on that round
+section and never seat, because the flat is 4.5 mm across — narrower than the Ø6 it would have
+to pass over. So the bore is **round for its first 3.5 mm, D above it**.
+
+| | |
+|---|---|
+| Bore | Ø6.0 + 0.25, round 3.5 mm then D at 4.5 + 0.25 across |
+| Engagement | 7.5 mm of shaft in an 8.5 mm bore (1 mm of air above the tip) |
+| Sits | z 22.5 – 36.5, i.e. 0.5 mm off the face so it cannot rub |
+
+**Print it top-face-down.** The bore then opens upward as a plain vertical hole — no overhang,
+no supports — and the visible top face is laid against the bed.
+
+The face's dial hole also changed: it is now **Ø9**, clearing only the encoder's Ø7 bushing,
+so the Ø36 cap overhangs it by **13.5 mm all round**. It was Ø37 (sized to the cap), which left
+a 37 mm hole you could see straight into with the cap floating inside it.
+
+If `KCAP_FIT` comes out tight or loose on your printer, it is one parameter.
 
 ## Not yet modelled
 

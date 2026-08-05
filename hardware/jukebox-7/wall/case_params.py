@@ -100,9 +100,12 @@ COL_X1       = FACE_W - WALL             # 227.00
 COL_CX       = (COL_X0 + COL_X1) / 2.0   # 204.20
 COL_W        = COL_X1 - COL_X0           #  45.60  (--u7-ctrl-col is 46)
 
-DIAL_D       = 36.0     # --knob-dia
-DIAL_CLR     = 1.0      # running clearance around the cap
+DIAL_D       = 36.0     # --knob-dia: the CAP diameter, which sits proud ON the face
 DIAL_CY      = 96.0     # column features ride up with the taller face
+# The face hole only has to clear the encoder's Ø7.0 BUSHING -- not the cap. Sizing it to
+# the cap (Ø37) left a 37 mm hole you could see into, with the Ø36 cap floating inside it.
+# At Ø9 the cap overhangs by 13.5 mm all round and hides the opening completely.
+DIAL_HOLE_D  = 9.0
 
 BTN_D        = 13.0     # --btn-dia
 BTN_CLR      = 0.4
@@ -110,6 +113,26 @@ BTN_GAP      = 9.0      # --btn-gap read as the GAP between caps, not the pitch:
 BTN_PITCH    = BTN_D + BTN_GAP           # 22.0 -- a 9 mm *pitch* is impossible with
                                          # Ø13 caps; the token is self-inconsistent.
 BTN_ROW_Y    = (62.0, 42.0)              # play/rooms on top, prev/next below
+
+# ---------------------------------------------------------------- printed knob cap
+# For the Bourns PEC11J-9215F-S0015: Ø6.0 shaft, D-flat over the last 5 mm at 4.5 across.
+# Geometry above the face (face outer = DEPTH = 22.0):
+#     22.0 .. 25.0  shaft is ROUND        -> bore must be round here
+#     25.0 .. 30.0  shaft is FLATTED      -> bore is D here, and keys the cap
+# The bore is therefore round for its first stretch and D above it. A D-bore all the way
+# down could not pass over the round part of the shaft at all.
+KCAP_D        = DIAL_D          # 36.0
+KCAP_H        = 14.0            # --knob-height, proud of the face
+KCAP_GAP      = 0.5             # underside sits this far above the face, so it cannot rub
+KCAP_FIT      = 0.25            # diametral clearance on the bore
+KCAP_SHAFT_D  = 6.0
+KCAP_FLAT     = 4.5             # across the flat
+KCAP_ROUND_H  = 3.5             # round section of the bore, from the underside up
+KCAP_BORE_H   = 8.5             # total bore depth (shaft gives 7.5 -> 1 mm of air above)
+KCAP_FLUTES   = 36              # knurl: scallops cut around the rim
+KCAP_FLUTE_D  = 2.0
+KCAP_CHAMFER  = 1.0             # top edge
+KCAP_LEADIN   = 0.6             # chamfer at the bore mouth, for assembly
 
 # ---------------------------------------------------------------- keyhole wall mount
 # Two keyholes in the TOP band, spread wide so the unit cannot swing.  The band has
