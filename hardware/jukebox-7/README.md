@@ -61,18 +61,42 @@ SparkFun-pattern **"USB C Breakout"** (silkscreen rev `V10`), red PCB, 6 castell
 > y ≈ 19.8) while the control column is on the right, so the power pair crosses the width behind the
 > PCB. Two low-current wires, so this is a channel-routing problem, not an electrical one.
 
-### Control boards — **pending selection**
-- **I2C rotary encoder board** (push-to-select) — outline, holes, shaft spec and **I2C address** TBD.
+### Rotary encoder — **Arduino Modulino® Knob**, SKU `ABX00107`
+Datasheet mirrored here: [`modulino-knob-ABX00107-datasheet.pdf`](modulino-knob-ABX00107-datasheet.pdf).
+
+| | value |
+|---|---|
+| Board | **41.0 × 25.36 mm**, 1.6 ±0.2 thick |
+| Mounting | **4× Ø3.2**, spacing **32.0 horizontal × 16.0 vertical** |
+| Interface | Qwiic / I²C, **3.3 V**, ~3.4 mA |
+| **I²C address** | **0x76**, software configurable |
+| MCU | STM32C011F4 |
+| Encoder | **Bourns PEC11J-9215F-S0015** — 15 PPR, **30 detents**, momentary push switch |
+| Shaft | **Ø6.0**, D-flat over the last **5 mm** (4.5 across the flat), **L1 = 15.0** from the bushing flange, **LB = 7.0** bushing (Ø7.0) |
+
+> ✅ **0x76 clears both** the GT911 touch controller at 0x5D and the unidentified device at 0x2F.
+> And the Modulino ships with **no I²C pull-ups fitted** — which is what we want, since the
+> CrowPanel's bus already has them. Don't add the optional 4.7 k 0402s.
+
+> ⚠️ **The board cannot sit on the case floor.** Shaft tip to Modulino PCB is ~21.5 mm
+> (`KNOB_BODY_H + L1`), so a floor-mounted board would leave the shaft only ~2 mm proud of a face
+> whose cap is 14 mm deep. It rides on **standoffs 6 mm above the floor** — see `KNOB_TIP_Z` in
+> `wall/case_params.py`, which positions the board from the shaft tip rather than from the floor.
+
+> Note the design system's control-layout spec says "24-detent enc." — the real part is **30
+> detents**. Cosmetic, but it is what the firmware will see per revolution.
+
+### Still pending selection
 - **I2C GPIO breakout** with solder pads for the four button wires — outline, holes, **address** TBD.
 - **4× momentary switches** — bodies TBD; the design calls for Ø13 caps on a 9 mm pitch.
-- **1× dial cap** — the design calls for Ø36, 14 mm proud, knurled.
+- **1× dial cap** — Ø36, 14 mm proud, knurled, **Ø6 D-bore**.
 
 Both I2C boards **daisy-chain into `J13`**, the board's Crowtail I2C connector (front-x ≈ 136.9,
 y ≈ 96.57 — conveniently on the column side).
 
-> ⚠️ **Check addresses before buying.** The bus already carries the **GT911 touch controller at
-> 0x5D** and an **unidentified device at 0x2F** (see `plans/07-sonos-jukebox.md`). A collision would
-> be silent and painful to diagnose.
+> ⚠️ **Check the GPIO breakout's address before buying.** The bus carries the **GT911 at 0x5D**, an
+> **unidentified device at 0x2F** (see `plans/07-sonos-jukebox.md`) and now the **Knob at 0x76**.
+> A collision would be silent and painful to diagnose.
 
 ## Parts
 

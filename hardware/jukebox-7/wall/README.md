@@ -65,6 +65,11 @@ The receptacle **nests into the 2.5 mm rear wall** rather than competing with it
 on the interior floor instead would recess the mouth 2.5 mm and force the plug's overmold into the
 port cutout before it could seat — the correct datum is `UC_Z0 = 0`, the outer rear plane.
 
+It mounts on a **single flat plate**, screwed through its two post holes — not trapped in a slot
+between two ribs. One face to register against, two M3 self-tap pilots, and it can be fitted or
+removed without springing anything. The plate is offset `UC_REC_OFF` from the port centreline so the
+receptacle lands on the port; a small lip at the front edge stops the board rotating on one screw.
+
 The plug then behaves the way the install wants: its nose travels ~6.5 mm into the receptacle inside
 the case while the **overmold stays in the wall's cable hole**, so the cable pushes back in once
 mated. The wall hole only has to clear the overmold, not the whole connector.
@@ -90,13 +95,33 @@ Also VERIFY before a final print, per `hardware/README.md` convention:
 - **USB-C breakout hole Ø and centres** — photo-scaled, not measured.
 - **Edge-connector heights and any outward overhang** past the PCB outline — sets the side walls.
 
+### The encoder board sits on standoffs, not on the floor
+
+The Arduino Modulino Knob carries a Bourns PEC11J-9215F-S0015, whose shaft is **15 mm from the
+bushing flange** on top of a ~6.5 mm body — roughly **21.5 mm from the Modulino PCB to the shaft
+tip**. Mounted flat on the case floor the shaft would clear the face by only ~2 mm, into a cap that
+is 14 mm deep. So it rides on four standoffs at `KNOB_PCB_Z = 8.5`.
+
+The board is positioned **from the shaft tip down** (`KNOB_TIP_Z = 30.0`, giving 8 mm of engagement
+into the cap) rather than from the floor up, because `KNOB_BODY_H` is the only estimate in that
+chain. Measure "shaft tip above the Modulino PCB" once, put it in `KNOB_STACK_H`, and the standoffs
+correct themselves.
+
+Standoffs are on the datasheet's **32 × 16 mm** pattern, centred on the dial. The 41 mm board fits
+the 45.6 mm column with 2.3 mm either side.
+
 ## Not yet modelled
 
-The **control column has holes but no internals**. The rotary encoder board, the I2C GPIO breakout
-and the button switch bodies are still unselected, so there are no mounts, standoffs or light-pipe
-for them yet. `BTN_PITCH` is currently 22 mm (Ø13 caps + a 9 mm gap) — note the design token
-`--btn-gap: 9mm` is labelled "centre-to-centre", which is geometrically impossible with Ø13 caps;
-it has been read as the gap.
+The **buttons have holes but no internals** — switch bodies are still unselected, so there are no
+mounts or plungers. The **I2C GPIO breakout** for the button wires is also unchosen; check its
+address against 0x5D (touch), 0x2F (unidentified) and 0x76 (the Knob).
+
+`BTN_PITCH` is currently 22 mm (Ø13 caps + a 9 mm gap) — note the design token `--btn-gap: 9mm` is
+labelled "centre-to-centre", which is geometrically impossible with Ø13 caps; it has been read as
+the gap.
+
+No **light-pipe** for the dial's RGB ring; the design system lists one as an open question and the
+Modulino Knob has no LEDs.
 
 Also unresolved: whether the case exposes **BOOT/RESET** (front-x ≈ 172.6, right against the column,
 so a hidden port through the column cavity is plausible) and **microSD** (front-x ≈ 159.7).

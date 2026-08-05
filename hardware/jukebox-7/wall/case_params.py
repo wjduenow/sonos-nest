@@ -145,6 +145,43 @@ UC_Z0        = 0.0      # receptacle mouth plane == rear outer plane (see above)
 UC_Z1        = UC_Z0 + UC_D              # 14.5  board rear edge
 UC_HEADROOM  = GLASS_Z - UC_Z1           #  5.0  spare to the face plate
 
+# Mount: a SINGLE flat plate the board screws onto through its two post holes -- not a
+# slot between two ribs.  One face to register against, two screws, and the board can be
+# fitted or removed without springing anything.
+UC_PLATE_T   = 3.0      # plate thickness
+UC_REC_OFF   = 3.2      # VERIFY: receptacle centreline, measured from the board's
+                        # mounting (bare) face = PCB 1.6 + half the 3.15 receptacle body
+UC_PILOT     = 2.6      # M3 self-tap pilot in the plate
+
+# ---------------------------------------------------------------- rotary encoder board
+# Arduino Modulino Knob, SKU ABX00107.  Qwiic/I2C, default address 0x76 (software
+# configurable) -- clears the GT911 at 0x5D and the unidentified 0x2F.  I2C pull-ups are
+# NOT fitted by default, which is what we want: the CrowPanel's bus already has them.
+KNOB_W       = 41.00    # datasheet
+KNOB_H       = 25.36
+KNOB_PCB_T   = 1.60     # +/- 0.2
+KNOB_HOLE_D  = 3.20     # 4x
+KNOB_HOLE_DX = 32.00    # horizontal hole spacing
+KNOB_HOLE_DY = 16.00    # vertical
+KNOB_PILOT   = 2.60     # M3 self-tap pilot
+
+# Encoder: Bourns PEC11J-9215F-S0015, 15 PPR / 30 detents, momentary push switch.
+#   shaft Ø6.0, D-flat over the last 5 mm, flat at 4.5 across
+#   L1 = 15.0 total from the bushing flange to the tip; LB = 7.0 bushing (Ø7.0)
+KNOB_SHAFT_D    = 6.0
+KNOB_SHAFT_L1   = 15.0
+KNOB_SHAFT_LB   = 7.0
+KNOB_SHAFT_FLAT = 5.0
+KNOB_BODY_H     = 6.5   # VERIFY: encoder body height above the Modulino PCB
+KNOB_STACK_H    = KNOB_BODY_H + KNOB_SHAFT_L1     # 21.5 PCB face -> shaft tip
+
+# The board is positioned by where we want the SHAFT TIP to land, not by the floor: the
+# cap needs real engagement, and KNOB_BODY_H is the only estimate in the chain.  Measure
+# "shaft tip above the Modulino PCB" once and KNOB_STACK_H fixes the standoffs for you.
+KNOB_TIP_Z      = 30.0                            # 8 mm into a 14 mm-proud cap
+KNOB_PCB_Z      = KNOB_TIP_Z - KNOB_STACK_H       # 8.5  standoff top / board front face
+KNOB_STANDOFF_D = 6.0
+
 # Rear port relief: deliberately oversized with an outside funnel, so the hole drilled
 # in the wall does not have to be placed precisely.
 PORT_W       = 14.0

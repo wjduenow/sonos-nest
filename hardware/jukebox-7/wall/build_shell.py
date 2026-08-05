@@ -96,24 +96,32 @@ def build_shell():
         cuts.append(prism(kp.buffer(1.5, resolution=16),
                           P.REAR_WALL, P.REAR_WALL + P.KEY_HEAD_CLR))
 
-    # ---- USB-C breakout cradle -------------------------------------------------
-    # The board stands on edge: plane perpendicular to the wall, receptacle at z~0.
-    t = P.UC_T + P.UC_SLOT_CLR
-    x0, x1 = P.UC_CX - t / 2.0, P.UC_CX + t / 2.0
-    y0, y1 = P.UC_CY - P.UC_H / 2.0, P.UC_CY + P.UC_H / 2.0
-    rib = 2.5
-    # Two ribs forming the slot. They start at the interior floor (the receptacle itself
-    # occupies the rear-wall thickness, nested in the port cutout) and run forward to the
-    # board's rear edge at UC_Z1.
-    adds.append(bx(x0 - rib, y0 - 1.0, P.FLOOR_Z, x0, y1 + 1.0, P.UC_Z1))
-    adds.append(bx(x1, y0 - 1.0, P.FLOOR_Z, x1 + rib, y1 + 1.0, P.UC_Z1))
-    # end stop so the board cannot be pushed forward off the port
-    adds.append(bx(x0 - rib, y0 - 1.0, P.UC_Z1, x1 + rib, y1 + 1.0, P.UC_Z1 + 2.0))
-    # screw bosses either side of the receptacle, at the board's hole depth
+    # ---- USB-C breakout: a SINGLE mounting plate -------------------------------
+    # The board screws flat onto one plate through its two post holes -- no slot to
+    # spring it into, and it can be removed without dismantling anything. The plate sits
+    # UC_REC_OFF to one side of the port centreline so the receptacle lands on the port.
+    px1 = P.UC_CX - P.UC_REC_OFF                 # plate face the board registers against
+    px0 = px1 - P.UC_PLATE_T
+    py0, py1 = P.UC_CY - P.UC_H / 2.0 - 2.5, P.UC_CY + P.UC_H / 2.0 + 2.5
+    adds.append(bx(px0, py0, P.FLOOR_Z, px1, py1, P.UC_Z1))
+    # a lip at the front edge so the board cannot rotate about a single screw
+    adds.append(bx(px1, py0, P.UC_Z1 - 2.0, px1 + P.UC_T + 0.6, py1, P.UC_Z1))
+    # two M3 self-tap pilots, drilled along X into the plate
     for dy in (-P.UC_HOLE_CC / 2.0, +P.UC_HOLE_CC / 2.0):
-        for xb in (x0 - rib, x1):
-            adds.append(bx(xb, P.UC_CY + dy - 3.0, P.FLOOR_Z,
-                           xb + rib, P.UC_CY + dy + 3.0, P.UC_Z0 + P.UC_HOLE_OFF + 3.0))
+        m = cylinder(radius=P.UC_PILOT / 2.0, height=P.UC_PLATE_T + 2.0, sections=32)
+        m.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+        m.apply_translation([(px0 + px1) / 2.0, P.UC_CY + dy, P.UC_Z0 + P.UC_HOLE_OFF])
+        cuts.append(m)
+
+    # ---- rotary encoder board (Arduino Modulino Knob) --------------------------
+    # Four standoffs on the datasheet's 32 x 16 hole pattern, centred on the dial.
+    # Height is driven by KNOB_TIP_Z so the cap gets real shaft engagement.
+    for dx in (-P.KNOB_HOLE_DX / 2.0, +P.KNOB_HOLE_DX / 2.0):
+        for dy in (-P.KNOB_HOLE_DY / 2.0, +P.KNOB_HOLE_DY / 2.0):
+            x, y = P.COL_CX + dx, P.DIAL_CY + dy
+            adds.append(cyl(P.KNOB_STANDOFF_D / 2.0, P.FLOOR_Z, P.KNOB_PCB_Z, x, y))
+            cuts.append(cyl(P.KNOB_PILOT / 2.0, P.KNOB_PCB_Z - 9.0, P.KNOB_PCB_Z + 1.0,
+                            x, y, seg=32))
 
     # ---- rear port + funnel ----------------------------------------------------
     port = bx(P.UC_CX - P.PORT_W / 2.0, P.UC_CY - P.PORT_H / 2.0, -1.0,

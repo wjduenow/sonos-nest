@@ -79,8 +79,18 @@ for cx in P.KEY_X:
 a.text(np.mean(P.KEY_X), P.KEY_ENTRY_CY + 6,
        f"2x keyhole — {P.KEY_X[1]-P.KEY_X[0]:.0f} mm apart, {P.KEY_DROP:.1f} mm drop",
        ha='center', fontsize=8, color='#c0392b', family='monospace')
-a.add_patch(Rectangle((P.UC_CX - P.UC_T / 2, P.UC_CY - P.UC_H / 2), P.UC_T, P.UC_H,
-                      fc='#c0392b', alpha=.35, ec='#c0392b'))
+a.add_patch(Rectangle((P.COL_CX - P.KNOB_W / 2, P.DIAL_CY - P.KNOB_H / 2), P.KNOB_W, P.KNOB_H,
+                      fc='#3f7d54', alpha=.20, ec='#3f7d54', lw=1.2))
+for dx in (-P.KNOB_HOLE_DX / 2, P.KNOB_HOLE_DX / 2):
+    for dy in (-P.KNOB_HOLE_DY / 2, P.KNOB_HOLE_DY / 2):
+        a.add_patch(Circle((P.COL_CX + dx, P.DIAL_CY + dy), P.KNOB_STANDOFF_D / 2,
+                           fc='#d7d3cc', ec='#3f7d54', lw=0.8))
+a.text(P.COL_CX, P.DIAL_CY - P.KNOB_H / 2 - 3, "Modulino Knob 41x25.4\n0x76 · 32x16 holes",
+       ha='center', va='top', fontsize=7.5, color='#2c6b42', family='monospace')
+a.add_patch(Rectangle((P.UC_CX - P.UC_REC_OFF - P.UC_PLATE_T, P.UC_CY - P.UC_H / 2 - 2.5),
+                      P.UC_PLATE_T, P.UC_H + 5, fc='#c0392b', alpha=.45, ec='#c0392b'))
+a.add_patch(Rectangle((P.UC_CX - P.UC_REC_OFF, P.UC_CY - P.UC_H / 2), P.UC_T, P.UC_H,
+                      fc='#c0392b', alpha=.18, ec='#c0392b', ls='--'))
 a.add_patch(Rectangle((P.UC_CX - P.PORT_W / 2, P.UC_CY - P.PORT_H / 2), P.PORT_W, P.PORT_H,
                       fc='#fff', ec='#c0392b', lw=1.5))
 a.text(P.UC_CX - 8, P.UC_CY - 12, "USB-C breakout\n+ wall cable hole", ha='center',
