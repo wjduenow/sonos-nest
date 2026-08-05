@@ -164,5 +164,8 @@ collides.
 - **microSD access.** J5 is ~17 mm inboard of the left edge, so the card does not reach a case wall.
   If the on-card album-art cache ships (`plans/07-sonos-jukebox.md`), card access needs a recessed
   channel — confirm insertion direction and slot depth first.
-- **Print bed.** A ~230 mm face fits a 256 mm Bambu or a 250 mm Prusa. It does **not** fit a 220 mm
-  bed, even diagonally; that would force a split face with dovetails.
+## Print constraints — resolved
+
+**Bambu P2S, 10" × 10" (~254 × 254 mm) bed.** The ~230 × 112 mm face prints **flat, in one piece**,
+with ~24 mm of margin in X. No split face, no dovetails. The taller-face mounting variant
+(~230 × 124) and a 24 mm-deep shell both still fit comfortably.
