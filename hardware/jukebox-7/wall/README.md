@@ -77,10 +77,20 @@ The receptacle **nests into the 2.5 mm rear wall** rather than competing with it
 on the interior floor instead would recess the mouth 2.5 mm and force the plug's overmold into the
 port cutout before it could seat — the correct datum is `UC_Z0 = 0`, the outer rear plane.
 
-It mounts on a **single flat plate**, screwed through its two post holes — not trapped in a slot
-between two ribs. One face to register against, two M3 self-tap pilots, and it can be fitted or
-removed without springing anything. The plate is offset `UC_REC_OFF` from the port centreline so the
-receptacle lands on the port; a small lip at the front edge stops the board rotating on one screw.
+It mounts on a **single bare plate**, screwed through its two post holes — not trapped in a slot,
+and with **no lip or roof over the board**. The two screws run along **X**, so a driver can only
+reach them from the side; anything overhanging the board's outer face sits directly in its path.
+
+Which face of the plate the board lands on is `UC_BOARD_SIDE` (+1 / −1). The port centreline stays
+on `UC_CX` either way, so flipping it moves only the board and the plate — not the hole you drill in
+the wall.
+
+> **Flipping alone does not buy clearance.** `UC_CX` is the column centre, so the two sides are
+> mirror images: 21.25 mm of open column on the screw side either way. To actually gain room, shift
+> `UC_CX` *away* from the screw side. With the board on the −X face, moving the port to x ≈ 214
+> opens the screw side to **~31 mm** — but it also moves the wall's cable hole ~10 mm right, so it
+> is a deliberate choice rather than a default. `check_clearances.py` asserts at least 12 mm and
+> warns below 18.
 
 The plug then behaves the way the install wants: its nose travels ~6.5 mm into the receptacle inside
 the case while the **overmold stays in the wall's cable hole**, so the cable pushes back in once

@@ -87,9 +87,10 @@ for dx in (-P.KNOB_HOLE_DX / 2, P.KNOB_HOLE_DX / 2):
                            fc='#d7d3cc', ec='#3f7d54', lw=0.8))
 a.text(P.COL_CX, P.DIAL_CY - P.KNOB_H / 2 - 3, "Modulino Knob 41x25.4\n0x76 · 32x16 holes",
        ha='center', va='top', fontsize=7.5, color='#2c6b42', family='monospace')
-a.add_patch(Rectangle((P.UC_CX - P.UC_REC_OFF - P.UC_PLATE_T, P.UC_CY - P.UC_H / 2 - 2.5),
+a.add_patch(Rectangle((min(P.UC_FACE_X, P.UC_FACE_X - P.UC_BOARD_SIDE * P.UC_PLATE_T),
+                       P.UC_CY - P.UC_H / 2 - 2.5),
                       P.UC_PLATE_T, P.UC_H + 5, fc='#c0392b', alpha=.45, ec='#c0392b'))
-a.add_patch(Rectangle((P.UC_CX - P.UC_REC_OFF, P.UC_CY - P.UC_H / 2), P.UC_T, P.UC_H,
+a.add_patch(Rectangle((min(P.UC_FACE_X, P.UC_BOARD_X), P.UC_CY - P.UC_H / 2), P.UC_T, P.UC_H,
                       fc='#c0392b', alpha=.18, ec='#c0392b', ls='--'))
 a.add_patch(Rectangle((P.UC_CX - P.PORT_W / 2, P.UC_CY - P.PORT_H / 2), P.PORT_W, P.PORT_H,
                       fc='#fff', ec='#c0392b', lw=1.5))

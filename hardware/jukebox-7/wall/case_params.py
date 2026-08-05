@@ -154,10 +154,22 @@ UC_HEADROOM  = GLASS_Z - UC_Z1           #  5.0  spare to the face plate
 # Mount: a SINGLE flat plate the board screws onto through its two post holes -- not a
 # slot between two ribs.  One face to register against, two screws, and the board can be
 # fitted or removed without springing anything.
+UC_BOARD_SIDE = -1      # which face of the plate the board mounts on: +1 = toward the
+                        # column's right wall, -1 = toward the screen. Flipping this moves
+                        # ONLY the board and the plate; the port stays on UC_CX.
 UC_PLATE_T   = 3.0      # plate thickness
 UC_REC_OFF   = 3.2      # VERIFY: receptacle centreline, measured from the board's
                         # mounting (bare) face = PCB 1.6 + half the 3.15 receptacle body
 UC_PILOT     = 2.6      # M3 self-tap pilot in the plate
+
+# Derived plate/board X. The plate face the board registers against is UC_REC_OFF from the
+# port centreline, on the opposite side to the board.
+UC_FACE_X    = UC_CX - UC_BOARD_SIDE * UC_REC_OFF        # plate face
+UC_PLATE_CX  = UC_FACE_X - UC_BOARD_SIDE * UC_PLATE_T / 2.0
+UC_BOARD_X   = UC_FACE_X + UC_BOARD_SIDE * UC_T          # board's outer face
+# Clear space on the screw-head side -- the screws run along X, so a driver has to come in
+# from this side. This is the number to maximise if assembly feels cramped.
+UC_ACCESS    = (COL_X1 - UC_BOARD_X) if UC_BOARD_SIDE > 0 else (UC_BOARD_X - COL_X0)
 
 # ---------------------------------------------------------------- rotary encoder board
 # Arduino Modulino Knob, SKU ABX00107.  Qwiic/I2C, default address 0x76 (software

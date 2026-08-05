@@ -31,6 +31,30 @@ def in_rect(pt, r):
     return r[0] <= pt[0] <= r[2] and r[1] <= pt[1] <= r[3]
 
 
+def circle_vs_rect(cn, c, cd, rn, r, minimum=0.0):
+    """Boards are rectangles, not circles. Approximating a 3 x 26 mm plate as a
+    circle produced a false collision -- and a checker that cries wolf gets ignored."""
+    qx = min(max(c[0], r[0]), r[2])
+    qy = min(max(c[1], r[1]), r[3])
+    d = ((c[0] - qx) ** 2 + (c[1] - qy) ** 2) ** 0.5
+    gap = d - cd / 2.0
+    check(f"{cn} vs {rn}", gap >= minimum, f"edge gap {gap:+.2f} mm",
+          tight=(0 <= gap < 1.0))
+
+
+def board_rects():
+    pa, pb = sorted((P.UC_FACE_X, P.UC_FACE_X - P.UC_BOARD_SIDE * P.UC_PLATE_T))
+    ba, bb = sorted((P.UC_FACE_X, P.UC_BOARD_X))
+    return {
+        "knob board": (P.COL_CX - P.KNOB_W / 2, P.DIAL_CY - P.KNOB_H / 2,
+                       P.COL_CX + P.KNOB_W / 2, P.DIAL_CY + P.KNOB_H / 2),
+        "expander board": (P.EXP_CX - P.EXP_W / 2, P.EXP_CY - P.EXP_H / 2,
+                           P.EXP_CX + P.EXP_W / 2, P.EXP_CY + P.EXP_H / 2),
+        "USB-C plate": (pa, P.UC_CY - P.UC_H / 2 - 2.5, pb, P.UC_CY + P.UC_H / 2 + 2.5),
+        "USB-C board": (ba, P.UC_CY - P.UC_H / 2, bb, P.UC_CY + P.UC_H / 2),
+    }
+
+
 PCB_RECT = (P.PCB_X0, P.PCB_Y0, P.PCB_X1, P.PCB_Y1)
 hx0, hy0 = P.PCB_X0 + P.HOLE_INSET, P.PCB_Y0 + P.HOLE_INSET
 PCB_BOSSES = [(hx0, hy0), (hx0 + P.HOLE_DX, hy0),
@@ -57,15 +81,25 @@ for i, f in enumerate(P.FSCREWS):
         circles(f"face screw {i}", f, P.FSCREW_BOSS,
                 f"keyhole x={kx:.0f}", (kx, P.KEY_ENTRY_CY), P.KEY_ENTRY_D + 3.0)
 
-print("\n== face screws vs the USB-C plate and the knob standoffs ==")
-uc = (P.UC_CX - P.UC_REC_OFF - P.UC_PLATE_T / 2.0, P.UC_CY)
+print("\n== face screws vs every mounted board ==")
 for i, f in enumerate(P.FSCREWS):
-    circles(f"face screw {i}", f, P.FSCREW_BOSS, "USB-C plate", uc, P.UC_H)
-for i, f in enumerate(P.FSCREWS):
-    for dx in (-P.KNOB_HOLE_DX / 2.0, P.KNOB_HOLE_DX / 2.0):
-        for dy in (-P.KNOB_HOLE_DY / 2.0, P.KNOB_HOLE_DY / 2.0):
-            circles(f"face screw {i}", f, P.FSCREW_BOSS, "knob standoff",
-                    (P.COL_CX + dx, P.DIAL_CY + dy), P.KNOB_STANDOFF_D)
+    for name, r in board_rects().items():
+        if abs(f[0] - (r[0] + r[2]) / 2) < 60 and abs(f[1] - (r[1] + r[3]) / 2) < 60:
+            circle_vs_rect(f"face screw {i}", f, P.FSCREW_BOSS, name, r)
+
+print("\n== boards must not overlap each other in XY unless they differ in Z ==")
+rs = board_rects()
+for an, bn in (("knob board", "USB-C plate"), ("knob board", "USB-C board"),
+               ("expander board", "USB-C plate"), ("expander board", "USB-C board"),
+               ("knob board", "expander board")):
+    a, b = rs[an], rs[bn]
+    sep = max(a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+    check(f"{an} vs {bn}", sep >= 0, f"separation {sep:+.2f} mm", tight=(0 <= sep < 1.0))
+
+print("\n== USB-C screw access (the screws run along X) ==")
+check("driver clearance beside the board", P.UC_ACCESS >= 12.0,
+      f"{P.UC_ACCESS:.2f} mm of open column on the screw-head side",
+      tight=(12.0 <= P.UC_ACCESS < 18.0))
 
 print("\n== control column: everything must fit between the walls ==")
 check("knob board width", P.COL_CX - P.KNOB_W / 2 >= P.COL_X0 and

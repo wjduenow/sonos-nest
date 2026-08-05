@@ -99,17 +99,17 @@ def build_shell():
     # The board screws flat onto one plate through its two post holes -- no slot to
     # spring it into, and it can be removed without dismantling anything. The plate sits
     # UC_REC_OFF to one side of the port centreline so the receptacle lands on the port.
-    px1 = P.UC_CX - P.UC_REC_OFF                 # plate face the board registers against
-    px0 = px1 - P.UC_PLATE_T
+    # It is a BARE plate -- no lip or roof over the board. Anything overhanging the
+    # board's outer face is directly in the path of the screwdriver, because the two
+    # screws run along X and can only be reached from the side.
+    pa, pb = sorted((P.UC_FACE_X, P.UC_FACE_X - P.UC_BOARD_SIDE * P.UC_PLATE_T))
     py0, py1 = P.UC_CY - P.UC_H / 2.0 - 2.5, P.UC_CY + P.UC_H / 2.0 + 2.5
-    adds.append(bx(px0, py0, P.FLOOR_Z, px1, py1, P.UC_Z1))
-    # a lip at the front edge so the board cannot rotate about a single screw
-    adds.append(bx(px1, py0, P.UC_Z1 - 2.0, px1 + P.UC_T + 0.6, py1, P.UC_Z1))
+    adds.append(bx(pa, py0, P.FLOOR_Z, pb, py1, P.UC_Z1))
     # two M3 self-tap pilots, drilled along X into the plate
     for dy in (-P.UC_HOLE_CC / 2.0, +P.UC_HOLE_CC / 2.0):
         m = cylinder(radius=P.UC_PILOT / 2.0, height=P.UC_PLATE_T + 2.0, sections=32)
         m.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
-        m.apply_translation([(px0 + px1) / 2.0, P.UC_CY + dy, P.UC_Z0 + P.UC_HOLE_OFF])
+        m.apply_translation([P.UC_PLATE_CX, P.UC_CY + dy, P.UC_Z0 + P.UC_HOLE_OFF])
         cuts.append(m)
 
     # ---- rotary encoder board (Arduino Modulino Knob) --------------------------
