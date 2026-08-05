@@ -69,6 +69,31 @@ LiPo battery input feeding the charger. `J4`/`J6` are the speakers.
 Its opening faces the **board's edge**, which is why the case carries a 10 mm gap on the left
 (`CLR_LEFT`) — the housing plugs in horizontally and sticks out past the board.
 
+#### Power only, by decision — updates go over OTA
+
+The rear port carries **5 V and GND, nothing else**. Two paths to a data port were considered and
+rejected:
+
+- **Breakout data pads → J10's serial pins.** Does not work. USB `D+`/`D−` is a differential USB
+  bus, not UART; it needs a bridge chip. And J10's pins are **UART3**, not the console UART — the
+  firmware logs on UART0 and the ROM bootloader listens there, so even with a bridge you would get
+  an app-level debug stream you had to write yourself, and never flashing.
+- **Rear port → `J1` with a passive USB-C female-to-male extension.** This *does* work: J1 goes
+  through 0 Ω links to the **CH340K** bridge, whose `DTR#`/`RTS#` drive the auto-reset circuit, so
+  it gives console *and* flashing with no button presses. (`J16` is different — straight to the
+  P4's native USB `DP`/`DM`.) Rejected as unnecessary complexity for a unit that is close to done.
+
+**So: OTA is the update path.** That is sound on *this* board specifically — the plan notes the
+internal-SRAM pressure that makes nest OTA unreliable is "genuinely gone" here, with ~70–100 KB of
+internal heap free at idle against the S3's ~150 KB total.
+
+**Recovery, if OTA ever cannot reach it:** lift the unit off its keyholes, open it, and plug USB
+into **J1** — the CH340K port. The keyhole mount exists partly to make that a two-minute job.
+
+> One caveat worth knowing: the ESP-Hosted link fault in `plans/07-sonos-jukebox.md` is still open,
+> and an OTA attempted while the link is down will fail. That is harmless — a failed transfer leaves
+> the running firmware untouched — but retry rather than assume the image is bad.
+
 > Note the routing consequence: `J10` is at the **far left** of the front view (front-x ≈ 6.2,
 > y ≈ 19.8) while the control column is on the right, so the power pair crosses the width behind the
 > PCB. Two low-current wires, so this is a channel-routing problem, not an electrical one.
