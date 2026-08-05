@@ -40,6 +40,7 @@
 LV_FONT_DECLARE(lv_font_lucide_28);
 #define ICON_HEART "\xEE\x83\xB2"   // U+E0F2
 #define ICON_RADIO "\xEE\x85\x82"   // U+E142
+#define ICON_SPEAKER "\xEE\x85\xA6" // U+E166
 
 // --- Geometry, from the design's device shell -------------------------------------------------
 // Rail widened from the design's 66 px and its 48 px items scaled 1.5x to 72 px. A DELIBERATE
@@ -205,9 +206,9 @@ static void buildRail(lv_obj_t *scr) {
   // the rest stay on LVGL's built-in symbols, which already match well enough that subsetting more
   // of Lucide would be flash spent for no gain.
   const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO,
-                                   LV_SYMBOL_VOLUME_MAX, LV_SYMBOL_SETTINGS};
+                                   ICON_SPEAKER, LV_SYMBOL_SETTINGS};
   const lv_font_t *iconFonts[PAGE_COUNT] = {&lv_font_montserrat_28, &lv_font_lucide_28,
-                                            &lv_font_lucide_28, &lv_font_montserrat_28,
+                                            &lv_font_lucide_28, &lv_font_lucide_28,
                                             &lv_font_montserrat_28};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
