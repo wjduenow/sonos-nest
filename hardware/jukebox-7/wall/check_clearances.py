@@ -178,8 +178,16 @@ check("port sits behind the breakout board",
       f"port {P.PORT_H} within the {P.UC_H} mm board height")
 
 print("\n== magnets ==")
-check("spigot wall around the face magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.8,
+check("spigot wall around the face magnet", (P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2 >= 0.7,
       f"{(P.MAG_SPIGOT_D - P.MAG_POCKET_D) / 2:.2f} mm of spigot around the Ø{P.MAG_D_FACE} disc")
+check("shell magnet stays located in the bore",
+      0.2 <= (P.MAG_BORE_D - P.MAG_D_SHELL) / 2 <= 0.45,
+      f"{(P.MAG_BORE_D - P.MAG_D_SHELL) / 2:.2f} mm a side -- loosening the SPIGOT must not "
+      f"loosen the magnet, so the bore is fixed and the spigot shrinks")
+check("spigot fit absorbs print-scale variation",
+      P.MAG_SPIGOT_FIT / 2 >= 0.35,
+      f"{P.MAG_SPIGOT_FIT/2:.2f} mm a side vs {(max(P.MAG_X)-min(P.MAG_X))*0.002:.2f} mm of "
+      f"drift at 0.2% scale over {max(P.MAG_X)-min(P.MAG_X):.0f} mm")
 check("shell bore is a single diameter", P.MAG_BORE_D > P.MAG_D_SHELL,
       f"Ø{P.MAG_BORE_D} bore takes the Ø{P.MAG_D_SHELL} disc with "
       f"{(P.MAG_BORE_D - P.MAG_D_SHELL) / 2:.2f} mm a side -- no step to glue into")

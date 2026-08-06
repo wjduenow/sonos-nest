@@ -294,6 +294,16 @@ the spigot lands first and the face hovers off the rim.
 Registration is unaffected: 3.5 mm of spigot still engages a 6.0 mm bore. If the hold feels weak,
 `MAG_AIRGAP` is the knob — but shrink it only after confirming the face actually sits down.
 
+**The spigot fit is deliberately loose: Ø7.8 in a Ø8.6 bore, 0.40 mm per side.** Six spigots must
+engage six bores simultaneously across a 203 mm span, and two separately printed parts routinely
+differ by 0.1–0.3 % in scale — 0.2 to 0.6 mm over that distance. At the original 0.20 mm per side
+the tolerance stack ate the whole clearance and the face would have refused to sit down, presenting
+as exactly the hovering symptom fixed twice already. A magnet pair self-centres, so the **magnets**
+align the plate and the spigots are stops that engage only under a shove.
+
+Note *how* it was loosened: the bore is fixed at Ø8.6 because it also seats the Ø8 shell magnet
+(0.30 mm a side). Opening the bore would have let the disc float. The spigot shrank instead.
+
 Why the spigot exists at all: the face plate is 2.5 mm thick, so a 2.2 mm pocket sunk into it
 would leave a **0.3 mm skin** on the visible front surface. Its magnet therefore rides in a boss
 that drops 4 mm below the mating plane. Three things follow — 4.3 mm of material over the disc

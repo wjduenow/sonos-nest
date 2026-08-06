@@ -338,9 +338,18 @@ MAG_SPIGOT_H   = 4.0     # free depth of the shell bore above its magnet
 # The spigot is therefore held back by MAG_AIRGAP: the plate seats on the rim and the six
 # blocks, and the magnets pull across a small designed gap rather than defining position.
 MAG_AIRGAP     = 0.5     # designed gap between the two magnet faces when seated
-MAG_SPIGOT_D   = 8.2
-MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving bore
-MAG_BORE_D     = MAG_SPIGOT_D + MAG_SPIGOT_FIT   # 8.6 -- ONE diameter, top to bottom
+# The BORE is the primary dimension -- it is sized to the shell magnet, which must stay
+# located, so it cannot simply be opened up to loosen the spigot fit. The SPIGOT is
+# derived from it instead.
+MAG_BORE_D0    = MAG_D_SHELL + 0.6       # 8.6 -- Ø8 disc drops in with 0.30 mm a side
+# Six spigots have to engage six bores at once, spread over 203 mm. Two separately
+# printed parts routinely differ by 0.1-0.3% in scale -- 0.2 to 0.6 mm across that span --
+# so a tight fit is over-constrained and the face would refuse to sit down. A magnet pair
+# self-centres, so let the MAGNETS align the plate and leave the spigots as stops that
+# only engage under a shove. Was 0.4 (0.20 a side), which the tolerance stack eats.
+MAG_SPIGOT_FIT = 0.8     # diametral clearance -> 0.40 mm a side
+MAG_BORE_D     = MAG_BORE_D0                     # 8.6 -- ONE diameter, top to bottom
+MAG_SPIGOT_D   = MAG_BORE_D - MAG_SPIGOT_FIT     # 7.8
 MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
 # *** The block must STOP SHORT of the board. ***
 # It used to be drawn to PCB_Y0 / PCB_Y1 -- the board's own edges -- so it touched the
