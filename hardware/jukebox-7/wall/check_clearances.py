@@ -185,7 +185,8 @@ check("shell bore is a single diameter", P.MAG_BORE_D > P.MAG_D_SHELL,
       f"{(P.MAG_BORE_D - P.MAG_D_SHELL) / 2:.2f} mm a side -- no step to glue into")
 for i, (x, y) in enumerate(P.MAGNETS):
     r = P.MAG_BORE_D / 2.0
-    inner = (P.PCB_Y0 - (y + r)) if y < P.FACE_H / 2 else ((y - r) - P.PCB_Y1)
+    inner = ((P.MAG_BLOCK_BOT_Y1 - (y + r)) if y < P.FACE_H / 2
+             else ((y - r) - P.MAG_BLOCK_TOP_Y0))
     outer = (y - r) if y < P.FACE_H / 2 else (P.FACE_H - (y + r))
     check(f"magnet bore {i} walls", min(inner, outer) >= 1.0,
           f"{outer:.2f} mm outboard, {inner:.2f} mm inboard",
@@ -201,7 +202,13 @@ check("left clearance for the J10 cable", P.CLR_LEFT >= 8.0,
       f"horizontally and protrudes past the board")
 check("J10 sits in that gap", P.PCB_X0 + P.J10_X - P.WALL > 8.0,
       f"J10 at x={P.PCB_X0 + P.J10_X:.2f}, wall inside at {P.WALL}")
-check("PCB clearance in Y (against the magnet blocks)", P.CLR_Y >= 2.0,
+check("magnet block clears the board below", P.PCB_Y0 - P.MAG_BLOCK_BOT_Y1 >= 1.5,
+      f"{P.PCB_Y0 - P.MAG_BLOCK_BOT_Y1:.2f} mm gap: block ends y={P.MAG_BLOCK_BOT_Y1:.2f}, "
+      f"board starts y={P.PCB_Y0:.2f}")
+check("magnet block clears the board above", P.MAG_BLOCK_TOP_Y0 - P.PCB_Y1 >= 1.5,
+      f"{P.MAG_BLOCK_TOP_Y0 - P.PCB_Y1:.2f} mm gap: board ends y={P.PCB_Y1:.2f}, "
+      f"block starts y={P.MAG_BLOCK_TOP_Y0:.2f}")
+check("PCB clearance in Y (band to board)", P.CLR_Y >= 2.0,
       f"{P.CLR_Y:.2f} mm above and below the board")
 for nm, conn, rect in (("I2C  J13", (P.PCB_X0 + P.J13_X, P.PCB_Y0 + P.J13_Y), P.I2C_RELIEF),
                        ("PWR  J10", (P.PCB_X0 + P.J10_X, P.PCB_Y0 + P.J10_Y), P.J10_RELIEF)):

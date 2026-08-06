@@ -61,6 +61,22 @@ not an option: the whole wall is only 3.75 mm of material, less than the housing
 > The alternative is soldering power wires directly rather than using the connector, which would
 > save the 10 mm. Worth knowing, but the pre-made XH pigtail is the better build.
 
+### The magnet blocks must stop SHORT of the board
+
+This one cost two case-height increases before it was diagnosed, so it is written down.
+
+The blocks were drawn spanning up to `PCB_Y0` / `PCB_Y1` — **the board's own edges**. So they
+touched the board *by construction*, and raising `CLR_Y` moved the board and the blocks together.
+The gap stayed exactly zero however much the case grew.
+
+They now stop **`MAG_BLOCK_GAP` (2.0 mm) short of the board**, measured from the board rather than
+from the band, and `MAG_Y_BOT` / `MAG_Y_TOP` are derived from those extents so the bore stays
+centred in whatever material each block actually has. `check_clearances.py` asserts the gap at both
+ends.
+
+The earlier height increases were not wasted: at 136 mm the blocks can give a 2 mm gap *and* keep
+2.1 mm of wall around the Ø8.6 bore. At the original 128 they could not have done both.
+
 ### Clearance around the board
 
 `CLR` is **0.75 mm in X** but **`CLR_Y` is 2.75 mm**. At 0.75 the board dropped onto its posts

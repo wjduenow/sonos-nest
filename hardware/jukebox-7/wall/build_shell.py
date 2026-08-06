@@ -91,7 +91,10 @@ def build_shell():
     # spans the band and merges with the side wall, which backs the pocket outward.
     # Each block takes the face plate's spigot (registration) over the magnet pocket.
     for (x, y) in P.MAGNETS:
-        y0, y1 = (P.WALL, P.PCB_Y0) if y < P.FACE_H / 2 else (P.PCB_Y1, P.FACE_H - P.WALL)
+        # NB the block stops MAG_BLOCK_GAP short of the board -- not at PCB_Y0/PCB_Y1,
+        # which is what made it pinch the board however much the case grew.
+        y0, y1 = ((P.WALL, P.MAG_BLOCK_BOT_Y1) if y < P.FACE_H / 2
+                  else (P.MAG_BLOCK_TOP_Y0, P.FACE_H - P.WALL))
         adds.append(bx(x - P.MAG_BLOCK_HW, y0, P.FLOOR_Z,
                        x + P.MAG_BLOCK_HW, y1, P.GLASS_Z))
     for (x, y) in P.MAGNETS:

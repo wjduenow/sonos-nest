@@ -314,6 +314,12 @@ MAG_SPIGOT_D   = 8.2
 MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving bore
 MAG_BORE_D     = MAG_SPIGOT_D + MAG_SPIGOT_FIT   # 8.6 -- ONE diameter, top to bottom
 MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
+# *** The block must STOP SHORT of the board. ***
+# It used to be drawn to PCB_Y0 / PCB_Y1 -- the board's own edges -- so it touched the
+# board by construction, and raising CLR_Y just moved the board and the block together.
+# Two case-height increases bought no gap at all. This is the gap, and it is measured
+# from the board, not from the band.
+MAG_BLOCK_GAP  = 2.0
 MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets meet
 
 # Positions: in the two bands, NEVER over the PCB (the block runs the full interior
@@ -322,11 +328,15 @@ MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets
 # PCB that height is display glass -- so the spigot must stay off the PCB footprint
 # entirely, while still leaving real wall thickness outboard of it.
 MAG_X        = (25.0, 110.0, 228.0)
-# Centred in the material available either side, so the Ø8.6 bore keeps balanced walls:
-#   bottom, y 0..14.75 (wall + band)  -> bore 3.08..11.68,   walls 3.08 / 3.08
-#   top,    y 118.75..136             -> bore 123.08..131.68, walls 4.33 / 4.33
-MAG_Y_BOT    = 7.375
-MAG_Y_TOP    = 127.375
+# Where each block actually ends -- MAG_BLOCK_GAP short of the board, not at its edge:
+MAG_BLOCK_BOT_Y1 = PCB_Y0 - MAG_BLOCK_GAP        #  12.75
+MAG_BLOCK_TOP_Y0 = PCB_Y1 + MAG_BLOCK_GAP        # 120.75
+# ...and the bore centred in the material each block actually has, so the walls balance:
+#   bottom  y 0 .. 12.75  (outer wall + block)  -> bore  2.08.. 10.68, walls 2.08 / 2.08
+#   top     y 120.75 .. 136                     -> bore 124.08..132.68, walls 3.33 / 3.33
+# Derived, so they cannot drift out of step with the board again.
+MAG_Y_BOT    = MAG_BLOCK_BOT_Y1 / 2.0            #   6.375
+MAG_Y_TOP    = (MAG_BLOCK_TOP_Y0 + FACE_H) / 2.0 # 128.375
 MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
 
 # Pry notch: with six pairs meeting face to face there is real holding force, so the
