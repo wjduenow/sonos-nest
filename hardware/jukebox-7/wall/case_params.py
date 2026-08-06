@@ -374,7 +374,10 @@ MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
 # plate needs somewhere to get a fingernail or spudger under. Bottom edge, hidden once
 # the unit is on the wall.
 PRY_W        = 22.0
-PRY_X        = FACE_W / 2.0
+# NOT at the centre of the face: FACE_W/2 = 120 put the notch across the bottom magnet
+# block at x=110, opening into its bore and stripping the spigot's wall over the top
+# 2.5 mm. Sited between the x=110 and x=228 blocks instead.
+PRY_X        = 160.0
 
 # !!! MAGNET POLARITY !!!  Glue ALL shell magnets one way up and ALL face-plate magnets
 # the other, so every pair attracts. Mark one pole with a marker before gluing -- the same

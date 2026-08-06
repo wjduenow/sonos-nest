@@ -223,6 +223,13 @@ for i, (x, y) in enumerate(P.MAGNETS):
     clear = (x + r < sx0 or x - r > sx1 or y + r < sy0 or y - r > sy1)
     check(f"magnet spigot {i} clears the opening", clear, "lands in solid face plate")
 
+print("\n== pry notch ==")
+for mx in P.MAG_X:
+    ov = (min(mx + P.MAG_BLOCK_HW, P.PRY_X + P.PRY_W / 2)
+          - max(mx - P.MAG_BLOCK_HW, P.PRY_X - P.PRY_W / 2))
+    check(f"pry notch clears the magnet block at x={mx:.0f}", ov <= 0,
+          f"{-ov:.1f} mm clear" if ov <= 0 else f"OVERLAPS BY {ov:.1f} mm -- breaches the bore")
+
 print("\n== rear-face clearances ==")
 check("left clearance for the J10 cable", P.CLR_LEFT >= 8.0,
       f"{P.CLR_LEFT:.2f} mm from the PCB's left edge to the wall; the XH housing plugs in "
