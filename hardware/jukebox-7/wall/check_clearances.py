@@ -191,8 +191,14 @@ for i, (x, y) in enumerate(P.MAGNETS):
     check(f"magnet bore {i} walls", min(inner, outer) >= 1.0,
           f"{outer:.2f} mm outboard, {inner:.2f} mm inboard",
           tight=(1.0 <= min(inner, outer) < 1.2))
-check("material over the magnet", P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H) >= 2.0,
-      f"{P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H):.2f} mm from disc to the front face")
+check("material over the magnet", P.DEPTH - (P.MAG_SPIGOT_Z0 + P.MAG_POCKET_H) >= 2.0,
+      f"{P.DEPTH - (P.MAG_SPIGOT_Z0 + P.MAG_POCKET_H):.2f} mm from disc to the front face")
+check("face seats on the rim, not on the magnets", P.MAG_AIRGAP >= 0.3,
+      f"spigot tip z={P.MAG_SPIGOT_Z0}, shell magnet face z={P.MAG_MATE_Z} "
+      f"-> {P.MAG_AIRGAP:.2f} mm of slack before anything bottoms out")
+check("spigot still engages for registration", P.FACE_Z0 - P.MAG_SPIGOT_Z0 >= 3.0,
+      f"{P.FACE_Z0 - P.MAG_SPIGOT_Z0:.2f} mm of spigot inside a "
+      f"{P.FACE_Z0 - (P.MAG_MATE_Z - P.MAG_T):.2f} mm bore")
 check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOOR_Z,
       f"pocket floor z={P.MAG_MATE_Z - P.MAG_POCKET_H:.2f}, case floor z={P.FLOOR_Z}")
 

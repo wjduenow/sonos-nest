@@ -276,6 +276,24 @@ spigot**. Putting a 6 mm disc at the bottom of it left a stepped hole — you ha
 magnet 4 mm down a wide bore and hope it found a small pocket. An **8 mm disc fills that same
 bore**, so it is now a single straight hole: drop it in, it lands flat, glue it.
 
+**The seating plane is the rim, not the magnets.** The spigot stops `MAG_AIRGAP` (0.5 mm) short
+of the shell magnet, so the plate lands on the rim and the six blocks and the magnets pull across
+a small designed gap. It used to be exactly as long as the free bore — the face bottomed on the
+magnet at the same instant it touched the rim, with **zero slack**. Over-constrained, and every
+tolerance pushes the same way: blind bores print shallow, glue sits under both discs. In practice
+the spigot lands first and the face hovers off the rim.
+
+```
+  14.0  shell magnet face
+  ────  0.5 mm designed AIR GAP
+  14.5  spigot tip + face magnet face
+  18.0  face underside   ← SEATS HERE
+  20.5  face front
+```
+
+Registration is unaffected: 3.5 mm of spigot still engages a 6.0 mm bore. If the hold feels weak,
+`MAG_AIRGAP` is the knob — but shrink it only after confirming the face actually sits down.
+
 Why the spigot exists at all: the face plate is 2.5 mm thick, so a 2.2 mm pocket sunk into it
 would leave a **0.3 mm skin** on the visible front surface. Its magnet therefore rides in a boss
 that drops 4 mm below the mating plane. Three things follow — 4.3 mm of material over the disc

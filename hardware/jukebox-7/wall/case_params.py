@@ -329,7 +329,15 @@ MAG_D_FACE     = 6.0     # in the face plate's spigot
 MAG_T          = 2.0     # both are 2 mm thick
 MAG_POCKET_D   = MAG_D_FACE + 0.3        # face-plate pocket
 MAG_POCKET_H   = MAG_T + 0.2
-MAG_SPIGOT_H   = 4.0     # how far the face plate's boss drops into the shell
+MAG_SPIGOT_H   = 4.0     # free depth of the shell bore above its magnet
+# *** THE SEATING PLANE IS THE RIM, NOT THE MAGNETS. ***
+# The spigot used to be exactly as long as the free bore, so the face bottomed on the
+# shell magnet at the same instant it touched the rim -- over-constrained, with zero
+# slack. Every tolerance pushes the same way (blind bores print shallow, glue sits under
+# both discs), so in practice the spigot lands first and the face HOVERS off the rim.
+# The spigot is therefore held back by MAG_AIRGAP: the plate seats on the rim and the six
+# blocks, and the magnets pull across a small designed gap rather than defining position.
+MAG_AIRGAP     = 0.5     # designed gap between the two magnet faces when seated
 MAG_SPIGOT_D   = 8.2
 MAG_SPIGOT_FIT = 0.4     # diametral clearance in the shell's receiving bore
 MAG_BORE_D     = MAG_SPIGOT_D + MAG_SPIGOT_FIT   # 8.6 -- ONE diameter, top to bottom
@@ -340,9 +348,10 @@ MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
 # Two case-height increases bought no gap at all. This is the gap, and it is measured
 # from the board, not from the band.
 MAG_BLOCK_GAP  = 2.0
-MAG_MATE_Z     = FACE_Z0 - MAG_SPIGOT_H          # 14.0 -- where the two magnets meet
+MAG_MATE_Z     = FACE_Z0 - MAG_SPIGOT_H          # 14.0 -- SHELL magnet's front face
                                                  # (FACE_Z0, not GLASS_Z: since the
                                                  # wrap-around, those are 2.5 apart)
+MAG_SPIGOT_Z0  = MAG_MATE_Z + MAG_AIRGAP         # 14.5 -- spigot tip / FACE magnet face
 
 # Positions: in the two bands, NEVER over the PCB (the block runs the full interior
 # height), and clear of the keyholes.

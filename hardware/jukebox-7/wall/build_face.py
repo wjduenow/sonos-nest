@@ -77,11 +77,13 @@ def build_face():
     # mating plane, so there is 4.3 mm of material between the disc and the outside, the
     # two discs touch with no plastic between them, and the six bosses register the plate
     # against sliding -- which matters, because magnets are weak in shear.
-    spigots = [cyl(P.MAG_SPIGOT_D / 2.0, P.MAG_MATE_Z, z0 + 0.01, x, y)
+    # The spigot stops MAG_AIRGAP short of the shell magnet, so the plate seats on the
+    # rim and the blocks rather than bottoming out on a disc.
+    spigots = [cyl(P.MAG_SPIGOT_D / 2.0, P.MAG_SPIGOT_Z0, z0 + 0.01, x, y)
                for (x, y) in P.MAGNETS]
     for (x, y) in P.MAGNETS:
-        cuts.append(cyl(P.MAG_POCKET_D / 2.0, P.MAG_MATE_Z - 0.01,
-                        P.MAG_MATE_Z + P.MAG_POCKET_H, x, y))
+        cuts.append(cyl(P.MAG_POCKET_D / 2.0, P.MAG_SPIGOT_Z0 - 0.01,
+                        P.MAG_SPIGOT_Z0 + P.MAG_POCKET_H, x, y))
 
     return difference([union([plate] + spigots)] + cuts)
 
