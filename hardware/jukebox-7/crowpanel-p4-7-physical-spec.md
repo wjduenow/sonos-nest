@@ -179,7 +179,7 @@ Measured on the unit, not derived:
 
 | | |
 |---|---|
-| **Total electronics envelope** | **16.5 mm** — glass front surface → outermost face of the Crowtail I2C connector on the rear |
+| **Total electronics envelope** | **17.5 mm** — glass front surface → outermost face of the Crowtail I2C connector on the rear (re-measured; first read 16.5) |
 | Tallest point | the **Crowtail I2C connector**, rear face, top edge |
 | PCB | **1.65 mm** |
 | microSD slot | protrudes **1.5 mm** past the PCB's rear face — well inside the 16.5 mm envelope |
@@ -188,12 +188,12 @@ Measured on the unit, not derived:
 Which gives a comfortable case:
 
 ```
-   1.5   front bezel lip over the glass
-  16.5   electronics envelope
+   2.5   face plate
+  17.5   electronics envelope
    0.5   clearance
    2.5   rear wall
  ──────
-  21.0   mm total   (design token allows 22)
+  23.0   mm total
 ```
 
 > ⚠️ **The corollary that shapes the rear shell: only ~3 mm sits behind the PCB.** Anything needing

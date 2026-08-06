@@ -160,12 +160,12 @@ def build_shell():
                 P.UC_CX + P.PORT_W / 2.0 + f, P.UC_CY + P.PORT_H / 2.0 + f, 1.0)
     cuts.append(funnel)
 
-    # ---- relief behind the Crowtail I2C connector -------------------------------
-    # Local, so the whole case does not get deeper for one connector.
-    cuts.append(bx(P.PCB_X0 + P.J13_X - P.I2C_RELIEF_HW, P.I2C_RELIEF_Y0,
-                   P.FLOOR_Z - P.I2C_RELIEF_D,
-                   P.PCB_X0 + P.J13_X + P.I2C_RELIEF_HW, P.I2C_RELIEF_Y1,
-                   P.FLOOR_Z + 0.01))
+    # ---- reliefs behind the rear-face connectors --------------------------------
+    # J13 (I2C) and J10 (power) both sit on the PCB's rear face with only REAR_CLR
+    # behind them, which is nothing once a plug is in. Relieved locally so the whole
+    # case does not get deeper for two connectors.
+    for (rx0, ry0, rx1, ry1) in (P.I2C_RELIEF, P.J10_RELIEF):
+        cuts.append(bx(rx0, ry0, P.FLOOR_Z - P.RELIEF_D, rx1, ry1, P.FLOOR_Z + 0.01))
 
     # ---- power cable channel: breakout (right) -> J10 (far LEFT) ---------------
     # A recess in the interior floor so the pair does not get pinched under the PCB.

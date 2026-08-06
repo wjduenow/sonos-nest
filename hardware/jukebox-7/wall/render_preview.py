@@ -111,11 +111,11 @@ for (fx, fy) in P.MAGNETS:
 a.text(P.MAG_X[1], P.MAG_Y_BOT - 7, f"6x Ø{P.MAG_D_SHELL:.0f}x{P.MAG_T:.0f} in the shell\n"
        f"6x Ø{P.MAG_D_FACE:.0f}x{P.MAG_T:.0f} in the face", ha='center',
        va='top', fontsize=7, color='#8a6a15', family='monospace')
-a.add_patch(Rectangle((P.PCB_X0 + P.J13_X - P.I2C_RELIEF_HW, P.I2C_RELIEF_Y0),
-                      2 * P.I2C_RELIEF_HW, P.I2C_RELIEF_Y1 - P.I2C_RELIEF_Y0,
-                      fc='#7b5ea7', alpha=.18, ec='#7b5ea7', lw=1.0, ls='--'))
-a.text(P.PCB_X0 + P.J13_X, P.I2C_RELIEF_Y0 - 2, "I2C relief\n1.5 deep", ha='center', va='top',
-       fontsize=7, color='#5b4480', family='monospace')
+for _lbl, _r in (("I2C relief", P.I2C_RELIEF), ("power relief", P.J10_RELIEF)):
+    a.add_patch(Rectangle((_r[0], _r[1]), _r[2] - _r[0], _r[3] - _r[1],
+                          fc='#7b5ea7', alpha=.18, ec='#7b5ea7', lw=1.0, ls='--'))
+    a.text((_r[0] + _r[2]) / 2, _r[1] - 2, f"{_lbl}\n{P.RELIEF_D} deep", ha='center', va='top',
+           fontsize=7, color='#5b4480', family='monospace')
 hx0, hy0 = P.PCB_X0 + P.HOLE_INSET, P.PCB_Y0 + P.HOLE_INSET
 for (x, y) in [(hx0, hy0), (hx0 + P.HOLE_DX, hy0),
                (hx0, hy0 + P.HOLE_DY), (hx0 + P.HOLE_DX, hy0 + P.HOLE_DY)]:

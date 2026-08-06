@@ -22,8 +22,8 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 
 | | |
 |---|---|
-| Face | **240 × 132 mm**, R14 corners |
-| Depth | **22.0 mm** — lands exactly on the design system's `--u7-depth` token |
+| Face | **240 × 136 mm**, R14 corners |
+| Depth | **23.0 mm** — derived from the measured envelope, not chosen |
 | Screen | 155 × 87 opening, 1 mm rebate onto the black border |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
 | Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
@@ -37,9 +37,14 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
    0.0  rear outer plane (against the wall)
    2.5  interior floor            rear wall 2.5
    3.0  rear-most component       + clearance 0.5
-  19.5  glass front plane         + envelope 16.5  (MEASURED)
-  22.0  face plate outer          + face 2.5
+  20.5  glass front plane         + envelope 17.5  (MEASURED)
+  23.0  face plate outer          + face 2.5
 ```
+
+**`DEPTH` is derived, not chosen.** The envelope was first measured at 16.5 and later corrected
+to 17.5; because the whole stack keys off `ENVELOPE`, that one edit moved the glass plane, the
+magnet mating plane, the knob shaft target and the face together. `check_clearances.py` asserts
+`DEPTH == REAR_WALL + REAR_CLR + ENVELOPE + FACE_T` so it can never drift from the measurement.
 
 ### The left gap exists for the J10 power cable
 
@@ -63,16 +68,21 @@ but sat hard against the magnet blocks above and below, with no room to get a fi
 millimetres were added top and bottom, which is where 128 → 132 came from. It also widened the
 magnet bore walls from ~1.05 mm to ~2.05 mm, since there is more material either side now.
 
-### The Crowtail I2C connector needs a relief, not a deeper case
+### Rear-face connectors get local reliefs, not a deeper case
 
-`J13` is on the PCB's **rear** face and is the tallest thing back there — it is what set the
-measured 16.5 mm envelope. That leaves only `REAR_CLR` (0.5 mm) between it and the interior
-floor, which is nothing once a plug is in it.
+**Both** `J13` (Crowtail I2C) and `J10` (power) sit on the PCB's **rear** face with only
+`REAR_CLR` — 0.5 mm — behind them. That is nothing once a plug is in.
 
-Deepening the whole case for one connector would be the wrong trade, so the floor is **relieved
-locally**: a 28 × 16.5 mm pocket 1.5 mm deep over J13 and the plug's exit path toward the PCB's
-top edge. Clearance there goes **0.5 → 2.0 mm**, the rear wall keeps 1.0 mm under the pocket, and
-the case depth stays at 22.
+Deepening the whole case for two connectors would be the wrong trade, so the floor is **relieved
+locally** at each. Clearance goes **0.5 → 2.0 mm**, the rear wall keeps 1.0 mm under each pocket,
+and the case depth is untouched.
+
+| pocket | covers |
+|---|---|
+| `I2C_RELIEF` | J13 and the plug's exit toward the PCB's top edge |
+| `J10_RELIEF` | J10's body and the cable running out into the `CLR_LEFT` gap |
+
+Both are defined **relative to their connectors**, so they follow if the board ever moves.
 
 > ⚠️ **2.0 mm is a first pass.** Measure how far your plugged Crowtail cable stands above the PCB's
 > rear face; if it is more than ~2 mm, `I2C_RELIEF_D` is one parameter. Going past 1.7 mm starts

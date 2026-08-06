@@ -44,7 +44,8 @@ HOLE_INSET   = 3.00     # hole centres, in from each PCB corner
 HOLE_DX      = 170.90   # bolt pattern X
 HOLE_DY      = 98.00    # bolt pattern Y
 
-ENVELOPE     = 16.50    # MEASURED: glass front face -> rear-most component
+ENVELOPE     = 17.50    # MEASURED: glass front face -> rear-most component
+                        # (re-measured; was 16.50, which made the case 1 mm too shallow)
 REAR_COMP_H  = 5.50     # VERIFY: PCB rear face -> rear-most component
 SD_PROUD     = 1.50     # MEASURED: microSD slot past the PCB rear face (inside ENVELOPE)
 
@@ -65,8 +66,7 @@ RST_X,  RST_Y  = 172.62, 17.25  # RESET (right edge)
 
 # ---------------------------------------------------------------- case shell
 FACE_W       = 240.0
-FACE_H       = 132.0
-DEPTH        = 22.0
+FACE_H       = 136.0
 CASE_R       = 14.0     # --case-radius token
 WALL         = 3.0      # side wall thickness
 REAR_WALL    = 2.5
@@ -78,9 +78,10 @@ CLR          = 0.75     # clearance around the PCB in X, on the COLUMN side
 # 2 mm of housing beyond the shroud, plus wire exit and bend. 0.75 mm was nowhere near it.
 # This costs WIDTH (230 -> 240), not depth -- the case is still 22 mm thick.
 CLR_LEFT     = 10.0     # PCB left edge to the inside of the wall, for the J10 cable
-CLR_Y        = 2.75     # ...and in Y. Wider on purpose: at 0.75 the board dropped in but
+CLR_Y        = 4.75     # ...and in Y. Wider on purpose: at 0.75 the board dropped in but
                         # sat hard against the magnet blocks above and below it, with no
-                        # room to get a finger to it. 2 mm added top and bottom.
+                        # room to get a finger to it. 2 mm added, then 2 mm again -- the
+                        # blocks were still pinching the board. Face 128 -> 132 -> 136.
 REAR_CLR     = 0.5      # gap behind the tallest rear component
 
 # derived z planes
@@ -88,6 +89,9 @@ FLOOR_Z      = REAR_WALL                 #  2.5
 COMP_Z       = FLOOR_Z + REAR_CLR        #  3.0  rear-most component plane
 GLASS_Z      = COMP_Z + ENVELOPE         # 19.5  glass front plane
 PCB_BACK_Z   = COMP_Z + REAR_COMP_H      #  8.5  PCB rear face == boss top
+# DEPTH is DERIVED, not chosen: it follows the measured envelope. Correcting
+# ENVELOPE moves the glass plane and the whole face with it, automatically.
+DEPTH        = GLASS_Z + FACE_T          # 23.0
 
 # --- Bands above/below the PCB.  Both must be thick enough to carry a face-plate screw
 # --- boss, because the boss runs the full interior height and CANNOT pass through the
@@ -110,7 +114,7 @@ COL_CX       = (COL_X0 + COL_X1) / 2.0   # 204.20
 COL_W        = COL_X1 - COL_X0           #  45.60  (--u7-ctrl-col is 46)
 
 DIAL_D       = 36.0     # --knob-dia: the CAP diameter, which sits proud ON the face
-DIAL_CY      = 98.0     # column features ride up with the taller face
+DIAL_CY      = 100.0    # column features ride up with the taller face
 # The face hole only has to clear the encoder's Ø7.0 BUSHING -- not the cap. Sizing it to
 # the cap (Ø37) left a 37 mm hole you could see into, with the Ø36 cap floating inside it.
 # At Ø9 the cap overhangs by 13.5 mm all round and hides the opening completely.
@@ -121,7 +125,7 @@ BTN_CLR      = 0.4
 BTN_GAP      = 9.0      # --btn-gap read as the GAP between caps, not the pitch:
 BTN_PITCH    = BTN_D + BTN_GAP           # 22.0 -- a 9 mm *pitch* is impossible with
                                          # Ø13 caps; the token is self-inconsistent.
-BTN_ROW_Y    = (64.0, 44.0)              # play/rooms on top, prev/next below
+BTN_ROW_Y    = (66.0, 46.0)              # play/rooms on top, prev/next below
 
 # ---------------------------------------------------------------- printed knob cap
 # For the Bourns PEC11J-9215F-S0015: Ø6.0 shaft, D-flat over the last 5 mm at 4.5 across.
@@ -158,7 +162,7 @@ SCREW_SHANK  = 3.5      # wall screw shank
 SCREW_HEAD   = 7.0      # wall screw head
 KEY_ENTRY_D  = SCREW_HEAD + 0.6          # 7.6  head passes through here
 KEY_SLOT_W   = SCREW_SHANK + 0.5         # 4.0  shank rides in here
-KEY_ENTRY_CY = 123.3                     # entry-hole centre; the slot runs UP from here
+KEY_ENTRY_CY = 125.5                     # entry-hole centre; the slot runs UP from here
 KEY_DROP     = 5.5                       # how far the unit drops to lock. Sized so the
                                          # head relief stops clear of the PCB: the relief
                                          # sits at z 2.5-5.5 and the PCB's rear components
@@ -237,7 +241,7 @@ KNOB_STACK_H    = KNOB_BODY_H + KNOB_SHAFT_L1     # 21.5 PCB face -> shaft tip
 # The board is positioned by where we want the SHAFT TIP to land, not by the floor: the
 # cap needs real engagement, and KNOB_BODY_H is the only estimate in the chain.  Measure
 # "shaft tip above the Modulino PCB" once and KNOB_STACK_H fixes the standoffs for you.
-KNOB_TIP_Z      = 30.0                            # 8 mm into a 14 mm-proud cap
+KNOB_TIP_Z      = 31.0                            # 8 mm proud of the 23 mm face
 KNOB_PCB_Z      = KNOB_TIP_Z - KNOB_STACK_H       # 8.5  standoff top / board front face
 KNOB_STANDOFF_D = 6.0
 
@@ -319,10 +323,10 @@ MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets
 # entirely, while still leaving real wall thickness outboard of it.
 MAG_X        = (25.0, 110.0, 228.0)
 # Centred in the material available either side, so the Ø8.6 bore keeps balanced walls:
-#   bottom, y 0..12.75 (wall + band)  -> bore 2.10..10.70,   walls 2.10 / 2.05
-#   top,    y 116.75..132             -> bore 120.10..128.70, walls 3.35 / 3.30
-MAG_Y_BOT    = 6.4
-MAG_Y_TOP    = 124.4
+#   bottom, y 0..14.75 (wall + band)  -> bore 3.08..11.68,   walls 3.08 / 3.08
+#   top,    y 118.75..136             -> bore 123.08..131.68, walls 4.33 / 4.33
+MAG_Y_BOT    = 7.375
+MAG_Y_TOP    = 127.375
 MAGNETS      = [(x, y) for y in (MAG_Y_BOT, MAG_Y_TOP) for x in MAG_X]
 
 # Pry notch: with six pairs meeting face to face there is real holding force, so the
@@ -341,10 +345,19 @@ PRY_X        = FACE_W / 2.0
 # it and the interior floor, which is nothing once a plug is in it. Rather than deepen the
 # whole case for one connector, the floor is relieved locally over J13 and the plug's exit
 # path toward the PCB's top edge.
-I2C_RELIEF_D  = 1.5     # into the floor -> 2.0 mm total clearance, 1.0 mm of wall left
-I2C_RELIEF_HW = 14.0    # half-width in X, around J13
-I2C_RELIEF_Y0 = 102.0   # from below the connector...
-I2C_RELIEF_Y1 = 118.5   # ...out past the PCB's top edge, where the plug and cable go
+# Both reliefs are 1.5 mm into the floor -> 2.0 mm of total clearance, leaving 1.0 mm of
+# rear wall. Defined RELATIVE to their connectors so they follow if the board moves.
+RELIEF_D      = 1.5
+
+# J13 (I2C), near the PCB's top edge: the plug exits toward that edge.
+I2C_RELIEF    = (PCB_X0 + J13_X - 14.0, PCB_Y0 + J13_Y - 7.0,
+                 PCB_X0 + J13_X + 14.0, PCB_Y1 + 2.0)
+
+# J10 (power) is a right-angle connector opening toward the board's LEFT edge, so its
+# housing and cable live in the CLR_LEFT gap. The relief runs from near the wall, under
+# the connector body, and back far enough to clear the shroud.
+J10_RELIEF    = (WALL + 0.5,       PCB_Y0 + J10_Y - 10.0,
+                 PCB_X0 + 9.0,     PCB_Y0 + J10_Y + 10.0)
 
 CABLE_CH_W   = 6.0      # channel across the rear for the J10 power pair
 SEG          = 96       # circle smoothness

@@ -21,8 +21,8 @@ the **back** from a cable in the wall.
 
 | | |
 |---|---|
-| Face | **240 × 132 mm** (see [`wall/`](wall/) for why each dimension is what it is) |
-| Depth | **22.0 mm** — exactly the design system's `--u7-depth` token |
+| Face | **240 × 136 mm** (see [`wall/`](wall/) for why each dimension is what it is) |
+| Depth | **23.0 mm** — derived from the measured 17.5 mm envelope |
 | Corner radius | 14 mm (design token) |
 | Screen cutout | 155 × 87 mm active area — **exact position pending measurement** |
 | Mounting | Keyhole slots in the rear shell — lowest profile, adds 0 mm |
@@ -32,7 +32,7 @@ the **back** from a cable in the wall.
 
 ### Main board
 **ELECROW CrowPanel Advance 7" ESP32-P4 HMI AI Display**, SKU `DHE04107D`, **PCB rev V1.0**.
-176.90 × 104.00 × 16.5 mm envelope, 4× M3.2 on a 170.90 × 98.00 pattern.
+176.90 × 104.00 × 17.5 mm envelope, 4× M3.2 on a 170.90 × 98.00 pattern.
 Full detail in [`crowpanel-p4-7-physical-spec.md`](crowpanel-p4-7-physical-spec.md).
 
 ### USB-C breakout — rear power entry

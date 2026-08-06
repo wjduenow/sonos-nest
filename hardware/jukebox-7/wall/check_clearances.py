@@ -203,17 +203,24 @@ check("J10 sits in that gap", P.PCB_X0 + P.J10_X - P.WALL > 8.0,
       f"J10 at x={P.PCB_X0 + P.J10_X:.2f}, wall inside at {P.WALL}")
 check("PCB clearance in Y (against the magnet blocks)", P.CLR_Y >= 2.0,
       f"{P.CLR_Y:.2f} mm above and below the board")
-check("I2C relief covers J13", 
-      P.I2C_RELIEF_Y0 < P.PCB_Y0 + P.J13_Y < P.I2C_RELIEF_Y1,
-      f"J13 at y={P.PCB_Y0 + P.J13_Y:.2f}, relief spans {P.I2C_RELIEF_Y0}..{P.I2C_RELIEF_Y1}")
-check("I2C relief leaves rear wall", P.REAR_WALL - P.I2C_RELIEF_D >= 0.8,
-      f"{P.REAR_WALL - P.I2C_RELIEF_D:.2f} mm of wall under the relief")
-check("I2C clearance after relief", P.REAR_CLR + P.I2C_RELIEF_D >= 1.5,
-      f"{P.REAR_CLR + P.I2C_RELIEF_D:.2f} mm from the connector to the floor there",
-      tight=(P.REAR_CLR + P.I2C_RELIEF_D < 2.5))
-check("relief clears the keyholes",
-      all(abs(kx - (P.PCB_X0 + P.J13_X)) > P.I2C_RELIEF_HW + 5 for kx in P.KEY_X),
-      "keyholes are clear of the relief pocket in X")
+for nm, conn, rect in (("I2C  J13", (P.PCB_X0 + P.J13_X, P.PCB_Y0 + P.J13_Y), P.I2C_RELIEF),
+                       ("PWR  J10", (P.PCB_X0 + P.J10_X, P.PCB_Y0 + P.J10_Y), P.J10_RELIEF)):
+    check(f"{nm} relief covers the connector",
+          rect[0] <= conn[0] <= rect[2] and rect[1] <= conn[1] <= rect[3],
+          f"connector at ({conn[0]:.2f}, {conn[1]:.2f}), relief "
+          f"x {rect[0]:.2f}..{rect[2]:.2f}  y {rect[1]:.2f}..{rect[3]:.2f}")
+    check(f"{nm} relief clears the keyholes",
+          all(not (rect[0] - 4 < kx < rect[2] + 4 and rect[1] - 4 < P.KEY_ENTRY_CY < rect[3] + 4)
+              for kx in P.KEY_X),
+          "no keyhole lands in the pocket")
+check("reliefs leave rear wall", P.REAR_WALL - P.RELIEF_D >= 0.8,
+      f"{P.REAR_WALL - P.RELIEF_D:.2f} mm of wall under the pockets")
+check("clearance after relief", P.REAR_CLR + P.RELIEF_D >= 1.5,
+      f"{P.REAR_CLR + P.RELIEF_D:.2f} mm from connector to floor there",
+      tight=(P.REAR_CLR + P.RELIEF_D < 2.5))
+check("DEPTH follows the measured envelope",
+      abs(P.DEPTH - (P.REAR_WALL + P.REAR_CLR + P.ENVELOPE + P.FACE_T)) < 1e-6,
+      f"{P.REAR_WALL} + {P.REAR_CLR} + {P.ENVELOPE} + {P.FACE_T} = {P.DEPTH}")
 
 print("\n== depth ==")
 check("USB-C headroom", P.UC_Z1 <= P.GLASS_Z, f"board rear edge z={P.UC_Z1}, face inner z={P.GLASS_Z}")
