@@ -66,12 +66,12 @@ def keyhole_poly(cx):
 def build_shell():
     # ---- outer body ------------------------------------------------------------
     outer = rrect(0, 0, P.FACE_W, P.FACE_H, P.CASE_R)
-    solid = prism(outer, 0.0, P.DEPTH)
+    solid = prism(outer, 0.0, P.FACE_Z0)   # NOT DEPTH -- the face plate fills the rest
 
     # ---- hollow it out: one cavity from the interior floor up to the face -------
     inner = rrect(P.WALL, P.WALL, P.FACE_W - P.WALL, P.FACE_H - P.WALL,
                   max(P.CASE_R - P.WALL, 1.0))
-    cavity = prism(inner, P.FLOOR_Z, P.DEPTH)
+    cavity = prism(inner, P.FLOOR_Z, P.FACE_Z0)
     shell = difference([solid, cavity])
 
     adds, cuts = [], []
@@ -96,18 +96,18 @@ def build_shell():
         y0, y1 = ((P.WALL, P.MAG_BLOCK_BOT_Y1) if y < P.FACE_H / 2
                   else (P.MAG_BLOCK_TOP_Y0, P.FACE_H - P.WALL))
         adds.append(bx(x - P.MAG_BLOCK_HW, y0, P.FLOOR_Z,
-                       x + P.MAG_BLOCK_HW, y1, P.GLASS_Z))
+                       x + P.MAG_BLOCK_HW, y1, P.FACE_Z0))
     for (x, y) in P.MAGNETS:
         # ONE straight bore, top to bottom: the upper part receives the face plate's
         # spigot, the 8 mm disc fills the bottom of the same hole. No step to glue into.
         cuts.append(cyl(P.MAG_BORE_D / 2.0,
-                        P.MAG_MATE_Z - P.MAG_T, P.GLASS_Z + 0.01, x, y))
+                        P.MAG_MATE_Z - P.MAG_T, P.FACE_Z0 + 0.01, x, y))
 
     # ---- pry notch --------------------------------------------------------------
     # Six magnet pairs meeting face to face hold hard; the plate needs a purchase point.
     # Bottom edge, hidden once the unit is on the wall.
-    cuts.append(bx(P.PRY_X - P.PRY_W / 2.0, -1.0, P.GLASS_Z - 2.5,
-                   P.PRY_X + P.PRY_W / 2.0, P.WALL + 0.5, P.GLASS_Z + 0.01))
+    cuts.append(bx(P.PRY_X - P.PRY_W / 2.0, -1.0, P.FACE_Z0 - 2.5,
+                   P.PRY_X + P.PRY_W / 2.0, P.WALL + 0.5, P.FACE_Z0 + 0.01))
 
     # ---- keyhole wall mount ----------------------------------------------------
     # Through the rear wall, plus a shallow relief inside so the captured screw head

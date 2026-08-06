@@ -75,7 +75,8 @@ Power is the odd one out: **J10 sits at the far left**, opposite the column.
 |---|---|
 | PCB outline | **176.90 × 104.00 mm** (vendor docs say "180 × 105" — that is nominal, not the drawing) |
 | Corner radius | **3.0 mm**, all four |
-| Active display area | **155 × 87 mm** (vendor docs; position on the PCB **VERIFY**) |
+| Display module | **164.9 × 100.0 mm**, centred: **6.0 mm** borders left/right, **2.0 mm** top/bottom (MEASURED, and it reconciles to the standard 7" 1024x600 IPS panel spec exactly) |
+| Active display area | **154.21 × 85.92 mm** — Elecrow's "155 × 87" is a rounding of this |
 | PCB thickness | **1.65 mm** (measured) |
 
 ## Mounting holes — 4× M3.2 through

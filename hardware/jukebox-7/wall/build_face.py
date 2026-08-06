@@ -39,25 +39,29 @@ def cyl(r, z0, z1, x, y, seg=P.SEG):
 
 
 def screen_rect():
-    """Lit-area rectangle in face coordinates."""
-    x0 = P.PCB_X0 + P.AA_X0
-    y0 = P.PCB_Y0 + P.AA_Y0
-    return x0, y0, x0 + P.AA_W, y0 + P.AA_H
+    """The OPENING: the display MODULE's outline plus clearance, in face coordinates.
+
+    Not the lit area. This is a wrap-around bezel -- the module passes up through the
+    face plate and its front surface finishes flush with the plate's, so the opening
+    has to clear the module, not frame the lit area.
+    """
+    c = P.SCREEN_CLR / 2.0
+    x0 = P.PCB_X0 + P.GLASS_X0 - c
+    y0 = P.PCB_Y0 + P.GLASS_Y0 - c
+    return x0, y0, x0 + P.GLASS_W + P.SCREEN_CLR, y0 + P.GLASS_H + P.SCREEN_CLR
 
 
 def build_face():
-    z0, z1 = P.GLASS_Z, P.DEPTH          # 19.5 .. 22.0
+    z0, z1 = P.FACE_Z0, P.DEPTH          # 18.0 .. 20.5
     plate = prism(rrect(0, 0, P.FACE_W, P.FACE_H, P.CASE_R), z0, z1)
 
     cuts = []
 
     # ---- screen opening --------------------------------------------------------
-    # Straight through at the lit area, with a 1 mm rebate on the inside so the
-    # plate overlaps the black border and hides the glass edge.
+    # Straight through, sized to the MODULE. No rebate: nothing overlaps the glass,
+    # because the glass finishes flush with this plate's front face.
     sx0, sy0, sx1, sy1 = screen_rect()
     cuts.append(prism(rrect(sx0, sy0, sx1, sy1, 2.0), z0 - 1.0, z1 + 1.0))
-    cuts.append(prism(rrect(sx0 - 1.0, sy0 - 1.0, sx1 + 1.0, sy1 + 1.0, 2.0),
-                      z0 - 1.0, z0 + 1.0))
 
     # ---- control column: dial + 4 buttons --------------------------------------
     # Only the encoder's Ø7 bushing passes through here; the Ø36 cap sits proud on top

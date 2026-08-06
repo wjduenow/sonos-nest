@@ -12,26 +12,25 @@ every value here.
     (X_front = 176.90 - X_eagle).  Do not mix in raw Eagle X values.
 
 WORLD FRAME (front view, looking at the screen):
-    +X  right,  0 .. FACE_W      (230)
-    +Y  up,     0 .. FACE_H      (128)
+    +X  right,  0 .. FACE_W      (240)
+    +Y  up,     0 .. FACE_H      (136)
     +Z  toward the VIEWER,  z=0 is the REAR plane that sits against the wall
 
 DEPTH STACK (z):
       0.0   rear outer plane (against the wall)
       2.5   interior floor            (REAR_WALL)
       3.0   rear-most component plane (+ REAR_CLR)
-     19.5   glass front plane         (+ ENVELOPE 16.5, measured)
-     22.0   face plate outer surface  (+ FACE_T)
-    -> lands exactly on the design system's --u7-depth: 22mm token.
+      9.85  PCB rear face             (+ REAR_COMP_H)  == boss tops
+     18.0   face plate underside      == TOP OF THE SHELL
+     20.5   glass front  ==  face plate front  (+ ENVELOPE)
+    -> WRAP-AROUND: the module passes UP THROUGH the face plate, so the two front
+       surfaces are coplanar. DEPTH is the glass plane, not glass + a bezel.
 
   !!! VALUES TO VERIFY WITH CALIPERS BEFORE A FINAL PRINT !!!
-  * AA_X0 / AA_Y0 -- where the LIT area sits on the PCB.  NOT MEASURED YET.
-    Defaulted to CENTRED, which is a guess.  This is the single value that moves
-    the screen opening, so the face plate is provisional until it is measured.
-  * REAR_COMP_H -- PCB rear face to the rear-most component (the Crowtail I2C
-    connector).  Only the BOSS HEIGHT depends on it; everything else is
-    referenced off the glass plane, which is measured.
   * The USB-C breakout hole diameter / centres were scaled from a product photo.
+  * RELIEF_D -- 2.0 mm of clearance for a plugged Crowtail cable is still a guess.
+  Everything else here is measured: the board and its holes from Elecrow's Eagle
+  files, the envelope and the module outline/position on the unit itself.
 """
 
 # ---------------------------------------------------------------- board (from Eagle)
@@ -46,16 +45,31 @@ HOLE_DY      = 98.00    # bolt pattern Y
 
 ENVELOPE     = 17.50    # MEASURED: glass front face -> rear-most component
                         # (re-measured; was 16.50, which made the case 1 mm too shallow)
-REAR_COMP_H  = 5.50     # VERIFY: PCB rear face -> rear-most component
+REAR_COMP_H  = 6.85     # MEASURED (indirectly): with the board on 8.5 mm bosses the glass
+                        # front read 3.85 below the 23.0 rim, i.e. z=19.15, so PCB-rear to
+                        # glass is 10.65 and the rear stack is 17.5 - 10.65. Was 5.50, which
+                        # sat the board 1.35 mm low -- and left the Crowtail connector
+                        # reaching BELOW the floor, fitting only because it happened to sit
+                        # over the I2C relief. That was luck, not design.
 SD_PROUD     = 1.50     # MEASURED: microSD slot past the PCB rear face (inside ENVELOPE)
 
-AA_W         = 155.00   # active (lit) area
-AA_H         =  87.00
+# --- Display module. MEASURED on the board, and it matches the standard 7" 1024x600 IPS
+# --- panel spec exactly: outline 164.9 x 100.0, active area 154.21 x 85.92.
+# --- Borders to the PCB edge measured 6 / 6 / 2 / 2, and 176.9-12 = 164.9,
+# --- 104-4 = 100.0 -- both reconcile to the spec, so the part is identified.
+GLASS_W      = 164.90   # module outline -- what the face opening must clear
+GLASS_H      = 100.00
+GLASS_X0     =   6.00   # MEASURED: PCB left edge -> module edge (front view)
+GLASS_Y0     =   2.00   # MEASURED: PCB bottom edge -> module edge
 
-# --- Where the lit area sits on the PCB.  *** NOT MEASURED -- CENTRED GUESS *** ---
-AA_X0        = (PCB_W - AA_W) / 2.0      # 10.95 from the PCB's LEFT edge  (front view)
-AA_Y0        = (PCB_H - AA_H) / 2.0      #  8.50 from the PCB's BOTTOM edge
-AA_MEASURED  = False                      # flip to True once caliper'd
+AA_W         = 154.21   # active (lit) area. Elecrow's "155 x 87" is a rounding of this.
+AA_H         =  85.92
+# Active area centred in the module (standard for this panel family).
+AA_X0        = GLASS_X0 + (GLASS_W - AA_W) / 2.0   # 11.345 from the PCB's LEFT edge
+AA_Y0        = GLASS_Y0 + (GLASS_H - AA_H) / 2.0   #  9.040 from the PCB's BOTTOM edge
+AA_MEASURED  = True
+
+SCREEN_CLR   = 0.6      # total clearance on the face opening, around the module
 
 # --- Front-view feature positions used by the case (see the spec's front-view table) ---
 J10_X, J10_Y = 6.17, 19.80      # +5V_IN -- FAR LEFT, low
@@ -89,9 +103,15 @@ FLOOR_Z      = REAR_WALL                 #  2.5
 COMP_Z       = FLOOR_Z + REAR_CLR        #  3.0  rear-most component plane
 GLASS_Z      = COMP_Z + ENVELOPE         # 19.5  glass front plane
 PCB_BACK_Z   = COMP_Z + REAR_COMP_H      #  8.5  PCB rear face == boss top
-# DEPTH is DERIVED, not chosen: it follows the measured envelope. Correcting
-# ENVELOPE moves the glass plane and the whole face with it, automatically.
-DEPTH        = GLASS_Z + FACE_T          # 23.0
+# WRAP-AROUND BEZEL: the face does not sit ON the glass, it sits AROUND it, and the two
+# front surfaces are coplanar. So DEPTH is the glass plane, and the face plate occupies
+# the FACE_T below it with the module passing up through its opening.
+DEPTH        = GLASS_Z                   # 20.5 -- glass front == face front
+FACE_Z0      = DEPTH - FACE_T            # 18.0 -- face underside == top of the shell
+# *** The shell must STOP at FACE_Z0, not at DEPTH. *** It used to be built to full
+# depth, so its 3 mm perimeter ring occupied the same 2.5 mm the face plate needed. The
+# face could not drop in: it perched on the rim, held 2.5 mm proud, and its spigots
+# stopped short of the magnets. That was the gap under the face.
 
 # --- Bands above/below the PCB.  Both must be thick enough to carry a face-plate screw
 # --- boss, because the boss runs the full interior height and CANNOT pass through the
@@ -241,7 +261,7 @@ KNOB_STACK_H    = KNOB_BODY_H + KNOB_SHAFT_L1     # 21.5 PCB face -> shaft tip
 # The board is positioned by where we want the SHAFT TIP to land, not by the floor: the
 # cap needs real engagement, and KNOB_BODY_H is the only estimate in the chain.  Measure
 # "shaft tip above the Modulino PCB" once and KNOB_STACK_H fixes the standoffs for you.
-KNOB_TIP_Z      = 31.0                            # 8 mm proud of the 23 mm face
+KNOB_TIP_Z      = DEPTH + 8.0                     # 8 mm proud of the face, whatever it is
 KNOB_PCB_Z      = KNOB_TIP_Z - KNOB_STACK_H       # 8.5  standoff top / board front face
 KNOB_STANDOFF_D = 6.0
 
@@ -320,7 +340,9 @@ MAG_BLOCK_HW   = 6.0     # half-width of the shell block that carries the pocket
 # Two case-height increases bought no gap at all. This is the gap, and it is measured
 # from the board, not from the band.
 MAG_BLOCK_GAP  = 2.0
-MAG_MATE_Z     = GLASS_Z - MAG_SPIGOT_H          # 15.5 -- where the two magnets meet
+MAG_MATE_Z     = FACE_Z0 - MAG_SPIGOT_H          # 14.0 -- where the two magnets meet
+                                                 # (FACE_Z0, not GLASS_Z: since the
+                                                 # wrap-around, those are 2.5 apart)
 
 # Positions: in the two bands, NEVER over the PCB (the block runs the full interior
 # height), and clear of the keyholes.

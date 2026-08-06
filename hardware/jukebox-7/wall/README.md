@@ -23,8 +23,8 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 | | |
 |---|---|
 | Face | **240 × 136 mm**, R14 corners |
-| Depth | **23.0 mm** — derived from the measured envelope, not chosen |
-| Screen | 155 × 87 opening, 1 mm rebate onto the black border |
+| Depth | **20.5 mm** — the glass plane; the face is flush with it, not on top of it |
+| Screen | **wrap-around** — 165.5 × 100.6 opening cut to the *module*, glass finishes flush |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
 | Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
 | Mount | 2 keyholes in the top band, **140 mm apart**, 5.5 mm drop |
@@ -37,9 +37,32 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
    0.0  rear outer plane (against the wall)
    2.5  interior floor            rear wall 2.5
    3.0  rear-most component       + clearance 0.5
-  20.5  glass front plane         + envelope 17.5  (MEASURED)
-  23.0  face plate outer          + face 2.5
+   9.85 PCB rear face             + REAR_COMP_H 6.85   == boss tops
+  18.0  face plate underside      == TOP OF THE SHELL
+  20.5  glass front == face front + envelope 17.5  (MEASURED)
 ```
+
+### Wrap-around bezel
+
+The face does **not** sit on the glass. The module passes **up through** the face plate and the
+two front surfaces finish coplanar, so the opening is cut to the **module outline**
+(164.9 × 100.0 + 0.6) rather than framing the lit area. That is what makes the screen read as
+flush instead of sunk in a well.
+
+Consequence: `DEPTH == GLASS_Z`, so the case is **20.5 mm** — 2.5 mm thinner than the overlay
+bezel it replaces. Frame left around the opening: 18.7 left, 16.4 bottom, 19.0 top, 55.8 right
+(the column). All six magnet spigots land in solid plate.
+
+### The shell must stop at `FACE_Z0`
+
+The shell used to be built to full `DEPTH` with the cavity inset by `WALL`, so its 3 mm perimeter
+ring occupied the same 2.5 mm the face plate needed. **They interfered around the entire
+perimeter.** The face could not drop in — it perched on the rim, sat 2.5 mm proud, and its spigots
+stopped short of the magnets, which is what produced the gap under the face and the weak hold.
+
+`check_clearances.py` now asserts `FACE_Z0 == DEPTH - FACE_T`, and the build is verified by
+sampling both meshes at the same perimeter point: shell material ends at 18.0, face material
+starts at 18.0, no overlap.
 
 **`DEPTH` is derived, not chosen.** The envelope was first measured at 16.5 and later corrected
 to 17.5; because the whole stack keys off `ENVELOPE`, that one edit moved the glass plane, the

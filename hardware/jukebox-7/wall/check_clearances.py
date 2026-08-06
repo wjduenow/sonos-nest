@@ -196,6 +196,27 @@ check("material over the magnet", P.DEPTH - (P.MAG_MATE_Z + P.MAG_POCKET_H) >= 2
 check("shell has depth under the pocket", P.MAG_MATE_Z - P.MAG_POCKET_H > P.FLOOR_Z,
       f"pocket floor z={P.MAG_MATE_Z - P.MAG_POCKET_H:.2f}, case floor z={P.FLOOR_Z}")
 
+print("\n== screen opening (wrap-around: clears the MODULE, not the lit area) ==")
+import build_face as BF
+sx0, sy0, sx1, sy1 = BF.screen_rect()
+gx0, gy0 = P.PCB_X0 + P.GLASS_X0, P.PCB_Y0 + P.GLASS_Y0
+check("opening clears the module", sx0 < gx0 and sy0 < gy0 and
+      sx1 > gx0 + P.GLASS_W and sy1 > gy0 + P.GLASS_H,
+      f"{sx1-sx0:.2f} x {sy1-sy0:.2f} opening for a {P.GLASS_W} x {P.GLASS_H} module "
+      f"-> {P.SCREEN_CLR/2:.2f} mm a side")
+check("module borders reconcile with the PCB",
+      abs(2 * P.GLASS_X0 + P.GLASS_W - P.PCB_W) < 0.05 and
+      abs(2 * P.GLASS_Y0 + P.GLASS_H - P.PCB_H) < 0.05,
+      f"{P.GLASS_X0}+{P.GLASS_W}+{P.GLASS_X0} = {2*P.GLASS_X0+P.GLASS_W:.2f} vs PCB {P.PCB_W}; "
+      f"{P.GLASS_Y0}+{P.GLASS_H}+{P.GLASS_Y0} = {2*P.GLASS_Y0+P.GLASS_H:.2f} vs PCB {P.PCB_H}")
+for nm, lo, hi in (("left", 0.0, sx0), ("right", sx1, P.FACE_W),
+                   ("bottom", 0.0, sy0), ("top", sy1, P.FACE_H)):
+    check(f"face frame {nm}", hi - lo >= 8.0, f"{hi - lo:.2f} mm of plate")
+for i, (x, y) in enumerate(P.MAGNETS):
+    r = P.MAG_SPIGOT_D / 2
+    clear = (x + r < sx0 or x - r > sx1 or y + r < sy0 or y - r > sy1)
+    check(f"magnet spigot {i} clears the opening", clear, "lands in solid face plate")
+
 print("\n== rear-face clearances ==")
 check("left clearance for the J10 cable", P.CLR_LEFT >= 8.0,
       f"{P.CLR_LEFT:.2f} mm from the PCB's left edge to the wall; the XH housing plugs in "
@@ -225,12 +246,14 @@ check("reliefs leave rear wall", P.REAR_WALL - P.RELIEF_D >= 0.8,
 check("clearance after relief", P.REAR_CLR + P.RELIEF_D >= 1.5,
       f"{P.REAR_CLR + P.RELIEF_D:.2f} mm from connector to floor there",
       tight=(P.REAR_CLR + P.RELIEF_D < 2.5))
-check("DEPTH follows the measured envelope",
-      abs(P.DEPTH - (P.REAR_WALL + P.REAR_CLR + P.ENVELOPE + P.FACE_T)) < 1e-6,
-      f"{P.REAR_WALL} + {P.REAR_CLR} + {P.ENVELOPE} + {P.FACE_T} = {P.DEPTH}")
+check("glass front is flush with the face front", abs(P.DEPTH - P.GLASS_Z) < 1e-6,
+      f"glass z={P.GLASS_Z}, face front z={P.DEPTH} -- wrap-around, no bezel over the glass")
+check("shell stops where the face starts", abs(P.FACE_Z0 - (P.DEPTH - P.FACE_T)) < 1e-6,
+      f"shell top z={P.FACE_Z0}, face plate {P.FACE_Z0}..{P.DEPTH} -- no perimeter interference")
 
 print("\n== depth ==")
-check("USB-C headroom", P.UC_Z1 <= P.GLASS_Z, f"board rear edge z={P.UC_Z1}, face inner z={P.GLASS_Z}")
+check("USB-C headroom", P.UC_Z1 <= P.FACE_Z0,
+      f"board rear edge z={P.UC_Z1}, face underside z={P.FACE_Z0}")
 check("knob shaft engagement", P.KNOB_TIP_Z > P.DEPTH + 5,
       f"tip z={P.KNOB_TIP_Z}, face outer z={P.DEPTH} -> {P.KNOB_TIP_Z - P.DEPTH:.1f} mm into the cap")
 check("knob standoff above floor", P.KNOB_PCB_Z > P.FLOOR_Z,
