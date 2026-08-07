@@ -106,12 +106,15 @@ Datasheet mirrored here: [`modulino-knob-ABX00107-datasheet.pdf`](modulino-knob-
 | Board | **41.0 × 25.36 mm**, 1.6 ±0.2 thick |
 | Mounting | **4× Ø3.2**, spacing **32.0 horizontal × 16.0 vertical** |
 | Interface | Qwiic / I²C, **3.3 V**, ~3.4 mA |
-| **I²C address** | **0x76**, software configurable |
+| **I²C address** | **0x3A as Arduino's `Wire` addresses it.** The datasheet's `0x76`/`0x74` are **8-bit**; `Wire` is 7-bit, so the bus scan finds it at `0x74 >> 1 = 0x3A` (its pinstrap byte reads back as `0x74`, confirming it). Software configurable. |
 | MCU | STM32C011F4 |
 | Encoder | **Bourns PEC11J-9215F-S0015** — 15 PPR, **30 detents**, momentary push switch |
 | Shaft | **Ø6.0**, D-flat over the last **5 mm** (4.5 across the flat), **L1 = 15.0** from the bushing flange, **LB = 7.0** bushing (Ø7.0) |
 
-> ✅ **0x76 clears both** the GT911 touch controller at 0x5D and the unidentified device at 0x2F.
+> ✅ **Verified on hardware:** the dial drives volume and play/pause. A bus scan with it attached
+> reads **0x2F, 0x3A, 0x5D** — it clears the GT911 at 0x5D and the unidentified device at 0x2F.
+> ⚠️ Expect the same 8-bit/7-bit shift on the **PCF8574**: its advertised 0x20-0x27 are 7-bit
+> already, but confirm with a scan rather than trusting the number.
 > And the Modulino ships with **no I²C pull-ups fitted** — which is what we want, since the
 > CrowPanel's bus already has them. Don't add the optional 4.7 k 0402s.
 
