@@ -36,9 +36,14 @@
 // kCountsPerDetent on real hardware (see below) — the same role WAKE_DEBUG plays for the wake word.
 #define KNOB_DEBUG 0
 
-// 0x76 is the documented default (hardware/jukebox-7/README.md); 0x74 is the other address the
-// Modulino firmware can be strapped to, and costs one extra probe to support.
-static const uint8_t kAddrs[] = {0x76, 0x74};
+// THE ADDRESSES ARE DOCUMENTED 8-BIT; Arduino's Wire takes 7-BIT. Arduino's own datasheet and our
+// hardware/jukebox-7/README.md both say "0x76" (with 0x74 as the alternate), but a bus scan with
+// the dial actually attached found it at **0x3A** — which is 0x74 >> 1. Probing only the 8-bit
+// forms found nothing at all and the driver reported "no dial on the bus" with the dial plugged in
+// and working. Both conventions are listed here so either wins; four probes at boot is nothing.
+//   0x3A = 0x74 >> 1 (the one this unit actually answers on)
+//   0x3B = 0x76 >> 1
+static const uint8_t kAddrs[] = {0x3A, 0x3B, 0x76, 0x74};
 
 // How many reported counts make one physical detent. **VERIFY ON HARDWARE.** The Bourns
 // PEC11J-9215F-S0015 is 15 PPR / 30 detents, so the underlying quadrature is 2 edges per detent —
@@ -102,15 +107,16 @@ static bool probe(uint8_t addr) {
   if (got) Serial.printf("[knob  ] probe 0x%02X: requestFrom=%u avail=%u bytes %02X %02X %02X %02X\n",
                          addr, (unsigned)got, (unsigned)n, b[0], b[1], b[2], b[3]);
 #endif
-  // THE PHANTOM. Measured on this board with nothing plugged into J13: a failed transaction leaves
-  // the P4's I2C driver returning exactly one bogus "success" — requestFrom reports 4, four bytes
-  // are readable, and all four are 0x00. It then strictly alternates with the real failure, which
-  // is why the driver reported finding and losing a dial every 3 s. The uncontended scan in
-  // boardInit() never saw it because nothing had failed on the bus yet.
+  // THE PHANTOM: requestFrom() to a NACKing address still reports 4 readable bytes, because it
+  // hands back the STALE RX BUFFER rather than failing. With nothing ever read the buffer is zeros,
+  // which is why an empty bus produced a bogus "dial found at 0x74" that flapped every 3 s. With a
+  // real dial present the same probe of an absent address returns a COPY OF THE DIAL'S LAST REPLY —
+  // verified live: 0x3B/0x76/0x74 all answered "74 99 00 00" while only 0x3A actually ACKed.
   //
-  // Byte 0 of a genuine reply is the Modulino's pinstrap address, which is non-zero, so an
-  // all-zero reply cannot come from a real dial — not even an idle one at position 0 with the
-  // button up, which answers [pinstrap, 00, 00, 00].
+  // So the byte content is never proof of presence; the ACK is (see probeConfirmed). The all-zero
+  // test below remains as a cheap second net for the cold-start case. A genuine reply's byte 0 is
+  // the pinstrap — measured 0x74 on this unit, i.e. the 8-bit form of its 7-bit address 0x3A — so
+  // it is never zero, not even for an idle dial at position 0 with the button up.
   if (got != 4 || n != 4) return false;
   return !(b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0);
 }
@@ -276,3 +282,49 @@ KnobEvent knobEvent() {
 bool knobPressed() { return knobEvent() == KnobEvent::Short; }
 
 bool knobDown() { return s_down; }
+
+// --- diagnostics ----------------------------------------------------------------------------------
+String knobDiagJson() {
+  String o = "{";
+  o += "\"addr\":\"";
+  { char b[8]; snprintf(b, sizeof b, "0x%02X", s_addr); o += b; }
+  o += "\",\"found\":";      o += (s_addr ? "true" : "false");
+  o += ",\"seeded\":";        o += (s_seeded ? "true" : "false");
+  o += ",\"lastPos\":";       o += String((int)s_lastPos);
+  o += ",\"pendingCounts\":"; o += String((int)s_rawAccum);
+  o += ",\"down\":";          o += (s_down ? "true" : "false");
+  o += ",\"countsPerDetent\":"; o += String((int)kCountsPerDetent);
+
+  // Live probe of every address we look for, reporting the RAW bytes. Byte 0 should be the
+  // Modulino's pinstrap; if a real dial answers all-zero then the phantom guard in probe() is
+  // what is rejecting it, and this is the only way to see that from off-device.
+  o += ",\"probe\":[";
+  for (size_t i = 0; i < sizeof kAddrs; ++i) {
+    uint8_t b[4] = {0, 0, 0, 0};
+    size_t n = 0, got = 0;
+    bool ack = false;
+    if (i2cBusLock()) {
+      Wire.beginTransmission(kAddrs[i]);
+      ack = (Wire.endTransmission() == 0);
+      got = Wire.requestFrom(kAddrs[i], (size_t)4);
+      while (Wire.available() && n < 4) b[n++] = (uint8_t)Wire.read();
+      while (Wire.available()) Wire.read();
+      i2cBusUnlock();
+    }
+    char buf[160];
+    snprintf(buf, sizeof buf,
+             "%s{\"addr\":\"0x%02X\",\"ack\":%s,\"got\":%u,\"read\":%u,"
+             "\"bytes\":\"%02X %02X %02X %02X\"}",
+             i ? "," : "", kAddrs[i], ack ? "true" : "false", (unsigned)got, (unsigned)n,
+             b[0], b[1], b[2], b[3]);
+    o += buf;
+  }
+  o += "]";
+
+  // NO FULL BUS CENSUS HERE. An ACK probe to an ABSENT address blocks on the I2C timeout (~80 ms),
+  // so sweeping 0x08-0x77 took 9.3 s and the HTTP client simply saw the connection die. The census
+  // lives at boot instead, behind KNOB_DEBUG, where it is uncontended and nothing is waiting on it —
+  // and it is what found this dial answering on 0x3A when the driver was only looking at 0x76/0x74.
+  o += "}";
+  return o;
+}

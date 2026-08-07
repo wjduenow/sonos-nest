@@ -17,11 +17,21 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
   discovery/switching, transport, album art, OTA, portal registration, UI click feedback on the
   onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). `core/` runs
-  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. The **rotary dial** is
-  written but **not yet verified on hardware** (awaiting the adapter cable): it is an Arduino
-  Modulino Knob on the **shared I2C bus via J13**, not the 11-pin GPIO header — see
-  `boards/crowpanel_p4_7in/knob.cpp`, and read its phantom-response note before debugging it.
-  **Not done**: the 4 transport buttons (a PCF8574 at 0x20, same bus) and the case.
+  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. The **rotary dial works**:
+  an Arduino Modulino Knob on the **shared I2C bus via J13** (not the 11-pin GPIO header), twist =
+  volume and press = play/pause from any page — `boards/crowpanel_p4_7in/knob.cpp`.
+  > ⚠️ **It answers at 7-bit `0x3A`, NOT the `0x76` its datasheet advertises** — those are 8-bit
+  > addresses and Arduino's `Wire` is 7-bit (`0x74 >> 1 == 0x3A`, and the pinstrap byte it returns
+  > is literally `0x74`). Probing only the documented values found nothing and the driver reported
+  > "no dial on the bus" with the dial plugged in and working. Expect the same off-by-a-shift for
+  > the PCF8574.
+  > ⚠️ **A NACKed `requestFrom` returns the STALE RX BUFFER, not an error** — 4 "readable" bytes
+  > that are a copy of the last real reply (or zeros on a cold bus). Byte content is never proof a
+  > device is there; the ACK is. This invented a phantom dial on an empty bus.
+  > `GET /api/knob` dumps driver state + a live probe of every candidate address; the full bus
+  > census runs at boot behind `KNOB_DEBUG` because an ACK probe to an *absent* address blocks
+  > ~80 ms, so sweeping the range takes ~9 s — far too slow for an HTTP handler.
+  **Not done**: the 4 transport buttons (a PCF8574, same bus) and the case.
   > ⚠️ **The Amazon crawl must never restart from zero, and its tree must contain nothing else.**
   > Two bugs kept this device in a permanent reboot loop. (1) `amazon::post()` skipped HTTP headers
   > with `readStringUntil()`, and `Stream::timedRead()` is a **busy-wait with no yield** — with a

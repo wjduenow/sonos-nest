@@ -17,6 +17,7 @@
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/webconfig.h"
+#include "knob.h"
 #include "web_config.h"
 
 static WebServer *s_server = nullptr;
@@ -182,6 +183,9 @@ static void handleRefresh() {
   s_server->send(200, "application/json", "{\"ok\":true}");
 }
 
+// Read-only; no side effects beyond re-probing the bus.
+static void handleKnob() { s_server->send(200, "application/json", knobDiagJson()); }
+
 static void handleFavRefresh() {
   favcache::requestRefresh();
   s_server->send(200, "application/json", "{\"ok\":true}");
@@ -197,6 +201,7 @@ static void serverTask(void *) {
   s_server->on("/api/config", HTTP_POST, handlePost);
   s_server->on("/api/radio/refresh", HTTP_POST, handleRefresh);
   s_server->on("/api/favorites/refresh", HTTP_POST, handleFavRefresh);
+  s_server->on("/api/knob", HTTP_GET, handleKnob);
   s_server->begin();
   s_url = String("http://") + WiFi.localIP().toString();
   Serial.printf("[web   ] config server on %s\n", s_url.c_str());
@@ -210,7 +215,7 @@ static void serverTask(void *) {
 bool webConfigServerInit() {
   // Core 0 with the rest of the networking, low priority: serving a settings page must never
   // compete with rendering, and it is idle almost always.
-  return xTaskCreatePinnedToCore(serverTask, "webcfg", 6144, nullptr, 1, nullptr, 0) == pdPASS;
+  return xTaskCreatePinnedToCore(serverTask, "webcfg", 8192, nullptr, 1, nullptr, 0) == pdPASS;
 }
 
 // --- core/board.h ---------------------------------------------------------------------------------

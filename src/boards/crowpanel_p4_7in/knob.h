@@ -10,7 +10,16 @@
 // mirrored.
 #pragma once
 
+#include <Arduino.h>
+
 // Probes the dial and starts the poll task. Returns true if the dial answered *now* — but a false
 // return is not fatal and not final: the task keeps re-probing, so plugging the dial in later
 // works without a reflash or a reboot.
 bool knobInit();
+
+// Read-only diagnostic snapshot as JSON, for the config server's /api/knob route. Reports what the
+// driver currently believes AND re-probes the bus live, so a dial that is present but not being
+// detected can be told apart from one that is absent, mis-addressed, or answering oddly. Exists
+// because this board's USB serial is not always attachable from WSL, and a bus device that will not
+// talk cannot be diagnosed from the UI alone.
+String knobDiagJson();
