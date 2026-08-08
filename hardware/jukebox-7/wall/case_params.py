@@ -141,19 +141,17 @@ COL_X1       = FACE_W - WALL             # 227.00
 COL_CX       = (COL_X0 + COL_X1) / 2.0   # 204.20
 COL_W        = COL_X1 - COL_X0           #  45.60  (--u7-ctrl-col is 46)
 
-DIAL_D       = 36.0     # --knob-dia: the CAP diameter, which sits proud ON the face
-DIAL_CY      = 100.0    # column features ride up with the taller face
+DIAL_D       = 42.0     # the CAP diameter, sitting proud ON the face. Was 36 with a 2x2
+                        # button grid below it; with the buttons gone the dial is the only
+                        # control, so it grows to the largest the column takes -- 2.17 mm of
+                        # margin each side. Bigger would need a wider face.
+# Centred on the SCREEN's centreline, not the face's -- they are 1.25 mm apart and the
+# eye reads the display, so aligning to the face would look like a near-miss.
+DIAL_CY      = PCB_Y0 + GLASS_Y0 + GLASS_H / 2.0     # 66.75
 # The face hole only has to clear the encoder's Ø7.0 BUSHING -- not the cap. Sizing it to
 # the cap (Ø37) left a 37 mm hole you could see into, with the Ø36 cap floating inside it.
 # At Ø9 the cap overhangs by 13.5 mm all round and hides the opening completely.
 DIAL_HOLE_D  = 9.0
-
-BTN_D        = 13.0     # --btn-dia
-BTN_CLR      = 0.4
-BTN_GAP      = 9.0      # --btn-gap read as the GAP between caps, not the pitch:
-BTN_PITCH    = BTN_D + BTN_GAP           # 22.0 -- a 9 mm *pitch* is impossible with
-                                         # Ø13 caps; the token is self-inconsistent.
-BTN_ROW_Y    = (66.0, 46.0)              # play/rooms on top, prev/next below
 
 # ---------------------------------------------------------------- printed knob cap
 # For the Bourns PEC11J-9215F-S0015: Ø6.0 shaft, D-flat over the last 5 mm at 4.5 across.
@@ -170,7 +168,7 @@ KCAP_SHAFT_D  = 6.0
 KCAP_FLAT     = 4.5             # across the flat
 KCAP_ROUND_H  = 3.5             # round section of the bore, from the underside up
 KCAP_BORE_H   = 8.5             # total bore depth (shaft gives 7.5 -> 1 mm of air above)
-KCAP_FLUTES   = 36              # knurl: scallops cut around the rim
+KCAP_FLUTES   = 42              # knurl: scallops cut around the rim (kept at ~3.1 mm pitch)
 KCAP_FLUTE_D  = 2.0
 KCAP_CHAMFER  = 1.0             # top edge
 KCAP_LEADIN   = 0.6             # chamfer at the bore mouth, for assembly
@@ -273,37 +271,6 @@ KNOB_TIP_Z      = DEPTH + 8.0                     # 8 mm proud of the face, what
 KNOB_PCB_Z      = KNOB_TIP_Z - KNOB_STACK_H       # 8.5  standoff top / board front face
 KNOB_STANDOFF_D = 6.0
 
-# ---------------------------------------------------------------- button I/O expander
-# Adafruit PCF8574 I2C GPIO Expander Breakout, STEMMA QT / Qwiic, product 5545.
-# Outline and holes are exact, from Adafruit's own Eagle file:
-#   github.com/adafruit/Adafruit-PCF8574-PCB -- "Adafruit PCF8574 QT.brd"
-# 8 GPIO (we need 4), address 0x20 with A0/A1/A2 jumpers giving 0x20-0x27 -- clear of the
-# GT911 (0x5D), the unidentified 0x2F and the Modulino Knob (0x76).
-# Inputs idle high on a weak (~100 uA) internal source, so the buttons just switch to GND;
-# no external pull-ups. The chip has an INT output if polling ever proves too costly.
-EXP_W        = 25.40    # exact (1.0")
-EXP_H        = 17.78    # exact (0.7")
-EXP_THICK    = 4.60     # incl. the STEMMA QT connectors
-EXP_HOLE_D   = 2.50     # 2x plated
-EXP_HOLE_CC  = 20.32    # centre-to-centre (holes at x 2.54 and 22.86)
-EXP_HOLE_DY  = -6.35    # hole row, relative to the board centre (2.54 up from the bottom)
-EXP_PILOT    = 2.10     # M2.5 self-tap pilot
-# Mounted FLAT on the floor beneath the button grid: the switch bodies hang down from the
-# face plate at z~19.5, the expander lives at z 4.0-8.6, so they share XY but never Z.
-EXP_CX       = COL_CX
-EXP_CY       = sum(BTN_ROW_Y) / 2.0      # midway between the two button rows
-EXP_PCB_Z    = FLOOR_Z + 1.5             # 4.0 -- clearance under the board for wiring
-
-# Rear port relief: deliberately oversized with an outside funnel, so the hole drilled
-# in the wall does not have to be placed precisely.
-# Sized to the receptacle body (8.94 x 3.26), not to the plug: the plug's overmold stays
-# out in the wall's cable hole and never enters this opening.
-#
-# WHICH AXIS IS WHICH -- this was wrong once, so it is spelled out. The board stands ON
-# EDGE, its plane perpendicular to the wall, i.e. the plane containing Y and Z. The
-# receptacle is mounted on that face, so its LONG axis (8.94) lies in the board's plane
-# and therefore runs ALONG the column (Y). Its short axis (3.26) is the board's normal,
-# across the column (X).
 PORT_W       =  5.0     # across the column (X) -> clears the 3.26 depth, 0.87 mm a side
 PORT_H       = 17.0     # along  the column (Y) -> clears the 8.94 length, 4.03 mm a side
 PORT_FUNNEL  =  2.5     # 45 deg flare on the WALL side only, to forgive the drilled hole
@@ -313,6 +280,7 @@ PORT_FUNNEL  =  2.5     # 45 deg flare on the WALL side only, to forgive the dri
 # ---------------------------------------------------------------- assembly
 BOSS_OD      = 7.0      # PCB mounting boss
 BOSS_PILOT   = 2.6      # M3 self-tap pilot
+
 # ---------------------------------------------------------------- magnetic face plate
 # The face is held on by MAGNETS, not screws -- nothing breaks the front surface.
 #

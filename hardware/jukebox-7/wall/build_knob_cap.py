@@ -25,6 +25,7 @@ warnings.filterwarnings('ignore')
 from trimesh.creation import cylinder, extrude_polygon, revolve
 from trimesh.boolean import difference
 from shapely.geometry import Point, box as sbox
+from shapely.ops import unary_union
 import case_params as P
 
 
@@ -40,18 +41,29 @@ def build_cap():
     H = P.KCAP_H
     ch = P.KCAP_CHAMFER
 
-    # ---- body: revolved profile, so the top edge chamfer is part of the solid ----
-    profile = np.array([[0.0, 0.0], [R, 0.0], [R, H - ch], [R - ch, H], [0.0, H]])
-    body = revolve(profile, sections=192)
+    # ---- knurl in 2D, then ONE extrusion ----------------------------------------
+    # Subtracting 42 cylinders from a revolved solid is a fragile boolean -- the flute
+    # centres lie exactly ON the outer surface, so every cut grazes it tangentially and
+    # the result came out non-watertight at Ø42. Doing the scallops in 2D with shapely
+    # and extruding once is exact, and drops ~40 3D booleans.
+    disc = Point(0, 0).buffer(R, resolution=128)
+    flutes = unary_union([
+        Point(R * np.cos(2 * np.pi * i / P.KCAP_FLUTES),
+              R * np.sin(2 * np.pi * i / P.KCAP_FLUTES)).buffer(P.KCAP_FLUTE_D / 2.0,
+                                                               resolution=12)
+        for i in range(P.KCAP_FLUTES)])
+    body = extrude_polygon(disc.difference(flutes), height=H)
 
     cuts = []
 
-    # ---- knurl: scallops cut around the rim -------------------------------------
-    for i in range(P.KCAP_FLUTES):
-        t = 2 * np.pi * i / P.KCAP_FLUTES
-        f = cylinder(radius=P.KCAP_FLUTE_D / 2.0, height=2 * H, sections=20)
-        f.apply_translation([R * np.cos(t), R * np.sin(t), H / 2.0])
-        cuts.append(f)
+    # ---- top-edge chamfer: built from two primitives, not a revolve --------------
+    # The tool is (a big disc) minus (a 45 deg cone), which leaves exactly the ring of
+    # material outside the chamfer face. Both are clean solids, so the boolean is safe.
+    big = cylinder(radius=R + 6.0, height=ch + 2.0, sections=128)
+    big.apply_translation([0, 0, H - ch + (ch + 2.0) / 2.0])
+    cone = trimesh.creation.cone(radius=R, height=R, sections=128)
+    cone.apply_translation([0, 0, H - ch])
+    cuts.append(difference([big, cone]))
 
     # ---- bore: round low, D high ------------------------------------------------
     bore_d = P.KCAP_SHAFT_D + P.KCAP_FIT
@@ -65,14 +77,23 @@ def build_cap():
     dsec.apply_translation([0, 0, P.KCAP_ROUND_H])
     cuts.append(dsec)
 
-    # lead-in chamfer at the bore mouth so the cap starts onto the shaft easily
-    lead = trimesh.creation.cone(radius=bore_d / 2.0 + P.KCAP_LEADIN,
-                                 height=P.KCAP_LEADIN + 0.01, sections=64)
-    lead.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
-    lead.apply_translation([0, 0, P.KCAP_LEADIN])
+    # Lead-in at the bore mouth, as a COUNTERBORE rather than a cone. The cone version
+    # tapered to a point at KCAP_LEADIN, so above ~0.1 mm it sat entirely inside the bore
+    # -- redundant overlap that produced degenerate faces and a non-watertight STL. A
+    # short wider cylinder starts the shaft just as well and is a clean primitive.
+    lead = cylinder(radius=bore_d / 2.0 + P.KCAP_LEADIN,
+                    height=P.KCAP_LEADIN * 2.0, sections=64)
     cuts.append(lead)
 
-    return difference([body] + cuts)
+    cap = difference([body] + cuts)
+
+    # The 2D knurl leaves a few sliver triangles where each scallop meets the disc.
+    # They are harmless in memory but do not survive an STL round-trip -- the reloaded
+    # mesh comes back non-watertight. Clean them out before returning.
+    cap.update_faces(cap.nondegenerate_faces())
+    cap.merge_vertices()
+    cap.fix_normals()
+    return cap
 
 
 if __name__ == "__main__":

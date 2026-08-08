@@ -26,7 +26,7 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 | Depth | **23.5 mm** — the glass plane; set by the plugged power cable, not the bare board |
 | Screen | **wrap-around** — 165.5 × 100.6 opening cut to the *module*, glass finishes flush |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
-| Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
+| Column | 46.35 mm wide on the right: a single **Ø42** dial, centred on the screen |
 | Mount | 2 keyholes in the top band, **140 mm apart**, 5.5 mm drop |
 | Power | USB-C breakout on edge at the bottom of the column → 2 wires to J10 |
 | Print | Bambu P2S; both parts lie flat, face printed front-face-down |
@@ -340,6 +340,24 @@ The face plate keeps a 6 mm disc because its spigot is only Ø8.2 and cannot wal
 > `check_clearances.py` warns that the bottom bores have ~1.05 mm of wall each side. That is the
 > geometric maximum: only 10.75 mm of material exists between the case's outer face and the PCB
 > edge, and the bore is 8.6 of it. Nothing loads that wall.
+
+### One control, centred
+
+The four transport buttons are gone. With the dial as the only control it moved to the **screen's
+centreline** (y = 66.75, not the face's 68.00 — they are 1.25 mm apart and the eye reads the
+display), and grew **Ø36 → Ø42**, the largest the 46.35 mm column takes at 2.17 mm of margin a side.
+
+That leaves ~43 mm of blank column above and below. Symmetric blank reads as a clean panel;
+asymmetric blank reads as leftover, which is what the old Ø36-at-y-100 layout looked like once the
+buttons came out.
+
+Removed with them: the four button holes, the **PCF8574 expander** and its standoffs. The I²C chain
+is now a single board — Modulino Knob → J13 — and the build has no soldering left in it beyond the
+two USB-C power wires.
+
+> Speakers still have no acoustic exit. The unit is flush to the wall, so a rear grille would be
+> sealed by the drywall; the exits are the **edges**, most easily the right wall alongside the free
+> column volume. Not yet modelled.
 
 ## Knob cap — `build_knob_cap.py`
 

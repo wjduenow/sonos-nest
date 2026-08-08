@@ -145,14 +145,6 @@ def build_shell():
             cuts.append(cyl(P.KNOB_PILOT / 2.0, P.KNOB_PCB_Z - 9.0, P.KNOB_PCB_Z + 1.0,
                             x, y, seg=32))
 
-    # ---- button I/O expander (Adafruit PCF8574) --------------------------------
-    # Flat on the floor under the button grid; the switches hang down from the face
-    # plate well above it.
-    for dx in (-P.EXP_HOLE_CC / 2.0, +P.EXP_HOLE_CC / 2.0):
-        x, y = P.EXP_CX + dx, P.EXP_CY + P.EXP_HOLE_DY
-        adds.append(cyl(P.EXP_HOLE_D / 2.0 + 1.6, P.FLOOR_Z, P.EXP_PCB_Z, x, y))
-        cuts.append(cyl(P.EXP_PILOT / 2.0, P.EXP_PCB_Z - 6.0, P.EXP_PCB_Z + 1.0, x, y, seg=32))
-
     # ---- rear port + funnel ----------------------------------------------------
     port = bx(P.UC_CX - P.PORT_W / 2.0, P.UC_CY - P.PORT_H / 2.0, -1.0,
               P.UC_CX + P.PORT_W / 2.0, P.UC_CY + P.PORT_H / 2.0, P.REAR_WALL + 0.01)

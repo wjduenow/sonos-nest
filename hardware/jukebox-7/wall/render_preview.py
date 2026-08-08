@@ -53,10 +53,7 @@ a.add_patch(Rectangle((sx0, sy0), sx1 - sx0, sy1 - sy0, fc='#0e0f12', ec='#e8892
 a.text((sx0 + sx1) / 2, (sy0 + sy1) / 2,
        "screen 155 x 87\n" + ("MEASURED" if P.AA_MEASURED else "POSITION PROVISIONAL"),
        ha='center', va='center', color='#e8892b', fontsize=9, family='monospace')
-a.add_patch(Circle((P.COL_CX, P.DIAL_CY), P.DIAL_D / 2, fc='#cfcbc4', ec='#333', lw=1.2))
-for by in P.BTN_ROW_Y:
-    for dx in (-P.BTN_PITCH / 2, P.BTN_PITCH / 2):
-        a.add_patch(Circle((P.COL_CX + dx, by), P.BTN_D / 2, fc='#dedad3', ec='#333', lw=1.0))
+a.add_patch(Circle((P.COL_CX, P.DIAL_CY), P.KCAP_D / 2, fc='#cfcbc4', ec='#333', lw=1.2))
 a.plot([P.COL_X0, P.COL_X0], [0, P.FACE_H], color='#999', ls=':', lw=0.9)
 a.text(P.COL_CX, 116, f"column {P.COL_W:.1f}", ha='center', fontsize=8,
        color='#666', family='monospace')
@@ -101,10 +98,6 @@ a.plot([P.UC_CX, jx], [jy, jy], color='#e8892b', lw=2.2)
 a.plot([P.UC_CX, P.UC_CX], [P.UC_CY, jy], color='#e8892b', lw=2.2)
 a.plot(jx, jy, 'o', color='#e8892b', ms=7)
 a.text(jx + 4, jy + 5, "J10  +5V_IN", fontsize=8, color='#e8892b', family='monospace')
-a.add_patch(Rectangle((P.EXP_CX - P.EXP_W / 2, P.EXP_CY - P.EXP_H / 2), P.EXP_W, P.EXP_H,
-                      fc='#2c6b9e', alpha=.18, ec='#2c6b9e', lw=1.1))
-a.text(P.EXP_CX, P.EXP_CY, "PCF8574\n0x20", ha='center', va='center', fontsize=7,
-       color='#22557f', family='monospace')
 for (fx, fy) in P.MAGNETS:
     a.add_patch(Circle((fx, fy), P.MAG_SPIGOT_D / 2, fc='#f6e9c9', ec='#a07b1f', lw=1.0))
     a.add_patch(Circle((fx, fy), P.MAG_D_SHELL / 2, fc='#d9b44a', ec='#a07b1f', lw=0.8))

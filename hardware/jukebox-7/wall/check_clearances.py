@@ -48,8 +48,6 @@ def board_rects():
     return {
         "knob board": (P.COL_CX - P.KNOB_W / 2, P.DIAL_CY - P.KNOB_H / 2,
                        P.COL_CX + P.KNOB_W / 2, P.DIAL_CY + P.KNOB_H / 2),
-        "expander board": (P.EXP_CX - P.EXP_W / 2, P.EXP_CY - P.EXP_H / 2,
-                           P.EXP_CX + P.EXP_W / 2, P.EXP_CY + P.EXP_H / 2),
         "USB-C plate": (pa, P.UC_CY - P.UC_H / 2 - 2.5, pb, P.UC_CY + P.UC_H / 2 + 2.5),
         "USB-C board": (ba, P.UC_CY - P.UC_H / 2, bb, P.UC_CY + P.UC_H / 2),
     }
@@ -92,9 +90,7 @@ for i, f in enumerate(P.MAGNETS):
 
 print("\n== boards must not overlap each other in XY unless they differ in Z ==")
 rs = board_rects()
-for an, bn in (("knob board", "USB-C plate"), ("knob board", "USB-C board"),
-               ("expander board", "USB-C plate"), ("expander board", "USB-C board"),
-               ("knob board", "expander board")):
+for an, bn in (("knob board", "USB-C plate"), ("knob board", "USB-C board")):
     a, b = rs[an], rs[bn]
     sep = max(a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
     check(f"{an} vs {bn}", sep >= 0, f"separation {sep:+.2f} mm", tight=(0 <= sep < 1.0))
@@ -114,9 +110,13 @@ check("dial bushing hole", P.COL_CX - P.DIAL_HOLE_D / 2 >= P.COL_X0,
 check("knob cap fits the column", P.COL_CX - P.KCAP_D / 2 >= P.COL_X0 and
       P.COL_CX + P.KCAP_D / 2 <= P.COL_X1,
       f"Ø{P.KCAP_D} cap spans {P.COL_CX - P.KCAP_D/2:.1f}..{P.COL_CX + P.KCAP_D/2:.1f}")
-check("knob cap clears the top button row",
-      P.DIAL_CY - P.KCAP_D / 2 > max(P.BTN_ROW_Y) + P.BTN_D / 2,
-      f"gap {P.DIAL_CY - P.KCAP_D/2 - (max(P.BTN_ROW_Y) + P.BTN_D/2):+.2f} mm")
+check("knob cap is centred on the screen",
+      abs(P.DIAL_CY - (P.PCB_Y0 + P.GLASS_Y0 + P.GLASS_H / 2)) < 1e-6,
+      f"dial y={P.DIAL_CY:.2f}, screen centreline y={P.PCB_Y0+P.GLASS_Y0+P.GLASS_H/2:.2f}")
+check("knob cap clears the column walls",
+      P.COL_CX - P.KCAP_D / 2 >= P.COL_X0 and P.COL_CX + P.KCAP_D / 2 <= P.COL_X1,
+      f"O{P.KCAP_D} cap -> {(P.COL_W - P.KCAP_D)/2:.2f} mm margin each side",
+      tight=((P.COL_W - P.KCAP_D) / 2 < 2.5))
 check("cap overhangs the face hole", P.KCAP_D > P.DIAL_HOLE_D + 6,
       f"{(P.KCAP_D - P.DIAL_HOLE_D) / 2:.1f} mm of overhang all round")
 check("cap bore engages the shaft", P.KNOB_TIP_Z - (P.DEPTH + P.KCAP_GAP) >= 6.0,
@@ -128,21 +128,6 @@ check("bore round section covers the shaft's round part",
       P.KCAP_ROUND_H >= (P.KNOB_TIP_Z - P.KNOB_SHAFT_FLAT) - (P.DEPTH + P.KCAP_GAP),
       f"round for {P.KCAP_ROUND_H} mm; shaft is round for "
       f"{(P.KNOB_TIP_Z - P.KNOB_SHAFT_FLAT) - (P.DEPTH + P.KCAP_GAP):.1f} mm above the cap's underside")
-for by in P.BTN_ROW_Y:
-    check(f"button row y={by}", P.COL_CX - P.BTN_PITCH / 2 - P.BTN_D / 2 >= P.COL_X0,
-          f"pitch {P.BTN_PITCH} spans "
-          f"{P.COL_CX - P.BTN_PITCH/2 - P.BTN_D/2:.1f}..{P.COL_CX + P.BTN_PITCH/2 + P.BTN_D/2:.1f}")
-
-print("\n== column stack: knob board / buttons / USB-C must not overlap in Y ==")
-kb0 = P.DIAL_CY - P.KNOB_H / 2
-btn_hi = max(P.BTN_ROW_Y) + (P.BTN_D + P.BTN_CLR) / 2
-btn_lo = min(P.BTN_ROW_Y) - (P.BTN_D + P.BTN_CLR) / 2
-uc_hi = P.UC_CY + P.UC_H / 2
-check("knob board vs top button row", kb0 > btn_hi, f"gap {kb0 - btn_hi:+.2f} mm",
-      tight=(0 < kb0 - btn_hi < 3))
-check("bottom button row vs USB-C", btn_lo > uc_hi, f"gap {btn_lo - uc_hi:+.2f} mm",
-      tight=(0 < btn_lo - uc_hi < 3))
-
 print("\n== keyholes must stay inside the top band and off the PCB ==")
 check("keyhole slot runs UP from the entry hole", P.KEY_SLOT_TOP > P.KEY_ENTRY_CY,
       "load-bearing closed end is above the entry -- the unit is lowered onto the screws")

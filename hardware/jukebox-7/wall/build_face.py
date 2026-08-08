@@ -5,7 +5,7 @@ Build face.stl -- the front plate of the sonos-jukebox 7" flush wall case.
   * rounded plate matching the shell footprint, FACE_T thick
   * screen opening over the 155 x 87 lit area, with a rebate that lands on the
     display's black border rather than on the lit area itself
-  * control column: Ø36 dial hole + a 2x2 grid of Ø13 button holes
+  * control column: a single Ø9 dial hole -- the knob is the only control
   * 6 magnet spigots -- no screws, nothing breaks the front surface
 
   *** The screen opening's POSITION is provisional. *** AA_X0 / AA_Y0 in
@@ -67,10 +67,6 @@ def build_face():
     # Only the encoder's Ø7 bushing passes through here; the Ø36 cap sits proud on top
     # and overhangs the opening by 13.5 mm all round.
     cuts.append(cyl(P.DIAL_HOLE_D / 2.0, z0 - 1.0, z1 + 1.0, P.COL_CX, P.DIAL_CY))
-    for by in P.BTN_ROW_Y:
-        for dx in (-P.BTN_PITCH / 2.0, +P.BTN_PITCH / 2.0):
-            cuts.append(cyl((P.BTN_D + P.BTN_CLR) / 2.0, z0 - 1.0, z1 + 1.0,
-                            P.COL_CX + dx, by))
 
     # ---- magnet spigots ---------------------------------------------------------
     # NOTHING breaks the front surface. Each magnet lives in a boss that drops below the
