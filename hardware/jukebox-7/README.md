@@ -22,7 +22,7 @@ the **back** from a cable in the wall.
 | | |
 |---|---|
 | Face | **240 × 136 mm** (see [`wall/`](wall/) for why each dimension is what it is) |
-| Depth | **20.5 mm** — wrap-around bezel: the glass front *is* the front surface |
+| Depth | **23.5 mm** — wrap-around bezel; depth set by the plugged J10 cable |
 | Corner radius | 14 mm (design token) |
 | Screen cutout | **165.5 × 100.6** — cut to the module outline, not the lit area |
 | Mounting | Keyhole slots in the rear shell — lowest profile, adds 0 mm |

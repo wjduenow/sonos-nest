@@ -231,6 +231,18 @@ for i, (x, y) in enumerate(P.MAGNETS):
     clear = (x + r < sx0 or x - r > sx1 or y + r < sy0 or y - r > sy1)
     check(f"magnet spigot {i} clears the opening", clear, "lands in solid face plate")
 
+print("\n== plugged cables (the real rear-most feature) ==")
+relief_floor = P.FLOOR_Z - P.RELIEF_D
+cable_z = P.DEPTH - P.PLUGGED_DEPTH
+check("plugged J10 cable clears the rear wall", cable_z >= relief_floor,
+      f"cable back face z={cable_z:.2f}, J10 relief floor z={relief_floor:.2f} "
+      f"-> {cable_z - relief_floor:+.2f} mm",
+      tight=(0 <= cable_z - relief_floor < 1.0))
+check("plugged cable is inside the case at all", cable_z >= 0.0,
+      f"cable back face z={cable_z:.2f} vs the rear outer plane z=0")
+check("bare board still clears its floor", P.REAR_CLR >= 0.5,
+      f"REAR_CLR {P.REAR_CLR} behind the tallest bare component")
+
 print("\n== pry notch ==")
 for mx in P.MAG_X:
     ov = (min(mx + P.MAG_BLOCK_HW, P.PRY_X + P.PRY_W / 2)

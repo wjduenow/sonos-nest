@@ -96,7 +96,15 @@ CLR_Y        = 4.75     # ...and in Y. Wider on purpose: at 0.75 the board dropp
                         # sat hard against the magnet blocks above and below it, with no
                         # room to get a finger to it. 2 mm added, then 2 mm again -- the
                         # blocks were still pinching the board. Face 128 -> 132 -> 136.
-REAR_CLR     = 0.5      # gap behind the tallest rear component
+REAR_CLR     = 3.5      # gap behind the tallest rear component.
+                        # 0.5 was right for the BARE board, but the J10 power cable is the
+                        # real rear-most feature once it is plugged: measured 22.5 mm from
+                        # the glass front to the back of the wires, against a 17.5 mm bare
+                        # envelope. At REAR_CLR 0.5 the cable ended 2.0 mm BEHIND the
+                        # outside of the case -- it would have held the unit off the wall.
+                        # Raising this lifts the board off the floor and, because the glass
+                        # is pinned to the face by the wrap-around, deepens the case with it.
+PLUGGED_DEPTH = 22.5    # MEASURED: glass front -> back of the wires in the plugged J10
 
 # derived z planes
 FLOOR_Z      = REAR_WALL                 #  2.5

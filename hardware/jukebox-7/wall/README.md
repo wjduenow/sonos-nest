@@ -23,7 +23,7 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 | | |
 |---|---|
 | Face | **240 × 136 mm**, R14 corners |
-| Depth | **20.5 mm** — the glass plane; the face is flush with it, not on top of it |
+| Depth | **23.5 mm** — the glass plane; set by the plugged power cable, not the bare board |
 | Screen | **wrap-around** — 165.5 × 100.6 opening cut to the *module*, glass finishes flush |
 | Face fixing | **6 magnets, no screws** — nothing breaks the front surface |
 | Column | 45.6 mm wide on the right: Ø36 dial at the top, 2×2 Ø13 buttons below |
@@ -35,12 +35,33 @@ All geometry comes from [`case_params.py`](case_params.py). Board numbers come f
 
 ```
    0.0  rear outer plane (against the wall)
+   1.0  J10 / I2C relief floor    <- plugged power cable bottoms out here
    2.5  interior floor            rear wall 2.5
-   3.0  rear-most component       + clearance 0.5
-   9.85 PCB rear face             + REAR_COMP_H 6.85   == boss tops
-  18.0  face plate underside      == TOP OF THE SHELL
-  20.5  glass front == face front + envelope 17.5  (MEASURED)
+   6.0  rear-most bare component  + REAR_CLR 3.5
+  12.85 PCB rear face             + REAR_COMP_H 6.85   == boss tops
+  21.0  face plate underside      == TOP OF THE SHELL
+  23.5  glass front == face front + envelope 17.5  (MEASURED)
 ```
+
+### `REAR_CLR` is set by the plugged cable, not the bare board
+
+The bare board's rear-most feature is the Crowtail I2C connector at 17.5 mm from the glass. But
+with the **power cable plugged into J10** the rear-most feature is the wires, measured at
+**22.5 mm** — 5 mm deeper.
+
+At `REAR_CLR = 0.5` that put the cable's back face at **z = −2.0**: two millimetres *behind* the
+outside of the case, which would have held the whole unit off the wall. `REAR_CLR` is now **3.5**,
+which lifts the board off the floor and — because the glass is pinned to the face by the
+wrap-around — carries the face with it. Case 20.5 → 23.5.
+
+The cable now lands exactly on the J10 relief floor at z = 1.0. `check_clearances.py` **warns**
+rather than fails at zero margin: that floor is not a surface anything presses on, so touching is
+acceptable, but it is worth seeing every time the numbers are printed.
+
+> Most of that 22.5 is the wires bending back, not the connector — a JST XH housing is only
+> ~5.75 mm tall against the 11.85 mm the plug stands proud of the PCB. If the wires are ever
+> dressed to turn **in the plane** and run out into the `CLR_LEFT` gap, `PLUGGED_DEPTH` drops and
+> `REAR_CLR` can come back down with it.
 
 ### Wrap-around bezel
 
