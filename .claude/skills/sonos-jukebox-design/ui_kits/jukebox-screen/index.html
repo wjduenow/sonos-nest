@@ -21,7 +21,6 @@ body{font-family:var(--font-ui);background:var(--surface-2);display:grid;place-i
 const mount = () => {
   if (!window.App) return setTimeout(mount, 40);
   ReactDOM.createRoot(document.getElementById('root')).render(<window.App/>);
-  setTimeout(()=>window.lucide&&lucide.createIcons(),80);
 };
 mount();
 </script>

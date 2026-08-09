@@ -57,6 +57,10 @@
         "message": "<Dial> mode must be one of 'volume' | 'value'."
       },
       {
+        "selector": "JSXOpeningElement[name.name='Icon'] > JSXAttribute > JSXIdentifier[name!=/^(?:name|size|strokeWidth|color|style|key|ref|className|style|children)$/]",
+        "message": "<Icon> doesn't accept that prop. Declared props: name, size, strokeWidth, color, style."
+      },
+      {
         "selector": "JSXOpeningElement[name.name='ListRow'] > JSXAttribute > JSXIdentifier[name!=/^(?:title|subtitle|art|artColor|playing|selected|trailing|onClick|style|key|ref|className|style|children)$/]",
         "message": "<ListRow> doesn't accept that prop. Declared props: title, subtitle, art, artColor, playing, selected, trailing, onClick, style."
       },
@@ -110,6 +114,9 @@
         "replaces": []
       },
       "Dial": {
+        "replaces": []
+      },
+      "Icon": {
         "replaces": []
       },
       "ListRow": {

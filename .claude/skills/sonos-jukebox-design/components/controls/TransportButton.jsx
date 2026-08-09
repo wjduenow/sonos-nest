@@ -1,4 +1,5 @@
 import React from 'react';
+import { Icon } from '../system/Icon.jsx';
 
 const ICONS = { play:'play', pause:'pause', back:'chevron-left', next:'skip-forward', prev:'skip-back', room:'arrow-left-right', menu:'menu', shuffle:'shuffle', repeat:'repeat', add:'plus', more:'more-horizontal' };
 const SIZES = { sm:{d:44,i:20}, md:{d:56,i:24}, lg:{d:72,i:30} };
@@ -20,7 +21,7 @@ export function TransportButton({ icon='play', size='md', variant='ghost', activ
   return (
     <button type="button" aria-label={label || icon} aria-pressed={active}
       onClick={onClick} style={{ ...base, ...(variants[variant]||variants.ghost), ...style }} {...rest}>
-      <i data-lucide={ICONS[icon] || icon} width={s.i} height={s.i} stroke-width={2.2}></i>
+      <Icon name={ICONS[icon] || icon} size={s.i} strokeWidth={2.2} />
     </button>
   );
 }

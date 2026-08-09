@@ -1,5 +1,7 @@
 // Device shell: matte face + screen + physical dial/buttons, with nav + volume overlay.
-const { TransportButton, Dial } = window.SonosJukeboxDesignSystem_e55a41;
+const DS = window.SonosJukeboxDesignSystem_e55a41;
+const { TransportButton, Dial } = DS;
+const Icon = DS.Icon || window.JBIcon;
 const { useState, useEffect, useRef } = React;
 
 const RAIL = [
@@ -12,8 +14,11 @@ function App() {
   const [state, setState] = useState({
     view:'now', playing:true, shuffle:false,
     activeRoom:'kitchen', grouped:['kitchen','bedroom'], source:'RADIO',
-    stationId:'r6', track: window.JB.stations.find(s=>s.id==='r6'),
-    vol:64, volShow:false,
+    stationId:'r6',
+    track:(() => { const st = window.JB.stations.find(s=>s.id==='r6');
+      return { title:st.name, artist:'Lauren Laverne', album:'Live radio', elapsed:0, duration:0, art:st.art, quality:'AAC · 128' }; })(),
+    vol:64, volShow:false, artLayout:'split',
+    rooms: window.JB.rooms.map(r => ({ ...r, playing: ['kitchen','bedroom'].includes(r.id) })),
   });
   const volTimer = useRef(null);
   const groupCount = Math.max(0, state.grouped.length - 1);
@@ -32,11 +37,29 @@ function App() {
     playStation: (st) => setState(s => ({ ...s, stationId:st.id, source:'RADIO', playing:true, view:'now',
       track:{ title:st.name, artist:st.sub.replace(/^Now:\s*/,''), album:'Live radio', elapsed:0, duration:0, art:st.art, quality:'AAC · 128' } })),
     bumpVol: (d) => { setState(s => ({ ...s, vol: Math.max(0, Math.min(100, s.vol + d)) })); showVol(); },
+    cycleArt: () => setState(s => ({ ...s, view:'now', artLayout: s.artLayout==='split' ? 'hero' : s.artLayout==='hero' ? 'bleed' : 'split' })),
+    setActive: (id) => setState(s => ({ ...s, activeRoom:id, grouped: s.grouped.includes(id) ? s.grouped : [...s.grouped, id] })),
+    toggleGroup: (id) => setState(s => {
+      const inG = s.grouped.includes(id);
+      if (inG && id === s.activeRoom) return s;              // main room stays in its own group
+      const grouped = inG ? s.grouped.filter(g => g !== id) : [...s.grouped, id];
+      const anchor = s.rooms.find(r => r.id === s.activeRoom);
+      return { ...s, grouped, rooms: s.rooms.map(r => r.id===id ? { ...r, playing: inG ? false : anchor.playing } : r) };
+    }),
+    setRoomVol: (id, d) => setState(s => ({ ...s,
+      rooms: s.rooms.map(r => r.id===id ? { ...r, vol: Math.max(0, Math.min(100, r.vol + d)) } : r) })),
+    toggleRoomPlay: (id) => setState(s => ({ ...s,
+      rooms: s.rooms.map(r => r.id===id ? { ...r, playing:!r.playing } : r) })),
+    toggleGroupPlay: () => setState(s => {
+      const on = !s.rooms.filter(r => s.grouped.includes(r.id)).some(r => r.playing);
+      return { ...s, playing:on, rooms: s.rooms.map(r => s.grouped.includes(r.id) ? { ...r, playing:on } : r) };
+    }),
+    ungroupAll: () => setState(s => ({ ...s, grouped:[s.activeRoom],
+      rooms: s.rooms.map(r => r.id===s.activeRoom ? r : { ...r, playing:false }) })),
   };
 
-  useEffect(() => { window.lucide && lucide.createIcons(); });
-
-  const nowTrack = { ...state.track, elapsed: state.track.duration ? 84 : 0, duration: state.track.duration || 330 };
+  const isLive = !state.track.duration;
+  const nowTrack = { ...state.track, elapsed: isLive ? 0 : 84, duration: state.track.duration || 0, live: isLive };
   const viewState = { ...state, track: state.view==='now' ? nowTrack : state.track, groupCount };
   const View = { now: window.NowPlaying, radio: window.RadioBrowser, rooms: window.RoomPicker }[state.view];
 
@@ -52,10 +75,15 @@ function App() {
                 style={{ width:48, height:48, borderRadius:14, border:'none', cursor:'pointer', display:'grid', placeItems:'center',
                   background: on ? 'color-mix(in oklch, var(--accent) 18%, transparent)' : 'transparent',
                   color: on ? 'var(--accent)' : 'var(--screen-text-dim)' }}>
-                <i data-lucide={item.icon} width={22} height={22}></i>
+                <Icon name={item.icon} size={22} />
               </button>
             );
           })}
+          <button onClick={actions.cycleArt} title={`Album art: ${state.artLayout} — tap to change`}
+            style={{ width:48, height:48, marginTop:'auto', marginBottom:18, borderRadius:14, border:'1px solid var(--screen-line)',
+              cursor:'pointer', display:'grid', placeItems:'center', background:'transparent', color:'var(--screen-text-dim)' }}>
+            <Icon name={state.artLayout==='bleed' ? 'maximize' : state.artLayout==='hero' ? 'square' : 'columns-2'} size={20} />
+          </button>
         </nav>
         <div style={{ flex:1, minWidth:0 }}><View state={viewState} actions={actions} /></div>
         {state.volShow && (
@@ -69,7 +97,7 @@ function App() {
         <button onClick={() => actions.bumpVol(6)} onWheel={(e)=>actions.bumpVol(e.deltaY<0?4:-4)} title="Rotary dial — turn for volume, press to select"
           style={{ width:130, height:130, borderRadius:'999px', border:'none', cursor:'pointer', position:'relative',
             background:'radial-gradient(circle at 38% 32%,#4a4d55,#2a2c31 62%)', boxShadow:'0 10px 22px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.18)' }}>
-          <span style={{ position:'absolute', inset:12, borderRadius:'999px', background:'repeating-conic-gradient(from 0deg, rgba(255,255,255,.10) 0 3deg, transparent 3deg 9deg)' }}></span>
+          <span style={{ position:'absolute', inset:12, borderRadius:'999px', background:'repeating-conic-gradient(from 0deg, rgba(255,255,255,.055) 0 1.6deg, rgba(0,0,0,.05) 1.6deg 3.2deg, transparent 3.2deg 9deg)' }}></span>
           <span style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', width:4, height:18, borderRadius:3, background:'var(--accent)', boxShadow:'0 0 8px var(--accent)' }}></span>
         </button>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:16 }}>

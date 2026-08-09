@@ -17,3 +17,23 @@ window.JB = {
     { id:'classic', name:'Classic FM', sub:'Now: Einaudi', art:'linear-gradient(135deg,#3a5240,#161f18)', live:true },
   ],
 };
+
+// Fallback Icon — used only if the compiled bundle predates the Icon component.
+window.JBIcon = function JBIcon({ name, size = 20, strokeWidth = 2, color = 'currentColor', style }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const el = ref.current; if (!el) return;
+    el.replaceChildren();
+    const lib = window.lucide;
+    const pascal = String(name || '').replace(/(^\w|-\w)/g, s => s.replace('-', '').toUpperCase());
+    const node = lib && lib.icons && (lib.icons[pascal] || lib.icons[name]);
+    if (!node || !lib.createElement) return;
+    const svg = lib.createElement(node);
+    svg.setAttribute('width', size); svg.setAttribute('height', size);
+    svg.setAttribute('stroke-width', strokeWidth); svg.setAttribute('stroke', color);
+    svg.style.display = 'block';
+    el.appendChild(svg);
+  }, [name, size, strokeWidth, color]);
+  return React.createElement('span', { ref, 'aria-hidden':'true',
+    style: Object.assign({ display:'inline-flex', width:size, height:size, flex:'none', color }, style) });
+};

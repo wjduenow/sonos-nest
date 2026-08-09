@@ -1,4 +1,5 @@
 import React from 'react';
+import { Icon } from './Icon.jsx';
 
 /** Top status strip for the on-glass UI — room, clock, connectivity. */
 export function StatusBar({ room='Kitchen', grouped=0, time='14:32', source='wifi', style, ...rest }) {
@@ -11,7 +12,7 @@ export function StatusBar({ room='Kitchen', grouped=0, time='14:32', source='wif
         {grouped>0 && <span style={{ font:'500 12px/1 var(--font-mono)', color:'var(--screen-text-dim)' }}>+{grouped}</span>}
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-        <i data-lucide={source} width={17} height={17}></i>
+        <Icon name={source} size={17} />
         <span style={{ font:'600 14px/1 var(--font-mono)', color:'var(--screen-text-mut)' }}>{time}</span>
       </div>
     </div>

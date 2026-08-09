@@ -83,9 +83,9 @@ Two coordinated worlds: the **matte-white physical** unit and the **near-black o
 
 ## ICONOGRAPHY
 - **Set:** [Lucide](https://lucide.dev) — thin, consistent 2.2px stroke, round caps — matches the soft
-  grotesque and the physical control glyphs. Loaded via CDN (`lucide@0.462.0`); components render
-  `<i data-lucide="…">` placeholders, so any host page must load Lucide and call `lucide.createIcons()`
-  after mount. **This is a substitution** (no brand icon set was supplied) but a deliberate, close one.
+  grotesque and the physical control glyphs. Loaded via CDN (`lucide@0.462.0`). Always render glyphs with the
+  system's **`Icon`** component — never call `lucide.createIcons()`, which replaces React-owned nodes
+  with raw SVG and crashes the tree when an icon is conditionally rendered or swapped. **This is a substitution** (no brand icon set was supplied) but a deliberate, close one.
 - **Usage:** transport (`play`, `pause`, `chevron-left`, `skip-forward`, `skip-back`, `refresh-cw`,
   `shuffle`), status/connectivity (`wifi`, `bluetooth`, `cast`), volume (`volume-1/2/x`), rail
   (`disc-3`, `radio`, `speaker`). Physical button caps use the same transport glyphs, engraved.
@@ -112,6 +112,7 @@ On-glass UI primitives (namespace `SonosJukeboxDesignSystem_*`). Grouped by conc
 **System** (`components/system/`)
 - **StatusBar** — persistent top strip: room + group, connectivity, clock.
 - **Badge** — uppercase mono tag for source/quality/state (LIVE, FLAC, SPOTIFY).
+- **Icon** — Lucide glyph in a React-safe wrapper; the only correct way to render an icon here.
 
 ## Index / manifest
 - `styles.css` — global entry (import list only).
@@ -125,4 +126,6 @@ On-glass UI primitives (namespace `SonosJukeboxDesignSystem_*`). Grouped by conc
 
 ## Intentional additions
 - **Lucide icon dependency** — no brand icon set existed; Lucide is the documented substitute.
+- **Icon** — wraps Lucide so React can safely swap/remove glyphs; required because the global
+  `createIcons()` scan mutates React-owned DOM.
 - **Dial (on-glass)** — added so the software can visualize the physical knob's state (volume/scroll).

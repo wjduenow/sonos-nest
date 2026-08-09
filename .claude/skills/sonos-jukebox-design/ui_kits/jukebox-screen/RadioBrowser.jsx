@@ -2,10 +2,10 @@
 const { StatusBar, ListRow, Badge } = window.SonosJukeboxDesignSystem_e55a41;
 
 function RadioBrowser({ state, actions }) {
-  const room = window.JB.rooms.find(r => r.id === state.activeRoom) || window.JB.rooms[0];
+  const room = state.rooms.find(r => r.id === state.activeRoom) || state.rooms[0];
   const genres = ['Featured','Music','Talk','Local','Podcasts'];
   return (
-    <div style={{ height:'100%', display:'flex', flexDirection:'column', padding:'22px 30px 12px' }}>
+    <div style={{ height:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', padding:'22px 30px 12px' }}>
       <StatusBar room={room.name} grouped={state.groupCount} time="14:32" source="wifi" />
       <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', margin:'8px 0 14px' }}>
         <div style={{ font:'800 30px/1 var(--font-ui)', letterSpacing:'-.02em', color:'var(--screen-text)' }}>Radio</div>
