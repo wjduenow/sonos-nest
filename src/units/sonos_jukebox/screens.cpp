@@ -39,6 +39,7 @@
 #include "../../boards/crowpanel_p4_7in/bringup_console.h"   // no-op unless the
                                                             // bring-up flag is set
 #include "ui_scale.h"
+#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Two-glyph Lucide subset — see lv_font_lucide_28.c for why and how to regenerate.
 LV_FONT_DECLARE(lv_font_lucide_28);

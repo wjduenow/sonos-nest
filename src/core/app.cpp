@@ -32,6 +32,8 @@
 // NB above the secrets conditional on purpose: inside it, LOG would only be defined on
 // machines that happen to have include/secrets.h, which is gitignored.
 
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
+
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -402,6 +404,7 @@ static void netTask(void *) {
     if (millis() - s_lastCoordRefresh > 60000) {
       s_lastCoordRefresh = millis();
       String c = sonos::coordinatorIpFor(s_zoneName);
+      heapwatch::note("coord.refresh");   // full topology XML fetch + parse
       if (c.length() && c != s_coordIp) {
         s_coordIp = c;
         if (stateLock()) { g_player.coordinatorIp = c; stateUnlock(); }
@@ -438,6 +441,7 @@ static void netTask(void *) {
       String uri;
       if (ok && st == TransportState::Playing) sonos::getMediaInfo(s_coordIp, uri);
       if (ok && stateLock()) { g_player.transport = st; g_player.currentUri = uri; stateUnlock(); }
+      heapwatch::note("poll.headless");
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #else
@@ -526,6 +530,7 @@ static void netTask(void *) {
         g_player.dirty = true;
         stateUnlock();
       }
+      heapwatch::note("poll");
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #endif

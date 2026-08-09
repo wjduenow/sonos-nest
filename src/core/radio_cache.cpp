@@ -38,6 +38,7 @@
 #include "net/wifi.h"
 #include "settings.h"
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 namespace radiocache {
 

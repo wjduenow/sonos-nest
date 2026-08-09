@@ -4,6 +4,7 @@
 #include "sonos/soap_client.h"
 #include <Arduino.h>
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
 namespace library {
 
@@ -113,6 +114,7 @@ static void collectRows(const String &ip, const String &object, bool onlyPlaylis
     std::vector<sonos::DidlItem> page;
     if (!sonos::browse(ip, object, didl, start, PAGE)) break;
     size_t n = sonos::parseDidl(didl, page);
+    heapwatch::note("library.browse");
     for (uint32_t j = 0; j < page.size(); ++j) {
       if (onlyPlaylists && page[j].metadata.indexOf("playlistContainer") < 0) continue;
       out.push_back({page[j].title, object, start + j});

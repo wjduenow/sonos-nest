@@ -27,6 +27,7 @@
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 namespace favcache {
 
@@ -128,6 +129,7 @@ bool refresh() {
     const String tm = tag(r, "TotalMatches");
     if (tm.length()) total = tm.toInt();
     const String didl = unesc(tag(r, "Result"));
+    heapwatch::note("favs.page");     // page response + unescaped copy both held
 
     // Split on the record boundary, NOT on </item> — see the header comment.
     int got = 0, p = didl.indexOf("<item id=\"FV:2/");

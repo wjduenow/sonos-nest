@@ -24,6 +24,7 @@
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
 namespace amazon {
 
@@ -200,6 +201,7 @@ static bool readResponse(String &out, bool &keepAlive) {
       if (!pump()) break;
     }
   }
+  heapwatch::note("amazon.body");   // raw body + TLS buffers both held — the heaviest point
   out = raw;
   return true;
 }

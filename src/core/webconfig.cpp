@@ -8,6 +8,7 @@
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
+#include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
@@ -142,6 +143,22 @@ String webConfigJson() {
   h["lvMemUsed"]    = s_lvUsed;
   h["lvMemMax"]     = s_lvMaxUsed;
   h["lvMemFragPct"] = s_lvFragPct;
+
+  // WHERE the internal-heap low-water actually happened (core/heap_watch.h). heapMin says how
+  // close the device came to the ~15 KB cliff where LWIP starves; this says what was holding the
+  // memory at that moment, which is the part you cannot get any other way — the dips are
+  // transient, rare, and invisible by the time anyone looks.
+  {
+    heapwatch::Low lw;
+    heapwatch::worst(lw);
+    if (lw.tag && lw.tag[0]) {
+      JsonObject w = h["heapLow"].to<JsonObject>();
+      w["tag"]     = lw.tag;                  // e.g. gena.unescape, favs.page, art.fetch, poll
+      w["free"]    = lw.freeBytes;
+      w["largest"] = lw.largestFree;
+      w["atSec"]   = lw.atMs / 1000;
+    }
+  }
 
   // What the device BELIEVES is playing. Added after a bug where Now Playing sat on "Nothing
   // playing" while the speaker was fine: with no way to read g_player remotely, telling "the

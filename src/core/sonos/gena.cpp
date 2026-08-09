@@ -10,6 +10,7 @@
 #include "../player_state.h"
 #include "../net/wifi.h"
 #include "../net/logmirror.h"     // LOG — reaches the TCP mirror on the jukebox, plain Serial
+#include "../heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
                                   // elsewhere. A wall-mounted unit has no cable, and these
                                   // diagnostics are exactly what you need to read from it.
 
@@ -113,6 +114,7 @@ void applyEvent(const String &body) {
   // attribute values are STILL escaped (the DIDL blob doubly so) — see CLAUDE.md on double
   // escaping, and gena.h.
   const String ev = xmlUnescape(body);
+  heapwatch::note("gena.unescape");    // body + its unescaped copy both live here
 
   PlayerState np;
   bool gotTrack = false, gotTransport = false, gotVol = false, gotDur = false;
@@ -130,7 +132,7 @@ void applyEvent(const String &body) {
   // Still-escaped DIDL — parseNowPlaying() does the second unescape itself, exactly as it does for
   // the GetPositionInfo path. Reusing it keeps the two sources of now-playing data identical.
   const String meta = tagVal(ev, "CurrentTrackMetaData");
-  if (meta.length() > 20) { parseNowPlaying(meta, np); gotTrack = true; }
+  if (meta.length() > 20) { parseNowPlaying(meta, np); gotTrack = true; heapwatch::note("gena.didl"); }
 
   // Same fallback the poll uses, and free here: content playing outside the queue (a direct
   // Spotify track) has a stub CurrentTrackMetaData with no dc:title, but the event ALSO carries
@@ -246,6 +248,7 @@ void serveOne(WiFiClient &c) {
   c.flush();
   c.stop();
 
+  heapwatch::note("gena.body");        // body still held — the trough for a NOTIFY
   if ((long)body.length() == clen) applyEvent(body);
   else LOG.printf("[gena  ] short body %u/%ld\n", (unsigned)body.length(), clen);
 }

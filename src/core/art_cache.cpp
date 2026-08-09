@@ -16,6 +16,7 @@
 #include "amazon.h"
 #include "board.h"
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
 namespace artcache {
 
@@ -135,6 +136,7 @@ static size_t obtain(const Req &r) {
     const size_t avail = st->available();
     if (!avail) { if (!http.connected() && (len < 0 || got >= (size_t)len)) break; delay(5); continue; }
     got += st->readBytes(s_jpeg + got, min(avail, kJpegMax - got));
+    heapwatch::note("artcache.fetch");
     if (len > 0 && got >= (size_t)len) break;
   }
   http.end();

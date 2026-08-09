@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <WiFiClient.h>
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
@@ -108,6 +109,7 @@ bool albumArtFetch(const String &url) {
   BufSink sink(s_jpeg, JPEG_MAX);
   http.writeToStream(&sink);
   size_t got = sink.len;
+  heapwatch::note("art.fetch");
   size_t dropped = sink.dropped;
   http.end();
   if (got < 100) { LOG.printf("[art] short read (%u bytes)\n", (unsigned)got); return false; }
