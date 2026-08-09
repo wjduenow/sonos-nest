@@ -440,23 +440,23 @@ static void netTask(void *) {
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #else
-    // --- The poll, in two modes ---------------------------------------------------------------
+    // --- Poll cadence ---------------------------------------------------------------------------
     //
-    // FULL (the default, and what every unit without eventing always does): ~1 Hz, transport +
-    // position + volume.
+    // 1 Hz normally — what every unit without eventing always does. 15 s while GENA is carrying
+    // the state, which is a 15x traffic cut on its own (measured 3.00 SOAP calls/sec -> ~0.09).
     //
-    // BACKSTOP: only while GENA is demonstrably carrying the state. Transport, volume, mute, track
-    // and duration all arrive as events, so the only thing left worth asking for is POSITION —
-    // which Sonos never events (measured) and which an external seek can move without any event at
-    // all. So the backstop drops from three calls a second to ONE call every 15 s: ~45x less
-    // traffic, while still reconciling a seek within 15 s. See plans/09.
+    // ONLY the RATE changes. The poll body below is identical either way, on purpose; see the
+    // comment there for the bug that came from trimming it.
     //
-    // TRUST IS EARNED, AND REVOCABLE. It requires a live subscription AND at least one event
-    // actually received: a SUBSCRIBE that Sonos accepted but whose callback it cannot reach would
-    // otherwise silently downgrade us to a 15 s screen. The moment either stops being true this
-    // reverts to the full 1 Hz poll on its own, so a lapsed subscription or a broken renewal
-    // degrades to today's behaviour instead of a stale screen. That is why the renewal path not
-    // being battle-tested yet is safe to ship behind.
+    // TRUST IS REVOCABLE. It needs a live subscription AND at least one event received — a
+    // SUBSCRIBE that Sonos accepts but whose callback it cannot reach would otherwise silently
+    // downgrade the screen to 15 s updates. The moment either stops holding, this returns to 1 Hz
+    // by itself, so a lapsed subscription or a failed renewal costs latency, never correctness.
+    //
+    // Note "at least one event" is weak on its own: Sonos always sends an initial state dump at
+    // SUBSCRIBE time, so the counter is non-zero within a second of boot whether or not any LATER
+    // event will ever arrive. That is tolerable precisely BECAUSE the backstop is complete — the
+    // worst case of misplaced trust is a 15 s-stale screen, not a blank one.
     bool genaTrusted = false;
 #ifdef GENA_EVENTS
     {
@@ -467,44 +467,43 @@ static void netTask(void *) {
 #endif
     const uint32_t pollEveryMs = genaTrusted ? 15000 : 1000;
 
+    // ONE poll body, two cadences. The backstop is the SAME poll, just slower — it is emphatically
+    // not a reduced one.
+    //
+    // It was a reduced one, and that was a real bug: it fetched position and threw the track
+    // metadata away, on the theory that events owned those fields. So Now Playing became entirely
+    // event-dependent, and starting playback showed "Nothing playing" indefinitely — the forced
+    // immediate poll discarded the very title it had just fetched, and only an AVTransport event
+    // could fill it in. Anything that dropped or delayed one event stranded the screen, and a zone
+    // switch (which clears the track fields) stranded it too.
+    //
+    // The premise was always "events make it feel instant, the poll guarantees correctness". A
+    // backstop that cannot reconstruct the whole screen on its own does not guarantee anything.
+    // The in-flight-event race that motivated the reduction is not real either: a SOAP response is
+    // live data at the moment it lands, so writing it is never a step backwards.
     if (millis() - s_lastPoll > pollEveryMs) {
       s_lastPoll = millis();
       PlayerState np;
-      bool ok;
+      TransportState st = TransportState::Unknown;
+      uint8_t vol = 0;
+      bool gotVol = false;
 
-      if (genaTrusted) {
-        // Position only. Everything else in this response is already correct from events, so it is
-        // deliberately NOT written back — an in-flight event must not be overwritten by an older
-        // poll response.
-        ok = sonos::getPositionInfo(s_coordIp, np);
-        if (ok && stateLock()) {
-          g_player.positionSec  = np.positionSec;
-          g_player.positionAtMs = millis();
-          if (np.durationSec) g_player.durationSec = np.durationSec;
-          g_player.dirty = true;
-          stateUnlock();
-        }
-      } else {
-        TransportState st = TransportState::Unknown;
-        uint8_t vol = 0;
-        bool gotVol = false;
-        ok = sonos::getTransportInfo(s_coordIp, st);  processPending();
-        sonos::getPositionInfo(s_coordIp, np);        processPending();
-        if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
+      const bool ok = sonos::getTransportInfo(s_coordIp, st);  processPending();
+      sonos::getPositionInfo(s_coordIp, np);                   processPending();
+      if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
-        if (stateLock()) {
-          g_player.transport    = st;
-          g_player.positionSec  = np.positionSec;
-          g_player.positionAtMs = millis();
-          g_player.durationSec  = np.durationSec;
-          g_player.title        = np.title;
-          g_player.artist       = np.artist;
-          g_player.album        = np.album;
-          g_player.artUri       = np.artUri;
-          if (gotVol) g_player.volume = vol;
-          g_player.dirty = true;
-          stateUnlock();
-        }
+      if (stateLock()) {
+        g_player.transport    = st;
+        g_player.positionSec  = np.positionSec;
+        g_player.positionAtMs = millis();
+        g_player.durationSec  = np.durationSec;
+        g_player.title        = np.title;
+        g_player.artist       = np.artist;
+        g_player.album        = np.album;
+        g_player.artUri       = np.artUri;
+        if (gotVol) g_player.volume = vol;
+        g_player.dirty = true;
+        stateUnlock();
       }
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }

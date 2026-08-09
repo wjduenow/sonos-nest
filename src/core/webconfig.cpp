@@ -141,6 +141,25 @@ String webConfigJson() {
   h["lvMemMax"]     = s_lvMaxUsed;
   h["lvMemFragPct"] = s_lvFragPct;
 
+  // What the device BELIEVES is playing. Added after a bug where Now Playing sat on "Nothing
+  // playing" while the speaker was fine: with no way to read g_player remotely, telling "the
+  // device has the wrong state" apart from "the screen is not drawing it" needed a person in front
+  // of the panel. This is the cheap way to answer that from a terminal.
+  {
+    JsonObject n = h["nowPlaying"].to<JsonObject>();
+    if (stateLock()) {
+      n["transport"] = (int)g_player.transport;   // 0=Stopped 1=Playing 2=Paused 3=Transitioning 4=Unknown
+      n["title"]     = g_player.title;
+      n["artist"]    = g_player.artist;
+      n["posSec"]    = g_player.positionSec;
+      n["durSec"]    = g_player.durationSec;
+      n["volume"]    = g_player.volume;
+      n["room"]      = g_player.zoneName;
+      n["hasArt"]    = g_player.artUri.length() > 0;
+      stateUnlock();
+    }
+  }
+
   // GENA eventing (plans/09, issue #6). Emitted only on units that have it compiled in — port is
   // 0 when the no-op stubs are linked, so its ABSENCE means "not built with -DGENA_EVENTS" rather
   // than "built and broken". That distinction is the whole point of the block: eventing failing
