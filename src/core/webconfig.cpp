@@ -86,6 +86,15 @@ String webConfigJson() {
   doc["brightness"] = settingsBrightness();   // screen units (nest); the unit applies changes
   doc["playlist"]   = settingsPlaylist();
   doc["volume"]     = settingsVolume();
+  // Radio catalogue refresh. Belongs in the CONFIG document, not the registration payload — that
+  // one is identity only (who and where), and putting settings there means the config page cannot
+  // read back what it just wrote.
+  // On-device sound. uiSound is the master level (0 = off); scrollSound gates the carousel
+  // detents only and is meaningless while the master is 0 — the page reflects that by disabling it.
+  doc["uiSound"]     = settingsUiSound();
+  doc["scrollSound"] = settingsScrollSound();
+  doc["radio_refresh_hour"] = settingsRadioRefreshHour();
+  doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
   // NVS value — a page showing "" when the router says "sonos-button" would just be wrong.
   doc["deviceName"] = wifiHostname();
@@ -101,6 +110,23 @@ String webConfigJson() {
   h["uptimeSec"] = (uint32_t)(millis() / 1000);
   h["heapFree"]  = (uint32_t)ESP.getFreeHeap();
   h["heapMin"]   = (uint32_t)ESP.getMinFreeHeap();
+  // Largest contiguous internal block. Watch this alongside heapFree, not instead of it: the way
+  // internal SRAM actually kills this project is FRAGMENTATION, not exhaustion. On the nest, ~15 KB
+  // free with a 7.6 KB largest block left LWIP unable to get socket buffers, and the symptom was
+  // Sonos "connection refused" — heapFree alone never showed the fault coming.
+  h["heapLargest"] = (uint32_t)ESP.getMaxAllocHeap();
+  // PSRAM. Wide open on every unit here (the jukebox uses ~2.4 MB of 32 MB), which is exactly why
+  // it belongs in the readout: it's where new work SHOULD land, and this is how you confirm a new
+  // buffer went there rather than quietly onto the internal heap.
+  h["psramSize"] = (uint32_t)ESP.getPsramSize();
+  h["psramFree"] = (uint32_t)ESP.getFreePsram();
+  // psramMin is EMITTED ONLY WHEN IT IS REAL. heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)
+  // returns a flat 0 on the P4 — IDF doesn't track a low-water for that heap there — and a
+  // published 0 reads as "PSRAM was fully exhausted at some point", the opposite of the truth (an
+  // actual 0 would have failed allocations). Absent means "not tracked on this target"; present
+  // means trustworthy. Verified non-zero paths keep the field; don't "fix" this by always emitting.
+  const uint32_t psMin = (uint32_t)ESP.getMinFreePsram();
+  if (psMin) h["psramMin"] = psMin;
   h["resetReason"] = (int)esp_reset_reason();   // 4=PANIC 6=TASK_WDT 9=BROWNOUT (esp_reset_reason_t)
   uint32_t sCalls, sRe, sLast, sMax;
   sonos::soapDiag(sCalls, sRe, sLast, sMax);
@@ -142,7 +168,9 @@ String webConfigJson() {
 
   // Zones are whatever discovery has found so far — possibly none, if it hasn't run yet.
   JsonArray zones = doc["zones"].to<JsonArray>();
-  for (const sonos::Zone &z : sonos::zones()) {
+  std::vector<sonos::Zone> zsnap;
+  sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+  for (const sonos::Zone &z : zsnap) {
     JsonObject o = zones.add<JsonObject>();
     o["name"] = z.name;
     o["ip"]   = z.ip;
@@ -164,6 +192,8 @@ String registrationJson() {
   doc["unit"] = "nest";    doc["board"] = "crowpanel_rotary";
 #elif defined(UNIT_SLEEP)
   doc["unit"] = "sleep";   doc["board"] = "es3c28p";
+#elif defined(UNIT_JUKEBOX)
+  doc["unit"] = "jukebox"; doc["board"] = "crowpanel_p4_7in";
 #elif defined(HEADLESS)
   doc["unit"] = "button";  doc["board"] = "esp32s3cam";
 #else
@@ -183,7 +213,9 @@ String registrationJson() {
   else     doc["configUrl"] = (const char *)nullptr;
 
   JsonArray zones = doc["zones"].to<JsonArray>();
-  for (const sonos::Zone &z : sonos::zones()) {
+  std::vector<sonos::Zone> zsnap;
+  sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+  for (const sonos::Zone &z : zsnap) {
     JsonObject o = zones.add<JsonObject>();
     o["name"] = z.name;
     o["ip"]   = z.ip;
@@ -202,8 +234,46 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     return true;
   }
 
+  // Radio catalogue refresh schedule. Exposed here rather than in a board's own page so every
+
+  // board with a config UI gets it identically; boards without one simply never call this.
+
+  if (field == "uiSound") {
+    long v = 0;                                   // parsePct takes a long&, like the other levels
+    if (!parsePct(value, v)) { err = "uiSound must be a number 0..100"; return false; }
+    settingsSetUiSound((uint8_t)v);
+    return true;
+  }
+  if (field == "scrollSound") {
+    settingsSetScrollSound(value == "1" || value == "true" || value == "on");
+    return true;
+  }
+  if (field == "radio_refresh_hour") {
+
+    const int h = value.toInt();
+
+    // Fill err: the page renders it verbatim, and "Could not save:" with nothing after it
+    // is worse than no message at all.
+    if (h < 0 || h > 23) { err = "hour must be 0-23"; return false; }
+
+    settingsSetRadioRefreshHour((uint8_t)h);
+
+    return true;
+
+  }
+
+  if (field == "radio_auto_refresh") {
+
+    settingsSetRadioAutoRefresh(value == "1" || value == "true" || value == "on");
+
+    return true;
+
+  }
+
   if (field == "room") {
-    for (const sonos::Zone &z : sonos::zones()) {
+    std::vector<sonos::Zone> zsnap;
+    sonos::zonesSnapshot(zsnap);   // this server runs on its own task
+    for (const sonos::Zone &z : zsnap) {
       if (z.name != value) continue;
       settingsSetRoom(z.name);                                 // persist the choice...
       if (stateLock()) {                                       // ...and let netTask switch to it

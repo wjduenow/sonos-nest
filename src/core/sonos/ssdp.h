@@ -22,7 +22,17 @@ struct Zone {
 // ST urn:schemas-upnp-org:device:ZonePlayer:1). Falls back to NVS cache.
 bool ssdpDiscover();
 
+// *** netTask ONLY. *** Returns a reference to the live list, which discovery rewrites. Any other
+// task must use zonesSnapshot() instead — reading this reference while netTask is rediscovering
+// walks destroyed Strings or a reallocated buffer (garbage names, or LoadProhibited).
 const std::vector<Zone>& zones();
+
+// Thread-safe copy of the current room list. This is what UI tasks and board web servers want.
+// Costs one vector copy of a handful of small structs; call it when rebuilding, not per frame.
+void zonesSnapshot(std::vector<Zone>& out);
+
+// Thread-safe count, for the common case of only needing the size (health logs, empty checks).
+size_t zoneCount();
 
 // Resolve a zone name to the IP of its group coordinator (for transport calls).
 String coordinatorIpFor(const String& zoneName);

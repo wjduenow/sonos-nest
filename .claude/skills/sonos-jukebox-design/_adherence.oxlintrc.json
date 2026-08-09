@@ -1,0 +1,400 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/controls/**",
+              "components/display/**",
+              "components/system/**",
+              "ui_kits/jukebox-screen/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Hanken Grotesk|JetBrains Mono))/i]",
+        "message": "Font not provided by the design system. Available: Hanken Grotesk, JetBrains Mono."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Badge'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|tone|style|key|ref|className|style|children)$/]",
+        "message": "<Badge> doesn't accept that prop. Declared props: children, tone, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Badge'] > JSXAttribute[name.name='tone'] > Literal[value!=/^(?:live|neutral|hi)$/]",
+        "message": "<Badge> tone must be one of 'live' | 'neutral' | 'hi'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dial'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|min|max|size|label|mode|style|key|ref|className|style|children)$/]",
+        "message": "<Dial> doesn't accept that prop. Declared props: value, min, max, size, label, mode, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dial'] > JSXAttribute[name.name='mode'] > Literal[value!=/^(?:volume|value)$/]",
+        "message": "<Dial> mode must be one of 'volume' | 'value'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Icon'] > JSXAttribute > JSXIdentifier[name!=/^(?:name|size|strokeWidth|color|style|key|ref|className|style|children)$/]",
+        "message": "<Icon> doesn't accept that prop. Declared props: name, size, strokeWidth, color, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='ListRow'] > JSXAttribute > JSXIdentifier[name!=/^(?:title|subtitle|art|artColor|playing|selected|trailing|onClick|style|key|ref|className|style|children)$/]",
+        "message": "<ListRow> doesn't accept that prop. Declared props: title, subtitle, art, artColor, playing, selected, trailing, onClick, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='RoomChip'] > JSXAttribute > JSXIdentifier[name!=/^(?:name|playing|grouped|selected|onClick|style|key|ref|className|style|children)$/]",
+        "message": "<RoomChip> doesn't accept that prop. Declared props: name, playing, grouped, selected, onClick, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Scrubber'] > JSXAttribute > JSXIdentifier[name!=/^(?:elapsed|duration|live|style|key|ref|className|style|children)$/]",
+        "message": "<Scrubber> doesn't accept that prop. Declared props: elapsed, duration, live, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusBar'] > JSXAttribute > JSXIdentifier[name!=/^(?:room|grouped|time|source|style|key|ref|className|style|children)$/]",
+        "message": "<StatusBar> doesn't accept that prop. Declared props: room, grouped, time, source, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TransportButton'] > JSXAttribute > JSXIdentifier[name!=/^(?:icon|size|variant|active|label|onClick|style|key|ref|className|style|children)$/]",
+        "message": "<TransportButton> doesn't accept that prop. Declared props: icon, size, variant, active, label, onClick, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TransportButton'] > JSXAttribute[name.name='icon'] > Literal[value!=/^(?:play|pause|back|next|prev|room|menu|shuffle|repeat|add|more)$/]",
+        "message": "<TransportButton> icon must be one of 'play' | 'pause' | 'back' | 'next' | 'prev' | 'room' | 'menu' | 'shuffle' | 'repeat' | 'add' | 'more'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TransportButton'] > JSXAttribute[name.name='size'] > Literal[value!=/^(?:sm|md|lg)$/]",
+        "message": "<TransportButton> size must be one of 'sm' | 'md' | 'lg'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TransportButton'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:ghost|elevated|solid)$/]",
+        "message": "<TransportButton> variant must be one of 'ghost' | 'elevated' | 'solid'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='VolumeBar'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|muted|style|key|ref|className|style|children)$/]",
+        "message": "<VolumeBar> doesn't accept that prop. Declared props: value, muted, style."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Badge": {
+        "replaces": []
+      },
+      "Dial": {
+        "replaces": []
+      },
+      "Icon": {
+        "replaces": []
+      },
+      "ListRow": {
+        "replaces": []
+      },
+      "RoomChip": {
+        "replaces": []
+      },
+      "Scrubber": {
+        "replaces": []
+      },
+      "StatusBar": {
+        "replaces": []
+      },
+      "TransportButton": {
+        "replaces": []
+      },
+      "VolumeBar": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--accent",
+      "--accent-deep",
+      "--accent-ink",
+      "--accent-soft",
+      "--amber",
+      "--amber-deep",
+      "--amber-soft",
+      "--bezel",
+      "--board",
+      "--border-hair",
+      "--border-screen",
+      "--btn-dia",
+      "--btn-gap",
+      "--bw-1",
+      "--bw-2",
+      "--bw-hair",
+      "--case-radius",
+      "--coral",
+      "--coral-deep",
+      "--coral-soft",
+      "--focus-ring",
+      "--font-mono",
+      "--font-ui",
+      "--fs-body",
+      "--fs-caption",
+      "--fs-heading",
+      "--fs-hero",
+      "--fs-label",
+      "--fs-micro",
+      "--fs-subtitle",
+      "--fs-title",
+      "--fw-bold",
+      "--fw-extrabold",
+      "--fw-medium",
+      "--fw-regular",
+      "--fw-semibold",
+      "--gutter-5in",
+      "--gutter-7in",
+      "--gutter-screen",
+      "--hit-comfort",
+      "--hit-min",
+      "--ink-300",
+      "--ink-400",
+      "--ink-500",
+      "--ink-700",
+      "--ink-900",
+      "--inset-soft",
+      "--inset-well",
+      "--knob-dia",
+      "--knob-height",
+      "--lh-body",
+      "--lh-snug",
+      "--lh-tight",
+      "--line",
+      "--line-strong",
+      "--mat-button",
+      "--mat-case",
+      "--mat-glass",
+      "--mat-knob",
+      "--mat-knob-hi",
+      "--mm",
+      "--mount-standoff",
+      "--power",
+      "--r-case",
+      "--r-lg",
+      "--r-md",
+      "--r-pill",
+      "--r-sm",
+      "--r-xl",
+      "--r-xs",
+      "--screen-bg",
+      "--screen-elev",
+      "--screen-elev-2",
+      "--screen-elev-shadow",
+      "--screen-glow",
+      "--screen-line",
+      "--screen-text",
+      "--screen-text-dim",
+      "--screen-text-mut",
+      "--shadow-float",
+      "--shadow-lg",
+      "--shadow-md",
+      "--shadow-sm",
+      "--sp-0",
+      "--sp-1",
+      "--sp-10",
+      "--sp-12",
+      "--sp-16",
+      "--sp-2",
+      "--sp-3",
+      "--sp-4",
+      "--sp-5",
+      "--sp-6",
+      "--sp-8",
+      "--surface-0",
+      "--surface-1",
+      "--surface-2",
+      "--surface-3",
+      "--surface-card",
+      "--surface-page",
+      "--surface-sunken",
+      "--teal",
+      "--teal-deep",
+      "--teal-soft",
+      "--text-body",
+      "--text-muted",
+      "--text-secondary",
+      "--tracking-caps",
+      "--tracking-normal",
+      "--tracking-tight",
+      "--tracking-wide",
+      "--u5-ctrl-col",
+      "--u5-depth",
+      "--u5-face-h",
+      "--u5-face-w",
+      "--u5-screen-h",
+      "--u5-screen-w",
+      "--u7-ctrl-col",
+      "--u7-depth",
+      "--u7-face-h",
+      "--u7-face-w",
+      "--u7-screen-h",
+      "--u7-screen-w",
+      "--usbc-port",
+      "--wall-plate"
+    ],
+    "tokenKinds": {
+      "--ink-900": "color",
+      "--ink-700": "color",
+      "--ink-500": "color",
+      "--ink-400": "color",
+      "--ink-300": "color",
+      "--line": "color",
+      "--line-strong": "color",
+      "--surface-0": "color",
+      "--surface-1": "color",
+      "--surface-2": "color",
+      "--surface-3": "color",
+      "--screen-bg": "color",
+      "--screen-elev": "shadow",
+      "--screen-elev-2": "shadow",
+      "--screen-line": "color",
+      "--screen-text": "font",
+      "--screen-text-mut": "font",
+      "--screen-text-dim": "font",
+      "--amber": "color",
+      "--amber-soft": "color",
+      "--amber-deep": "color",
+      "--teal": "color",
+      "--teal-soft": "color",
+      "--teal-deep": "color",
+      "--coral": "color",
+      "--coral-soft": "color",
+      "--coral-deep": "color",
+      "--accent": "color",
+      "--accent-soft": "color",
+      "--accent-deep": "color",
+      "--accent-ink": "color",
+      "--text-body": "font",
+      "--text-secondary": "font",
+      "--text-muted": "font",
+      "--surface-page": "color",
+      "--surface-card": "color",
+      "--surface-sunken": "color",
+      "--focus-ring": "color",
+      "--mat-case": "color",
+      "--mat-knob": "color",
+      "--mat-knob-hi": "color",
+      "--mat-button": "color",
+      "--mat-glass": "color",
+      "--font-ui": "font",
+      "--font-mono": "font",
+      "--fs-hero": "spacing",
+      "--fs-title": "spacing",
+      "--fs-heading": "spacing",
+      "--fs-subtitle": "spacing",
+      "--fs-body": "spacing",
+      "--fs-label": "spacing",
+      "--fs-caption": "spacing",
+      "--fs-micro": "spacing",
+      "--lh-tight": "other",
+      "--lh-snug": "other",
+      "--lh-body": "other",
+      "--fw-regular": "other",
+      "--fw-medium": "other",
+      "--fw-semibold": "other",
+      "--fw-bold": "other",
+      "--fw-extrabold": "other",
+      "--tracking-tight": "other",
+      "--tracking-normal": "other",
+      "--tracking-wide": "other",
+      "--tracking-caps": "other",
+      "--sp-0": "spacing",
+      "--sp-1": "spacing",
+      "--sp-2": "spacing",
+      "--sp-3": "spacing",
+      "--sp-4": "spacing",
+      "--sp-5": "spacing",
+      "--sp-6": "spacing",
+      "--sp-8": "spacing",
+      "--sp-10": "spacing",
+      "--sp-12": "spacing",
+      "--sp-16": "spacing",
+      "--hit-min": "spacing",
+      "--hit-comfort": "spacing",
+      "--gutter-screen": "spacing",
+      "--gutter-7in": "spacing",
+      "--gutter-5in": "spacing",
+      "--r-xs": "spacing",
+      "--r-sm": "spacing",
+      "--r-md": "spacing",
+      "--r-lg": "spacing",
+      "--r-xl": "spacing",
+      "--r-pill": "spacing",
+      "--r-case": "spacing",
+      "--bw-hair": "spacing",
+      "--bw-1": "spacing",
+      "--bw-2": "spacing",
+      "--border-hair": "color",
+      "--border-screen": "color",
+      "--shadow-sm": "shadow",
+      "--shadow-md": "shadow",
+      "--shadow-lg": "shadow",
+      "--shadow-float": "shadow",
+      "--inset-soft": "spacing",
+      "--inset-well": "spacing",
+      "--screen-elev-shadow": "shadow",
+      "--screen-glow": "color",
+      "--mm": "other",
+      "--u7-face-w": "other",
+      "--u7-face-h": "other",
+      "--u7-depth": "other",
+      "--u7-screen-w": "other",
+      "--u7-screen-h": "other",
+      "--u7-ctrl-col": "other",
+      "--u5-face-w": "other",
+      "--u5-face-h": "other",
+      "--u5-depth": "other",
+      "--u5-screen-w": "other",
+      "--u5-screen-h": "other",
+      "--u5-ctrl-col": "other",
+      "--knob-dia": "other",
+      "--knob-height": "other",
+      "--btn-dia": "other",
+      "--btn-gap": "other",
+      "--bezel": "other",
+      "--case-radius": "other",
+      "--wall-plate": "other",
+      "--board": "other",
+      "--power": "other",
+      "--usbc-port": "other",
+      "--mount-standoff": "other"
+    },
+    "fontFamilies": [
+      "Hanken Grotesk",
+      "JetBrains Mono"
+    ]
+  }
+}

@@ -15,6 +15,36 @@ void settingsSetRoom(const String &name) {
   if (settingsRoom() != name) s_prefs.putString("room", name);
 }
 
+// UI feedback tone level. Defaults to a modest 40: audible confirmation without being a novelty
+// the owner immediately wants to switch off. 0 disables it entirely.
+uint8_t settingsUiSound() { return s_prefs.getUChar("uisnd", 40); }
+void settingsSetUiSound(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  s_prefs.putUChar("uisnd", pct);
+}
+
+bool settingsScrollSound()           { return s_prefs.getUChar("scrsnd", 1) != 0; }
+void settingsSetScrollSound(bool on) { s_prefs.putUChar("scrsnd", on ? 1 : 0); }
+
+bool settingsRadioAutoRefresh()           { return s_prefs.getUChar("rdauto", 1) != 0; }
+void settingsSetRadioAutoRefresh(bool on) { s_prefs.putUChar("rdauto", on ? 1 : 0); }
+uint8_t settingsRadioRefreshHour()        { uint8_t h = s_prefs.getUChar("rdhour", 4); return h > 23 ? 4 : h; }
+void settingsSetRadioRefreshHour(uint8_t hour) { s_prefs.putUChar("rdhour", hour > 23 ? 4 : hour); }
+
+// Amazon Music DeviceLink credentials. NVS keys are capped at 15 chars.
+String settingsAmazonToken() { return s_prefs.getString("amztok", ""); }
+String settingsAmazonKey()   { return s_prefs.getString("amzkey", ""); }
+void settingsSetAmazonAuth(const String &token, const String &key) {
+  s_prefs.putString("amztok", token);
+  s_prefs.putString("amzkey", key);
+}
+uint8_t settingsAmazonSerial()          { return s_prefs.getUChar("amzsn", 0); }
+void    settingsSetAmazonSerial(uint8_t sn) { s_prefs.putUChar("amzsn", sn); }
+String  settingsHouseholdId()           { return s_prefs.getString("hhid", ""); }
+void    settingsSetHouseholdId(const String &id) {
+  if (settingsHouseholdId() != id) s_prefs.putString("hhid", id);
+}
+
 uint8_t settingsBrightness() {
   uint8_t b = s_prefs.getUChar("bright", 100);
   return b < 10 ? 10 : b;

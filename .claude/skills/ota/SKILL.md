@@ -75,6 +75,32 @@ Skip this step entirely on a native Linux/macOS build host.
      succeeded if you saw `100% Done...`.
    - Equivalent (but slower/flakier build): `pio run -e nest-ota -t upload --upload-port <device-ip> --upload-flags="--auth=<password>"`.
 
+   > ⚠️ **`Authenticating...FAIL` / `No Answer to our Authentication` on the jukebox = WRONG
+   > espota, not a wrong password.** The S3 units (Arduino 2.0.17) authenticate with plain MD5;
+   > the P4 jukebox (Arduino 3.x / pioarduino) uses **PBKDF2-HMAC-SHA256**, and only the 3.x
+   > `espota.py` speaks it. The failure is instant and perfectly repeatable, so it reads like a
+   > bad `OTA_PASSWORD` — it isn't. A correct run prints `Authenticating (PBKDF2-HMAC-SHA256)...OK`.
+   >
+   > Both frameworks install to the **same** path, `packages/framework-arduinoespressif32`, and
+   > whichever platform built last owns it (the same name collision `[env]`'s platform pin guards
+   > against). So don't hardcode a path — build the target env first, then check the tool:
+   > ```bash
+   > grep -q PBKDF2 ~/.platformio/packages/framework-arduinoespressif32/tools/espota.py \
+   >   && echo "3.x espota — ok for jukebox" || echo "2.0.17 espota — S3 units only"
+   > ```
+
+   > ⚠️ **The jukebox's IP usually CHANGES across the OTA reboot** (DHCP). Polling the old
+   > address after the upload looks exactly like a bricked device — it answers ping (stale ARP /
+   > reassigned lease) but never serves HTTP. Re-resolve before concluding anything; the portal is
+   > the fastest oracle and also confirms the new build actually came up:
+   > ```bash
+   > curl -s http://192.168.68.99:8000/api/devices | python3 -c "
+   > import sys,json
+   > for d in json.load(sys.stdin)['devices']:
+   >   if 'jukebox' in d['id']: print(d['ip'], d['fwVersion'], d['uptimeSec'])"
+   > ```
+   > A `-dirty` suffix on `fwVersion` means uncommitted local changes are what's running.
+
 ## Notes & troubleshooting
 
 - **Errors early (~3%) then aborts:** the UI task is starving the OTA write. The firmware

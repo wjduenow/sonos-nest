@@ -1,0 +1,27 @@
+<!-- @dsCard group="Industrial Design" viewport="700x360" name="Accent trim variations" subtitle="Amber (live) · Teal · Coral — light-ring + on-screen accent" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+:root{--mmv:0.92px}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);background:var(--surface-2);padding:34px 20px;color:var(--ink-900);display:flex;gap:26px;justify-content:center;align-items:center}
+.opt{text-align:center}
+.tag{font-family:var(--font-mono);font-size:10px;letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--ink-500);margin-bottom:14px}
+.opt.live .tag{color:var(--accent-deep);font-weight:700}
+.face{position:relative;width:calc(210*var(--mmv));height:calc(130*var(--mmv));background:linear-gradient(160deg,#fbfbf9,var(--mat-case));border-radius:15px;box-shadow:var(--shadow-lg);display:flex;padding:9px;gap:7px}
+.screen{flex:1;background:var(--screen-bg);border-radius:5px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.r{font-size:9px;font-weight:700;color:var(--ac)}
+.t{font-size:14px;font-weight:800;color:var(--screen-text);letter-spacing:-.02em}
+.bar{height:3px;background:var(--screen-elev-2);border-radius:9px;margin-top:6px;position:relative}
+.bar::after{content:"";position:absolute;left:0;top:0;height:100%;width:45%;background:var(--ac);border-radius:9px}
+.col{width:calc(46*var(--mmv));display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:2px 0}
+.dial{width:34px;height:34px;border-radius:999px;background:radial-gradient(circle at 38% 32%,var(--mat-knob-hi),var(--mat-knob));position:relative;box-shadow:0 4px 8px rgba(0,0,0,.25)}
+.dial::after{content:"";position:absolute;inset:-3px;border-radius:999px;border:2px solid var(--ac);opacity:.55}
+.b{width:12px;height:12px;border-radius:999px;background:var(--mat-button);box-shadow:var(--shadow-sm)}
+.bs{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+</style></head><body>
+<div class="opt live" style="--ac:var(--amber)"><div class="tag">Amber · live</div>
+  <div class="face"><div class="screen"><div class="r">◉ Kitchen</div><div><div class="t">Teardrop</div><div class="bar"></div></div></div><div class="col"><div class="dial"></div><div class="bs"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div></div></div></div>
+<div class="opt" style="--ac:var(--teal)"><div class="tag">Teal</div>
+  <div class="face"><div class="screen"><div class="r">◉ Kitchen</div><div><div class="t">Teardrop</div><div class="bar"></div></div></div><div class="col"><div class="dial"></div><div class="bs"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div></div></div></div>
+<div class="opt" style="--ac:var(--coral)"><div class="tag">Coral</div>
+  <div class="face"><div class="screen"><div class="r">◉ Kitchen</div><div><div class="t">Teardrop</div><div class="bar"></div></div></div><div class="col"><div class="dial"></div><div class="bs"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div></div></div></div>
+</body></html>

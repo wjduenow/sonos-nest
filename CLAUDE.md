@@ -12,12 +12,121 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
+- **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
+  ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
+  ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
+  discovery/switching, transport, album art, OTA, portal registration, UI click feedback on the
+  onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). **Rooms does
+  grouping**: a checkbox per room joins/leaves the active group, plus UNGROUP, per-room volume
+  (±5) and per-room play/pause, over a group summary bar. Live per-room volume + play state come
+  from **`core/room_status.{h,cpp}`**, polled by netTask one room per step and ONLY while the page
+  asks (`keepAlive()`), so it costs nothing when you are elsewhere. `core/` runs
+  **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. The **rotary dial works**:
+  an Arduino Modulino Knob on the **shared I2C bus via J13** (not the 11-pin GPIO header), twist =
+  volume and press = play/pause from any page — `boards/crowpanel_p4_7in/knob.cpp`.
+  > ⚠️ **Rooms is latency-bound by SOAP, so the fixes are all about NOT waiting and NOT blanking.**
+  > Three things were each worth a visible second. (1) A fixed poll gate made the first fill 3.6 s
+  > when the calls themselves cost ~150 ms/room — it now steps fast until one full round completes,
+  > then backs off to 400 ms. The switch is on "a round finished", NOT "every room has a reading":
+  > an off speaker never answers and would pin it fast forever. (2) A `roomstatus::invalidate()`
+  > after each grouping op blanked all nine rooms to `--` and refilled — deleted, because volume is
+  > unaffected by grouping and transport is re-derived from the new coordinator. (3) A checkbox
+  > cannot be confirmed until netTask runs the SOAP op **and** a full `ssdpDiscover()` topology
+  > re-read, so every optimistic edit (volume, transport, group membership) is held over the poller
+  > for a few seconds or the UI snaps back and the tap reads as ignored. The `g_zonesGen` rebuild
+  > is what ends a group hold — that bump IS the confirmation.
+  > ⚠️ **`soapAction`'s keep-alive only helps for consecutive calls to the SAME host**
+  > (one static `WiFiClient`, `setReuse(true)`). Anything that round-robins speakers — the Rooms
+  > poller — pays a fresh TCP connect per step over the SDIO bridge. Ordering calls so a room's
+  > volume and transport go back-to-back is why they share one connection.
+  > ⚠️ **It answers at 7-bit `0x3A`, NOT the `0x76` its datasheet advertises** — those are 8-bit
+  > addresses and Arduino's `Wire` is 7-bit (`0x74 >> 1 == 0x3A`, and the pinstrap byte it returns
+  > is literally `0x74`). Probing only the documented values found nothing and the driver reported
+  > "no dial on the bus" with the dial plugged in and working. Expect the same off-by-a-shift for
+  > the PCF8574.
+  > ⚠️ **A NACKed `requestFrom` returns the STALE RX BUFFER, not an error** — 4 "readable" bytes
+  > that are a copy of the last real reply (or zeros on a cold bus). Byte content is never proof a
+  > device is there; the ACK is. This invented a phantom dial on an empty bus.
+  > `GET /api/knob` dumps driver state + a live probe of every candidate address; the full bus
+  > census runs at boot behind `KNOB_DEBUG` because an ACK probe to an *absent* address blocks
+  > ~80 ms, so sweeping the range takes ~9 s — far too slow for an HTTP handler.
+  **Not done**: the 4 transport buttons (a PCF8574, same bus) and the case.
+  > ⚠️ **The Amazon crawl must never restart from zero, and its tree must contain nothing else.**
+  > Two bugs kept this device in a permanent reboot loop. (1) `amazon::post()` skipped HTTP headers
+  > with `readStringUntil()`, and `Stream::timedRead()` is a **busy-wait with no yield** — with a
+  > 15 s timeout it starved IDLE0 and the task watchdog aborted the chip mid-crawl (`CPU 0:
+  > radiocache`). Never use a Stream helper on a TLS socket here; read blocks and yield. Phase
+  > timing will NOT find it (every phase is <1.5 s) — decode the register dump. (2) The artwork
+  > cache lived at `radio/art`, **inside the tree `refresh()` rmTree+renames**, so `rmdir` failed,
+  > the swap failed, and no crawl ever published however often it succeeded. Art now lives at
+  > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
+  > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
+  > instead of 27 connect/handshake/close cycles.
+  > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
+  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
+  > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
+  > users hard-freezes the device. Next leads are a slower SDIO clock and the C6 firmware upgrade.
+  > ⚠️ **Power-cycle after every upload**, and read the `[health]` heartbeat before diagnosing any
+  > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
+  > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
+  > different faults, identical on screen. The same numbers are on the wire without a serial cable:
+  > **`GET /api/config` → `.health`** (`core/webconfig.cpp`) carries heap/PSRAM/LVGL/SOAP counters.
+  > ⚠️ **Know which resource you are actually spending — they are nowhere near equal.** Measured on
+  > hardware: **PSRAM 32 MB, ~29.6 MB free** (frame buffer 1.17 MB + LVGL pool 512 KB + album art
+  > 526 KB + station tile cache 170 KB ≈ 2.4 MB); **app slot 6.25 MB, ~4.3 MB free** (and the
+  > 3.375 MB `spiffs` partition is *unused* — nothing mounts it — if you ever need more);
+  > **internal SRAM is the only tight one.** ~115 KB free but the `heapLargest` block is only
+  > ~32-49 KB, and `core/amazon.cpp` notes the crawl runs at **~40 KB free**. New buffers go in
+  > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
+  > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
+  > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **microSD (slot 0; the C6 is slot 1, so they don't share a bus).** Pins CLK 43 / CMD 44 /
+  > D0 39, 1-bit @ 10 MHz, no LDO power handle. **Never use Arduino's `SD_MMC`** — it takes its pins
+  > and a power-enable pin from the board variant, whose stock `BOARD_SDMMC_POWER_PIN 45` is this
+  > board's **I2C SDA** (it would kill touch). Use the IDF `sdmmc` API. And FATFS **must** be
+  > `CONFIG_FATFS_SECTOR_512` — the inherited default was `SECTOR_4096` (a SPI-flash option), which
+  > makes every FatFs LBA 8x wrong and shows up as `sdmmc_write_blocks failed (0x107)` **timeouts**
+  > that look exactly like bad hardware. Symptom to recognise: **raw sector I/O flawless, everything
+  > through `fopen`/`fwrite` timing out.**
+  The screen UI + case design system is in-tree as the **`/sonos-jukebox-design`** skill.
+  **Read `plans/07-sonos-jukebox.md` before touching this** — it is different silicon (RISC-V) on a
+  different toolchain, and several failure modes here are silent.
+  > ⚠️ The jukebox envs use the **pioarduino** fork of platform-espressif32, which publishes
+  > itself under the name `espressif32` too. `[env]` pins `platform = espressif32@6.9.0` to keep
+  > the S3 units on Arduino 2.0.17; installing the fork without that pin silently retargets
+  > `nest` and `sleep-machine` to Arduino 3.x. **Don't loosen either pin.**
 
-Both share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
+Units share all Sonos control/discovery/browse/settings/net/OTA; they differ only in
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
 
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
+- New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
+- Music services + the Radio feature: **`plans/08-music-service-integration.md`** — Part 1 is the
+  feature **as built** (Favorites + a real Radio page over Amazon Prime Stations, both backed by SD
+  caches with artwork, A-Z jump, search and scroll detents); Part 2 is the research record. Read
+  Part 1's *four things that would have broken it* before touching the artwork or token paths.
+  **OAuth services (YouTube Music, Spotify accounts) cannot be browsed** — closed question, don't
+  re-open: the favourite id is an opaque account-scoped token, the household's OAuth token is on the
+  player but write-only, and the cloud Control API has no browse path. Favourites (`FV:2`) are the
+  only route for those, already implemented.
+  **But `Auth="Anonymous"` services CAN be browsed on-device** — 32 of 106 here (TuneIn, SomaFM, NTS,
+  Radio France…). Verified by running it: an empty `<credentials/>` SOAP header is the entire
+  requirement, and `getMediaURI` resolves a station to a stream URL anonymously too. One playback
+  test remains. **Spotify tracks/albums/playlists are constructible too** (its Sonos id is a
+  transparent wrapper) — but its *stations and mixes* are gone at the Spotify end, not the Sonos end.
+  **DeviceLink services CAN be browsed in full — PROVEN on Amazon Music.** 15 of 106 here are
+  DeviceLink (vs 59 AppLink, 32 Anonymous). One browser authorisation by the owner yields an
+  authToken/privateKey, and `getMetadata` then returns the whole tree — **"Prime Stations" is a
+  root-level container, 26 genres x ~50 stations**, no Sonos app or cloud involved. The `#chunk-`
+  suffix in a station id is **minted per response — never construct one**, just take the browsed id
+  verbatim (old ones stay valid indefinitely). The `prime/stations/` *path* is legacy; build against
+  `catalog/stations/`. Gotcha: `linkDeviceId` is per-request and required to redeem the code — drop
+  it and the user has to authorise again.
+  Handy trick recorded there: `http://<speaker>:1400/getaa?s=1&u=<encoded URI>` is a **read-only
+  oracle for URI validity** — 200 = real, 404 = not — and it also gives album art for free. It covers
+  tracks only: for containers/stations a 404 means nothing. Also records two durability risks to this project's premise (`customsd.htm` now 403s
+  on S2; a Connection Security toggle can now require auth on the **LAN** APIs).
 - Flashing from WSL (USB): **`docs/flashing-wsl.md`**
 - Wireless flashing: the **`/ota` skill** (`.claude/skills/ota`)
 

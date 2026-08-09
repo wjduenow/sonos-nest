@@ -3,6 +3,7 @@
 #include "app.h"
 
 #include <Arduino.h>
+#include <WiFi.h>          // link-health check in the recovery path (see netTask)
 
 #include "player_state.h"
 #include "unit.h"                 // uiTick() — provided by whichever unit the build links
@@ -22,6 +23,7 @@
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
+#include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
 // Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
 #if __has_include("secrets.h")
@@ -72,6 +74,10 @@ static bool selectZoneByIp(const String &ip) {
                   s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
     return true;
   }
+  // Silent failure here is a trap: the UI has already given the user feedback (a tone, a screen
+  // change) and nothing happens. Say which IP was asked for and what was actually known.
+  Serial.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
+                (unsigned)sonos::zones().size());
   return false;
 }
 
@@ -115,6 +121,13 @@ static bool selectZone() {
 
 static uint32_t s_lastPoll = 0, s_lastVolCmd = 0, s_lastCoordRefresh = 0;
 
+// Dead-link detection state (see netTask). File scope rather than a function-local static because
+// the Wi-Fi supervisor at the top of the loop has to be able to clear it: an AP that actually goes
+// away must not leave a half-armed streak behind that turns the NEXT sighting into a reboot.
+static int      s_deadLinkStreak  = 0;
+static uint32_t s_deadLinkFirstMs = 0;
+static const uint32_t kDeadLinkWindowMs = 10000;
+
 // Drain + execute queued input commands. Kept cheap and called frequently (including
 // between the poll's SOAP calls) so a twist/press reaches the speaker with minimal lag.
 static void processPending() {
@@ -136,19 +149,64 @@ static void processPending() {
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.next) sonos::next(s_coordIp);
 
-  // Grouping: join a speaker to the active group, or split one off. Re-discover topology
-  // and refresh the active room's coordinator afterward, then signal the UI.
-  if (p.groupJoinIp.length()) {
-    sonos::setAvTransportUri(p.groupJoinIp, "x-rincon:" + s_coordUuid, "");
-    sonos::ssdpDiscover();
-    selectZoneByIp(s_zoneIp);
-    g_zonesGen++;
+  // A ready-made URI + DIDL from the UI — a Radio station, or a favourite played from the cache.
+  //
+  // The scheme decides the mechanism, exactly as library::playItem() does: a CONTAINER (a service
+  // playlist/album, or a Sonos saved queue) cannot be set as the transport URI, so it has to be
+  // enqueued and the queue played. Everything else — stations, single tracks, streams — replaces
+  // the transport directly. Verified on hardware that an x-sonosapi-radio: URI needs no
+  // getMediaURI resolve step first (plans/08).
+  if (p.playUri.length()) {
+    if (p.playUri.startsWith("x-rincon-cpcontainer:") || p.playUri.startsWith("file:")) {
+      sonos::removeAllTracksFromQueue(s_coordIp);
+      sonos::addUriToQueue(s_coordIp, p.playUri, p.playMeta);
+      sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
+    } else {
+      sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
+    }
+    sonos::play(s_coordIp);
+    s_lastPoll = 0;                        // reflect the new track immediately
   }
-  if (p.groupLeaveIp.length()) {
-    sonos::becomeStandalone(p.groupLeaveIp);
+
+  // Grouping. Every op in the batch is applied first, and the topology is re-read ONCE at the
+  // end: ssdpDiscover() is a full GetZoneGroupState fetch + parse (tens of KB of XML in a big
+  // house), so doing it per room made ungrouping a four-room group four times slower than it
+  // needed to be, for a result only the last pass could be correct about anyway.
+  if (p.ungroupAll) {
+    // Split off every OTHER member of the active group; the active room stays put and becomes a
+    // group of one. Leaving it grouped to a coordinator we just dissolved is what "Ungroup"
+    // must not do, and standalone-ing it too would needlessly interrupt its own playback.
+    std::vector<sonos::Zone> zs;
+    sonos::zonesSnapshot(zs);
+    for (const auto &z : zs) {
+      if (z.coordinatorUuid != s_coordUuid) continue;   // not in our group
+      if (z.ip == s_zoneIp) continue;                   // the active room keeps playing
+      sonos::becomeStandalone(z.ip);
+    }
+  }
+  for (const auto &op : p.groupOps) {
+    if (!op.ip.length()) continue;
+    if (op.join) sonos::setAvTransportUri(op.ip, "x-rincon:" + s_coordUuid, "");
+    else         sonos::becomeStandalone(op.ip);
+  }
+  if (p.ungroupAll || !p.groupOps.empty()) {
     sonos::ssdpDiscover();
     selectZoneByIp(s_zoneIp);
     g_zonesGen++;
+    // Deliberately NOT dropping the per-room status cache here: roomstatus carries volume and
+    // still-valid transport across the topology change itself. Blanking it made every checkbox
+    // tap wipe the page back to "--" for a second and a half.
+  }
+
+  // Per-room controls from the Rooms page.
+  if (p.roomVolIp.length() && p.roomVolTarget >= 0) {
+    sonos::setVolume(p.roomVolIp, (uint8_t)constrain(p.roomVolTarget, 0, 100));
+  }
+  if (p.roomPlayCoordIp.length() && p.roomSetPlay >= 0) {
+    if (p.roomSetPlay) sonos::play(p.roomPlayCoordIp);
+    else               sonos::pause(p.roomPlayCoordIp);
+    // If that was the room we are following, reflect it on Now Playing without waiting a second.
+    if (p.roomPlayCoordIp == s_coordIp) s_lastPoll = 0;
   }
   // Play a locally-served file (the ES3C28P's HTTP media server) on the group coordinator,
   // looped. Enqueue it with minimal DIDL so Sonos accepts the http mp3, switch the transport
@@ -225,9 +283,31 @@ static void uiTask(void *) {
   }
 }
 
+// Link snapshot for the UI. See the contract in app.h: these exist so uiTick() never has to make
+// a blocking radio RPC to log link health. Refreshed on a timer rather than every loop iteration
+// because on ESP-Hosted boards each read is an SDIO round-trip to the C6, and this is diagnostics,
+// not control.
+volatile int      g_linkStatus = 0;
+volatile int      g_linkRssi   = 0;
+volatile uint32_t g_linkIp     = 0;
+volatile uint32_t g_linkZones  = 0;
+
+static void publishLinkStats() {
+  static uint32_t s_last = 0;
+  if (s_last && millis() - s_last < 2000) return;
+  s_last = millis();
+  g_linkStatus = (int)WiFi.status();
+  g_linkRssi   = (int)WiFi.RSSI();
+  const IPAddress ip = WiFi.localIP();
+  g_linkIp = (uint32_t)ip[0] | ((uint32_t)ip[1] << 8) | ((uint32_t)ip[2] << 16) |
+             ((uint32_t)ip[3] << 24);
+  g_linkZones = (uint32_t)sonos::zones().size();
+}
+
 static void netTask(void *) {
   for (;;) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
+    publishLinkStats();
 
     // Wi-Fi supervisor: a transient outage (router reboot, DHCP renewal, AP roam) is near-certain
     // over a multi-day uptime and must self-heal, or the unit sits alive-but-wedged until a power
@@ -241,6 +321,13 @@ static void netTask(void *) {
         s_lastWifiKick = now;
         Serial.println("[net] wifi down — reconnecting");
         wifiReconnect();
+      }
+      // A genuine disconnect is NOT the fault netLinkRecover() exists for, and the RSSI-0 readings
+      // around a reconnect are normal. Disarm, or an ordinary router reboot ends in a device
+      // reboot — exactly what the "requires the symptom twice" rule was written to prevent.
+      if (s_deadLinkStreak) {
+        Serial.println("[net] wifi genuinely down — clearing the dead-link streak");
+        s_deadLinkStreak = 0;
       }
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
@@ -256,6 +343,47 @@ static void netTask(void *) {
       const bool recovering = s_coordStale;
       s_coordStale = false;
       if (recovering) Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
+
+      // Before blaming Sonos, check whether OUR link is the thing that died. A board whose radio
+      // is a separate co-processor can report WL_CONNECTED with a live IP while the transport to
+      // that co-processor is gone — RSSI comes from the co-processor, so 0 while "connected" means
+      // the RPC is dead, not that the signal is weak. Re-discovery cannot succeed in that state,
+      // and reconnecting Wi-Fi cannot fix it either: the reconnect path talks over the same dead
+      // transport. Ask the board to rebuild the link, then re-associate.
+      // Require the symptom TWICE before acting. Recovery on this board is a reboot, and a
+      // single transient must never cost the user a reboot — RSSI can read 0 momentarily around
+      // a roam or a scan without the transport being dead.
+      // Both sightings must fall inside kDeadLinkWindowMs. Without a window the counter is
+      // effectively permanent: one transient RSSI 0 now and another an hour later would add up to
+      // a reboot, and the two would have nothing to do with each other.
+      if (s_deadLinkStreak && millis() - s_deadLinkFirstMs > kDeadLinkWindowMs) {
+        Serial.println("[net] dead-link streak expired — starting over");
+        s_deadLinkStreak = 0;
+      }
+      if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
+        if (s_deadLinkStreak == 0) s_deadLinkFirstMs = millis();
+        if (++s_deadLinkStreak >= 2) {
+          Serial.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
+          if (netLinkRecover()) {   // may not return: see the board implementation
+            wifiConnect();
+            Serial.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
+                          (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
+          }
+          s_deadLinkStreak = 0;
+        } else {
+          // Confirm the second sighting in SECONDS, not minutes. Falling through to the discovery
+          // below would burn ~90 s on multicast that cannot possibly be answered over a dead
+          // radio, and re-entering this branch would then cost another 3 failed polls — which is
+          // why an obviously-dead link used to take ~3 minutes of empty room list to recover.
+          // Skip the doomed discovery, re-arm the recovery flag, and look again shortly.
+          Serial.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
+          s_coordStale = true;
+          vTaskDelay(pdMS_TO_TICKS(3000));
+          continue;
+        }
+      } else if (WiFi.RSSI() != 0) {
+        s_deadLinkStreak = 0;
+      }
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
       if (recovering) { processPending(); s_lastPoll = 0; continue; }
@@ -277,6 +405,9 @@ static void netTask(void *) {
     processPending();
     registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
     updaterTick();     // OTA pull check (self-rate-limited ~6 h; applies only on explicit approve)
+    // Per-room status for the Rooms screen. Costs nothing unless that page is actually open, and
+    // polls at most one room per pass — see room_status.h for why it must not burst.
+    roomstatus::tick();
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
@@ -329,17 +460,35 @@ static void netTask(void *) {
 }
 
 #ifndef HEADLESS
+// Wait for the art URI to stop changing before downloading it. A cover is a real HTTP transfer —
+// 228 KB was measured on a live system — so every track change costs one. Anything that walks
+// through tracks or rooms quickly (skipping, or tapping down a room list) would otherwise queue a
+// full download per step and push megabytes in a few seconds. On the ESP32-P4 that traffic goes
+// over the SDIO bridge to the Wi-Fi co-processor, where sustained load is what provokes the
+// transport failure netLinkRecover() exists to recover from; on the S3 units it is simply wasted
+// bandwidth and heap churn. Settling first means a burst of N changes costs ONE fetch, of the
+// track you actually landed on.
+static const uint32_t kArtSettleMs = 700;
+
 static void artTask(void *) {
-  String last;
+  String last, pending;
+  uint32_t pendingSince = 0;
   int    fails = 0;
   for (;;) {
     if (otaActive() || updaterActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }
 
     String cur;
     if (stateLock()) { cur = g_player.artUri; stateUnlock(); }
+
+    // Restart the settle timer every time the target moves.
+    if (cur != pending) { pending = cur; pendingSince = millis(); }
+
     if (cur != last) {
       if (cur.length() == 0) {
+        // Clearing is free and must be immediate, or the previous room's cover lingers.
         albumArtClear();  last = cur;  fails = 0;
+      } else if (millis() - pendingSince < kArtSettleMs) {
+        // Still moving — do not start a download we are about to throw away.
       } else if (albumArtFetch(cur)) {  // GET + TJpg decode + cache (never on UI task)
         last = cur;  fails = 0;
       } else if (++fails >= 4) {

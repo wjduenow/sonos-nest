@@ -1,0 +1,36 @@
+<!-- @dsCard group="Industrial Design" viewport="700x460" name="Exploded assembly" subtitle="Faceplate, controls, panel, ESP32-S3 carrier, rear housing, wall plate" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);background:var(--surface-2);padding:34px 30px;color:var(--ink-900)}
+.title{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--ink-500);margin:0 0 8px;text-align:center}
+.sub{font-size:12px;color:var(--ink-500);text-align:center;margin:0 0 26px}
+.stack{position:relative;width:340px;margin:0 auto;transform:rotate(-4deg)}
+.layer{position:relative;height:150px;margin-top:-96px;border-radius:22px;display:flex;align-items:center;padding-left:20px}
+.layer:first-child{margin-top:0}
+.callout{position:absolute;right:-8px;transform:translateX(100%);font-family:var(--font-mono);font-size:10px;color:var(--ink-600,#555);white-space:nowrap;display:flex;align-items:center;gap:6px}
+.callout .n{background:var(--ink-900);color:#fff;width:16px;height:16px;border-radius:999px;display:grid;place-items:center;font-size:9px;flex:none}
+.callout .ln{width:30px;height:1px;background:var(--ink-300)}
+/* individual layers */
+.l-face{background:linear-gradient(150deg,#fbfbf9,var(--mat-case));box-shadow:var(--shadow-lg)}
+.l-ctrl{background:transparent;box-shadow:none;display:flex;gap:14px;padding-left:24px}
+.l-ctrl .k{width:56px;height:56px;border-radius:999px;background:radial-gradient(circle at 38% 32%,var(--mat-knob-hi),var(--mat-knob));box-shadow:var(--shadow-md)}
+.l-ctrl .b{width:26px;height:26px;border-radius:999px;background:var(--mat-button);box-shadow:var(--shadow-sm);align-self:center}
+.l-screen{background:var(--screen-bg);box-shadow:var(--shadow-lg)}
+.l-screen .g{margin-left:6px;width:150px;height:88px;border-radius:6px;background:linear-gradient(120deg,#14161a,#0c0d10);box-shadow:inset 0 0 0 1px #23262d}
+.l-pcb{background:#2f6f45;box-shadow:var(--shadow-lg);background-image:radial-gradient(rgba(255,255,255,.08) 1px,transparent 1px);background-size:9px 9px}
+.l-pcb .chip{width:40px;height:26px;background:#1c1e22;border-radius:3px;margin-left:6px}
+.l-pcb .esp{margin-left:12px;font-family:var(--font-mono);font-size:10px;color:rgba(255,255,255,.8)}
+.l-rear{background:linear-gradient(150deg,#eef0f2,#e2e5e9);box-shadow:var(--shadow-lg)}
+.l-plate{background:linear-gradient(150deg,#f4f5f6,#e6e9ec);box-shadow:var(--shadow-md);height:120px}
+</style></head><body>
+<div class="title">Exploded Assembly · 7&quot; SKU</div>
+<div class="sub">Six-part stack — snap-fit faceplate over printed rear housing, flush wall plate</div>
+<div class="stack">
+  <div class="layer l-face"><span class="callout"><span class="ln"></span><span class="n">1</span> Faceplate · bezel + light-pipe</span></div>
+  <div class="layer l-ctrl"><span class="k"></span><span class="b"></span><span class="b"></span><span class="b"></span><span class="b"></span><span class="callout"><span class="ln"></span><span class="n">2</span> Dial + 4 transport caps</span></div>
+  <div class="layer l-screen"><span class="g"></span><span class="callout"><span class="ln"></span><span class="n">3</span> IPS panel · 1024×600 IPS</span></div>
+  <div class="layer l-pcb"><span class="chip"></span><span class="esp">ESP32-S3</span><span class="callout"><span class="ln"></span><span class="n">4</span> ESP32-S3 carrier + encoder</span></div>
+  <div class="layer l-rear"><span class="callout"><span class="ln"></span><span class="n">5</span> Rear housing · USB-C cutout</span></div>
+  <div class="layer l-plate"><span class="callout"><span class="ln"></span><span class="n">6</span> Flush wall plate · in-wall</span></div>
+</div>
+</body></html>

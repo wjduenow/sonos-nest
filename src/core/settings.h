@@ -13,6 +13,40 @@ void    settingsSetBrightness(uint8_t pct);
 // Button-ring level % (0..100), default 100. Deliberately NOT settingsBrightness(): that one
 // floors at 10 so nobody can blank an LCD and lose the UI needed to un-blank it. A ring has no
 // such trap and 0 (fully off) is a legitimate, wanted state on a bedside device.
+// UI feedback tone level, 0..100. 0 = off. Boards without a speaker ignore it.
+uint8_t settingsUiSound();
+void    settingsSetUiSound(uint8_t pct);
+
+// Scroll/detent feedback, separate from the master level above: wanting button clicks without
+// scroll noise is a reasonable preference, and a 50-row flick makes far more sound than a button.
+// settingsUiSound()==0 silences everything regardless — this only has meaning above that.
+bool    settingsScrollSound();
+void    settingsSetScrollSound(bool on);
+
+// --- Radio cache refresh schedule ---------------------------------------------------------------
+// The station catalogue is crawled once a day at a fixed LOCAL hour (the device's CLOCK_TZ), not on
+// an age timer: a predictable overnight slot keeps ~500 KB of traffic off the ESP-Hosted link at the
+// times anyone is listening. Default 4 (04:00 local).
+bool    settingsRadioAutoRefresh();
+void    settingsSetRadioAutoRefresh(bool on);
+uint8_t settingsRadioRefreshHour();          // 0-23 local
+void    settingsSetRadioRefreshHour(uint8_t hour);
+
+// --- Amazon Music (SMAPI DeviceLink) ------------------------------------------------------------
+// Our OWN account credentials, not the household's — Sonos never discloses those (plans/08). The
+// token expires in under an hour and is refreshed in-band by core/amazon.cpp, so these are written
+// far more often than most settings; both are ~600 chars.
+String  settingsAmazonToken();
+String  settingsAmazonKey();
+void    settingsSetAmazonAuth(const String &token, const String &key);
+// Account serial for the sn= URI parameter. Playback ignores it in practice, but it costs nothing
+// to send the right one, and it is readable from any existing Amazon favourite's res URI.
+uint8_t settingsAmazonSerial();
+void    settingsSetAmazonSerial(uint8_t sn);
+// The Sonos household id, used as the correlation key when linking.
+String  settingsHouseholdId();
+void    settingsSetHouseholdId(const String &id);
+
 uint8_t settingsRing();
 void    settingsSetRing(uint8_t pct);
 

@@ -8,6 +8,34 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <esp_arduino_version.h>   // ESP_ARDUINO_VERSION_MAJOR — see mdnsResultIp() below
+
+// Arduino-ESP32 3.x renamed MDNSResponder::IP(idx) to address(idx). This file has to compile on
+// both: the ESP32-S3 units (nest, sleep-machine) are pinned to Arduino 2.0.17, while sonos-jukebox
+// is ESP32-P4 and can only build on 3.x. Keep this shim rather than bumping the S3 units — see
+// plans/07-sonos-jukebox.md for why those pins are load-bearing.
+//
+// The fallback is NOT belt-and-braces. Both accessors just walk the addresses attached to the
+// service result and return an empty IPAddress if none is IPv4 — so a responder that answers the
+// PTR/SRV query without also inlining an A record yields 0.0.0.0, and the device then cheerfully
+// "registers" with the portal at 0.0.0.0. That is what this board did on its first real boot.
+// Resolving the advertised hostname separately is the reliable path.
+static inline IPAddress mdnsResultIp(int idx) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  IPAddress ip = MDNS.address(idx);
+#else
+  IPAddress ip = MDNS.IP(idx);
+#endif
+  if (ip == IPAddress((uint32_t)0)) {
+    String host = MDNS.hostname(idx);
+    if (host.length()) {
+      ip = MDNS.queryHost(host);
+      Serial.printf("[registrar] service result had no A record; resolved %s -> %s\n",
+                    host.c_str(), ip.toString().c_str());
+    }
+  }
+  return ip;
+}
 
 // Firmware version string — injected per build by tools/git_version.py (git describe). Default
 // keeps a plain `pio run` from any checkout compiling; the real value comes from the build flag.
@@ -27,6 +55,15 @@ static const uint32_t kHeartbeatMs = 45000;   // ~45 s: 2-3 misses (~2 min) flip
 static String   s_host;      // resolved portal IP ("" until we've found one)
 static uint16_t s_port = 0;
 
+// Backoff for portal resolution. resolvePortal() runs a blocking mDNS service query and, when the
+// responder answers without an A record, a second blocking queryHost() on top (see mdnsResultIp).
+// Both run on netTask, which is also draining g_pending and polling Sonos — so on a LAN with no
+// portal at all, retrying every heartbeat stalls playback control for seconds, every 45 s, forever.
+// The portal is optional; failing to find one must stay cheap. Doubles 45 s -> ~12 min and holds.
+static uint8_t  s_resolveFails = 0;
+static uint32_t s_nextResolveMs = 0;
+static const uint32_t kResolveBackoffMaxMs = 720000;
+
 static const char *serviceName() {
   const char *s = PORTAL_SERVICE;
   return (s[0] == '_') ? s + 1 : s;   // queryService() adds the underscore itself
@@ -37,11 +74,18 @@ static const char *serviceName() {
 static bool resolvePortal() {
   int n = MDNS.queryService(serviceName(), "tcp");
   if (n > 0) {
-    s_host = MDNS.IP(0).toString();
-    s_port = MDNS.port(0);
-    settingsSetPortal(s_host + ":" + String(s_port));
-    Serial.printf("[registrar] portal @ %s:%u (mDNS)\n", s_host.c_str(), s_port);
-    return true;
+    IPAddress ip = mdnsResultIp(0);
+    if (ip == IPAddress((uint32_t)0)) {
+      // Never cache 0.0.0.0: settingsSetPortal() would persist it to NVS and every later boot
+      // would "resolve" the portal to a dead address without ever retrying mDNS.
+      Serial.println("[registrar] mDNS hit but no usable address — falling back to cache");
+    } else {
+      s_host = ip.toString();
+      s_port = MDNS.port(0);
+      settingsSetPortal(s_host + ":" + String(s_port));
+      Serial.printf("[registrar] portal @ %s:%u (mDNS)\n", s_host.c_str(), s_port);
+      return true;
+    }
   }
   String cached = settingsPortal();
   int c = cached.indexOf(':');
@@ -116,7 +160,19 @@ void registrarTick() {
 
   // Never resolved (portal started after us): resolve + full register, not a heartbeat.
   if (s_host.length() == 0 || s_port == 0) {
-    if (resolvePortal()) postRegister();
+    if (s_nextResolveMs && (int32_t)(millis() - s_nextResolveMs) < 0) return;   // backing off
+    if (resolvePortal()) {
+      s_resolveFails = 0;
+      s_nextResolveMs = 0;
+      postRegister();
+    } else {
+      if (s_resolveFails < 8) s_resolveFails++;
+      uint32_t wait = kHeartbeatMs << s_resolveFails;
+      if (wait > kResolveBackoffMaxMs) wait = kResolveBackoffMaxMs;
+      s_nextResolveMs = millis() + wait;
+      Serial.printf("[registrar] portal not found (%u) — next mDNS attempt in %lus\n",
+                    (unsigned)s_resolveFails, (unsigned long)(wait / 1000));
+    }
     return;
   }
   // A failed heartbeat means the portal restarted, moved, or forgot us — drop the cached host so
@@ -125,6 +181,9 @@ void registrarTick() {
   if (!httpPostJson("/api/heartbeat", heartbeatJson(), &resp)) {
     Serial.println("[registrar] heartbeat failed — will re-resolve portal");
     s_host = ""; s_port = 0;
+    // We were talking to a portal a moment ago, so it is worth one prompt re-resolve; don't
+    // inherit a long backoff from whenever this device last booted with no portal on the LAN.
+    s_resolveFails = 0; s_nextResolveMs = 0;
     return;
   }
   // The portal sets "recheck" when a firmware update has been approved for us from the dashboard.

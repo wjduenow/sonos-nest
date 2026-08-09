@@ -1,0 +1,5 @@
+/* Sonos Jukebox — Webfonts.
+   SUBSTITUTION: no brand font files were provided. Using the closest
+   Google Fonts matches for a clean neutral grotesque + technical mono.
+   Swap these @import lines for licensed @font-face rules when available. */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');

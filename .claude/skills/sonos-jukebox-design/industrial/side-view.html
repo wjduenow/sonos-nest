@@ -1,0 +1,45 @@
+<!-- @dsCard group="Industrial Design" viewport="700x430" name="Side profile & flush mount" subtitle="22mm depth, in-wall plate, rear female USB-C via pigtail" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+:root{--mmv:2.6px}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);background:var(--surface-2);padding:34px 30px;color:var(--ink-900)}
+.title{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--ink-500);margin:0 0 34px;text-align:center}
+.stage{position:relative;display:flex;align-items:stretch;justify-content:center;height:calc(130*var(--mmv))}
+/* dial protruding at front (left) */
+.dial{align-self:flex-start;margin-top:34px;width:calc(14*var(--mmv));height:calc(36*var(--mmv));background:linear-gradient(90deg,var(--mat-knob-hi),var(--mat-knob));border-radius:7px 2px 2px 7px;box-shadow:0 5px 12px rgba(0,0,0,.28)}
+/* unit body */
+.unit{position:relative;width:calc(22*var(--mmv));background:linear-gradient(90deg,#fbfbf9,var(--mat-case));box-shadow:var(--shadow-lg);border-radius:14px 4px 4px 14px}
+.glass{position:absolute;left:0;top:6px;bottom:6px;width:5px;background:var(--mat-glass)}
+.pcb{position:absolute;right:6px;top:22px;bottom:22px;width:3px;background:#3f7d54;border-radius:2px;opacity:.6}
+/* flush wall plate — thin, sits between unit rear and wall face */
+.plate{width:calc(3*var(--mmv));background:linear-gradient(90deg,#eceef0,#e0e3e6);box-shadow:var(--shadow-sm)}
+/* wall */
+.wall{width:120px;background:repeating-linear-gradient(45deg,#e7e9ec 0 6px,#dfe2e6 6px 12px);border-left:2px solid var(--ink-300);position:relative}
+.cavity{position:absolute;left:0;top:26px;bottom:26px;width:52px;background:var(--surface-2);border-radius:0 4px 4px 0}
+/* rear female USB-C poking into cavity */
+.usbc{position:absolute;left:-1px;bottom:44px;width:calc(9*var(--mmv));height:15px;background:var(--ink-700);border-radius:2px}
+.usbc::after{content:"";position:absolute;inset:4px 3px;background:var(--ink-400);border-radius:2px}
+.cable{position:absolute;left:calc(9*var(--mmv) - 2px);bottom:12px;width:34px;height:34px;border:2px solid var(--ink-300);border-top:0;border-left:0;border-radius:0 0 12px 0}
+/* depth callout */
+.dep{position:absolute;left:calc(-14*var(--mmv));right:calc(-3*var(--mmv));bottom:-24px;display:flex;align-items:center}
+.dep .ln{flex:1;height:1px;background:var(--ink-400);position:relative}
+.dep .ln::before,.dep .ln::after{content:"";position:absolute;top:-3px;width:1px;height:7px;background:var(--ink-400)}
+.dep .ln::before{left:0}.dep .ln::after{right:0}
+.lab{font-family:var(--font-mono);font-size:10px;color:var(--ink-500);background:var(--surface-2);padding:0 6px}
+.lead{position:absolute;font-family:var(--font-mono);font-size:10px;color:var(--ink-500);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.lead .dotln{width:22px;height:1px;background:var(--ink-300)}
+</style></head><body>
+<div class="title">Side Section · Flush Wall Mount · Rear Power</div>
+<div class="stage">
+  <div class="dial"></div>
+  <div class="unit"><div class="glass"></div><div class="pcb"></div>
+    <div class="dep"><span class="lab">14</span><div class="ln"></div><span class="lab">22 mm</span></div>
+  </div>
+  <div class="plate"></div>
+  <div class="wall"><div class="cavity"></div><div class="usbc"></div><div class="cable"></div>
+    <div class="lead" style="left:70px;bottom:48px"><span class="dotln"></span><span>Female USB-C (rear)</span></div>
+    <div class="lead" style="left:70px;bottom:16px"><span class="dotln"></span><span>Pigtail in cavity</span></div>
+  </div>
+  <div class="lead" style="left:calc(50% + 40px);top:-4px"><span class="dotln"></span><span>Plate flush · proud 3mm</span></div>
+</div>
+</body></html>

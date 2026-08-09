@@ -14,7 +14,27 @@
 
 namespace sonos {
 
+// s_zones is written by netTask (discovery) and read by other tasks: every unit's UI task paints
+// a room list from it, and on boards with a web UI the HTTP server task reads it too. Discovery
+// does clear() + push_back(), so an unguarded reader can walk destroyed Strings or a reallocated
+// buffer mid-rebuild — garbage room names at best, LoadProhibited at worst.
+//
+// The rule here: BUILD INTO A LOCAL, SWAP UNDER THE LOCK. The lock is never held across network
+// I/O — a topology fetch takes hundreds of ms and blocking the UI for that would trade a rare
+// crash for a guaranteed stutter. Readers on another task take a copy (zonesSnapshot); the list is
+// a handful of small structs, so the copy is far cheaper than the alternatives.
 static std::vector<Zone> s_zones;
+
+// Function-local static: C++11 guarantees thread-safe initialisation, and the first call happens
+// during appBoot() before any other task exists anyway.
+static SemaphoreHandle_t zonesLock() {
+  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
+  return m;
+}
+struct ZonesGuard {
+  ZonesGuard()  { xSemaphoreTake(zonesLock(), portMAX_DELAY); }
+  ~ZonesGuard() { xSemaphoreGive(zonesLock()); }
+};
 
 // Value of an HTTP header line ("Name:") up to end-of-line, case-insensitive on the name.
 static String headerValue(const String &resp, const char *name) {
@@ -65,7 +85,7 @@ static String attrOf(const String &s, const char *name) {
 // stereo-pair satellites (<Satellite> children) and invisible devices (bridges, hidden
 // subs) are excluded, so a paired room appears once — matching the Sonos app.
 static bool buildZonesFromTopology(const String &seedIp) {
-  s_zones.clear();
+  std::vector<Zone> next;   // built here, swapped into s_zones at the end — see the note above
   String r;
   if (!soapAction(seedIp, "/ZoneGroupTopology/Control",
                   "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
@@ -84,7 +104,7 @@ static bool buildZonesFromTopology(const String &seedIp) {
     gpos = gend + 1;
 
     String coordUuid = attrOf(group, "Coordinator");
-    size_t firstIdx = s_zones.size();
+    size_t firstIdx = next.size();
 
     // Top-level <ZoneGroupMember ...> = a visible room; <Satellite> children aren't matched.
     int mpos = 0;
@@ -103,18 +123,20 @@ static bool buildZonesFromTopology(const String &seedIp) {
       z.uuid = attrOf(m, "UUID");
       z.coordinatorUuid = coordUuid;
       z.isCoordinator = (z.uuid == coordUuid);
-      s_zones.push_back(z);
+      next.push_back(z);
     }
     // Stamp this group's coordinator IP onto its members.
     String coordIp;
-    for (size_t i = firstIdx; i < s_zones.size(); ++i)
-      if (s_zones[i].uuid == coordUuid) coordIp = s_zones[i].ip;
-    for (size_t i = firstIdx; i < s_zones.size(); ++i) s_zones[i].coordIp = coordIp;
+    for (size_t i = firstIdx; i < next.size(); ++i)
+      if (next[i].uuid == coordUuid) coordIp = next[i].ip;
+    for (size_t i = firstIdx; i < next.size(); ++i) next[i].coordIp = coordIp;
   }
-  std::sort(s_zones.begin(), s_zones.end(), [](const Zone &a, const Zone &b) {
+  std::sort(next.begin(), next.end(), [](const Zone &a, const Zone &b) {
     return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
   });
-  return !s_zones.empty();
+  if (next.empty()) return false;
+  { ZonesGuard g; s_zones.swap(next); }   // the only mutation readers can observe
+  return true;
 }
 
 // Find one reachable Sonos via SSDP — just a seed to query topology from.
@@ -156,15 +178,17 @@ static String ssdpSeed() {
 // Serialize/deserialize the zone list for the NVS cache (fast boot). One zone per line,
 // fields separated by US (0x1f): name | ip | uuid | coordinatorUuid | coordIp.
 static String serializeZones() {
+  std::vector<Zone> zs;
+  zonesSnapshot(zs);
   String s;
-  for (auto &z : s_zones) {
+  for (auto &z : zs) {
     s += z.name; s += '\x1f'; s += z.ip; s += '\x1f'; s += z.uuid; s += '\x1f';
     s += z.coordinatorUuid; s += '\x1f'; s += z.coordIp; s += '\n';
   }
   return s;
 }
 static bool deserializeZones(const String &blob) {
-  s_zones.clear();
+  std::vector<Zone> next;
   int pos = 0;
   while (pos < (int)blob.length()) {
     int eol = blob.indexOf('\n', pos);
@@ -186,9 +210,11 @@ static bool deserializeZones(const String &blob) {
         }
       }
     }
-    if (z.name.length() && z.ip.length()) s_zones.push_back(z);
+    if (z.name.length() && z.ip.length()) next.push_back(z);
   }
-  return !s_zones.empty();
+  if (next.empty()) return false;
+  { ZonesGuard g; s_zones.swap(next); }
+  return true;
 }
 
 // Discover the canonical rooms. Fast path: refresh topology from a CACHED speaker IP (no
@@ -199,19 +225,30 @@ bool ssdpDiscover() {
   if (buildZonesFromTopology(SONOS_ZONE_IP)) { settingsSetZones(serializeZones()); return true; }
 #endif
   // Fast path: a cached IP is usually still valid — one topology fetch, no 3.6s SSDP wait.
-  if (deserializeZones(settingsZones()) && s_zones.size()) {
-    String seed = s_zones[0].ip;
+  if (deserializeZones(settingsZones()) && zoneCount()) {
+    String seed;
+    { ZonesGuard g; seed = s_zones[0].ip; }
     if (buildZonesFromTopology(seed)) { settingsSetZones(serializeZones()); return true; }
   }
   // Slow path: full SSDP discovery (network changed, or first boot).
   String seed = ssdpSeed();
-  if (seed.length() == 0) { s_zones.clear(); return false; }
+  if (seed.length() == 0) { ZonesGuard g; s_zones.clear(); return false; }
   if (!buildZonesFromTopology(seed)) return false;
   settingsSetZones(serializeZones());
   return true;
 }
 
 const std::vector<Zone> &zones() { return s_zones; }
+
+void zonesSnapshot(std::vector<Zone> &out) {
+  ZonesGuard g;
+  out = s_zones;
+}
+
+size_t zoneCount() {
+  ZonesGuard g;
+  return s_zones.size();
+}
 
 // The IP of the speaker that returned a zone's own IP (volume target fallback).
 static String zoneOwnIp(const String &zoneName) {

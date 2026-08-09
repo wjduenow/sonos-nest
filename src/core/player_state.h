@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <vector>
 
 enum class TransportState { Stopped, Playing, Paused, Transitioning, Unknown };
 
@@ -38,10 +39,32 @@ struct PendingCmds {
   bool   next         = false;
   bool   prev         = false;
   String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP
-  String groupJoinIp;         // join this speaker to the active group
-  String groupLeaveIp;        // remove this speaker from its group (become standalone)
+
+  // --- Grouping ---------------------------------------------------------------------------
+  // A QUEUE, not one IP per kind. The jukebox's Rooms page is a checkbox per room, so several
+  // toggles can land between two netTask passes; with a single String each, the second tap
+  // silently overwrote the first and that room just never joined. Drained in order, and the
+  // expensive ssdpDiscover() runs ONCE after the whole batch rather than per operation — a
+  // full topology fetch and parse is hundreds of ms of String-heavy work, so per-op made
+  // ungrouping a four-room group visibly slow.
+  struct GroupOp { String ip; bool join; };   // join=false -> BecomeCoordinatorOfStandaloneGroup
+  std::vector<GroupOp> groupOps;
+  bool   ungroupAll = false;  // split every member of the ACTIVE group off, in one batch
+
+  // Per-room controls from the Rooms page. Volume targets that room's own speaker; play/pause
+  // targets its group coordinator, because Sonos transport is per-group and a member cannot be
+  // paused on its own (the UI only offers the button where it is honest — see screens.cpp).
+  String roomVolIp;           // non-empty with roomVolTarget >= 0: set that speaker's volume
+  int    roomVolTarget = -1;
+  String roomPlayCoordIp;     // non-empty: play/pause this coordinator
+  int    roomSetPlay   = -1;  // 0 = pause; 1 = play
+
   String localStreamUrl;      // non-empty: play this local HTTP file URL on the coordinator, looped
   String localStreamTitle;    // dc:title shown by Sonos for the local stream
+  String playUri;             // non-empty: a fully-formed transport URI to play on the coordinator,
+  String playMeta;            // with this DIDL. Used by the Radio page, where the unit already has
+                              // both from the station cache and there is nothing for netTask to
+                              // look up — unlike a favourite, which goes through library::.
   String wifiSsid;            // non-empty: apply these WiFi creds (with wifiPass) on netTask
   String wifiPass;
   bool   reboot = false;      // reboot the device. Set on a device-name change: a clean boot

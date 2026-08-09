@@ -1,0 +1,16 @@
+/* Sonos Jukebox — Radii & border tokens. Soft, Sonos-like. */
+:root{
+  --r-xs:6px;
+  --r-sm:10px;
+  --r-md:14px;    /* list rows, chips */
+  --r-lg:20px;    /* cards, panels */
+  --r-xl:28px;    /* screen page containers */
+  --r-pill:999px;
+  --r-case:26px;  /* physical case corner radius (mm-scaled in views) */
+
+  --bw-hair:1px;
+  --bw-1:1.5px;
+  --bw-2:2px;
+  --border-hair:var(--bw-hair) solid var(--line);
+  --border-screen:var(--bw-hair) solid var(--screen-line);
+}

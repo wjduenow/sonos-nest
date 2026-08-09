@@ -6,6 +6,12 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
+// TJpgDec is a GLOBAL SINGLETON: one callback pointer, one scale factor, shared by every caller.
+// Anything else in the firmware that decodes a JPEG must hold this for the duration, or two
+// decoders running on different tasks will overwrite each other's callback and scale mid-frame.
+bool jpegLock(uint32_t timeoutMs = 8000);
+void jpegUnlock();
+
 bool albumArtInit();                 // allocate PSRAM buffers; call once after PSRAM is up
 bool albumArtFetch(const String &url);  // GET + decode into the back buffer, then swap
 void albumArtClear();                // mark "no art" (e.g. radio with no image)

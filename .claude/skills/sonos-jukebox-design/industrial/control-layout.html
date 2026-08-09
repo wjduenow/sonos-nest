@@ -1,0 +1,43 @@
+<!-- @dsCard group="Industrial Design" viewport="700x400" name="Control layout spec" subtitle="Large rotary dial + 4 transport caps — dimensions & spacing" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+:root{--mmv:3.4px}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-ui);background:var(--surface-2);padding:30px;color:var(--ink-900);display:flex;gap:34px;align-items:center;justify-content:center}
+.title{position:absolute;top:22px;left:0;right:0;font-family:var(--font-mono);font-size:11px;letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--ink-500);text-align:center}
+.col{position:relative;width:calc(46*var(--mmv));background:linear-gradient(160deg,#fbfbf9,var(--mat-case));border-radius:22px;box-shadow:var(--shadow-lg);padding:calc(5*var(--mmv)) 0;display:flex;flex-direction:column;align-items:center;gap:calc(6*var(--mmv))}
+.dial{width:calc(36*var(--mmv));height:calc(36*var(--mmv));border-radius:999px;background:radial-gradient(circle at 38% 32%,var(--mat-knob-hi),var(--mat-knob) 62%);box-shadow:0 6px 14px rgba(0,0,0,.28);position:relative}
+.dial::before{content:"";position:absolute;inset:6px;border-radius:999px;background:repeating-conic-gradient(from 0deg,rgba(255,255,255,.10) 0 3deg,transparent 3deg 9deg)}
+.ring{position:absolute;inset:-6px;border-radius:999px;border:2px solid var(--accent);opacity:.4}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:calc(6*var(--mmv))}
+.btn{width:calc(13*var(--mmv));height:calc(13*var(--mmv));border-radius:999px;background:var(--mat-button);box-shadow:0 2px 4px rgba(0,0,0,.14),inset 0 1px 1px rgba(255,255,255,.8);display:grid;place-items:center;color:var(--ink-500);font-size:15px;line-height:1}
+.play{width:0;height:0;border-left:9px solid var(--ink-500);border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:2px}
+.spec{font-family:var(--font-mono);font-size:12px;line-height:1.9;color:var(--ink-700)}
+.spec b{color:var(--ink-900)}
+.spec .k{color:var(--accent-deep)}
+.lead{position:absolute;font-family:var(--font-mono);font-size:10px;color:var(--ink-500);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.lead .dotln{width:26px;height:1px;background:var(--ink-300)}
+</style></head><body>
+<div class="title">Control Column · Dimensions</div>
+<div class="col">
+  <div class="dial"><span class="ring"></span></div>
+  <div class="grid">
+    <div class="btn"><span class="play"></span></div>
+    <div class="btn">⇄</div>
+    <div class="btn">⏮</div>
+    <div class="btn">⏭</div>
+  </div>
+  <div class="lead" style="top:calc(5*var(--mmv));right:-118px"><span class="dotln"></span><span>Ø36 dial · light ring</span></div>
+  <div class="lead" style="bottom:calc(9*var(--mmv));right:-118px"><span class="dotln"></span><span>4× Ø13 · 9mm pitch</span></div>
+</div>
+<div class="spec">
+  <div><span class="k">DIAL</span>&nbsp; <b>Ø36.0</b> · 14 proud · knurled</div>
+  <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;push-to-select · 24-detent enc.</div>
+  <div><span class="k">RING</span>&nbsp; RGB light-pipe · volume/scroll</div>
+  <div style="margin-top:8px"><span class="k">BTN·1</span> Play / Pause · ▶</div>
+  <div><span class="k">BTN·2</span> Skip Forward · ⏭</div>
+  <div><span class="k">BTN·3</span> Skip Back · ⏮</div>
+  <div><span class="k">BTN·4</span> Change Rooms · ⇄</div>
+  <div style="margin-top:8px"><span class="k">CAP</span>&nbsp;&nbsp; 4× Ø13 soft-touch · 2×2 grid</div>
+  <div><span class="k">COL</span>&nbsp;&nbsp; 46mm wide · right of screen</div>
+</div>
+</body></html>

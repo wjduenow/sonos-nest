@@ -27,6 +27,26 @@ KnobEvent knobEvent();             // next queued press event; None if no knob
 bool      knobPressed();           // true once per Short press; false if no knob
 bool      knobDown();              // true while the knob is held; false if no knob
 
+// --- Network link recovery (optional) ---
+// Boards whose Wi-Fi is a separate co-processor can have the HOST believe it is associated while
+// the radio is actually gone. Recovery there means resetting the co-processor, not reconnecting
+// Wi-Fi — the normal reconnect path cannot fix a dead transport. Return true if the board did
+// something and the caller should re-associate; false (the default) means "nothing I can do",
+// which is correct for boards with an on-die radio.
+bool netLinkRecover();
+
+// --- UI feedback tones (optional; no-op on boards without a speaker) ---
+// Short non-musical confirmations for touch/press, NOT media playback — deliberately separate
+// from localAudio*, which means "play a file off local storage". A board with speakers but no
+// storage (the jukebox) implements this and stubs those; the reverse is equally valid.
+// Volume is not a parameter: the level is a user setting (settingsUiSound()), read by the board.
+enum class UiSound {
+  Tick,      // a control was pressed
+  Confirm,   // an action was accepted (room changed, favourite started)
+  Error,     // an action failed
+};
+void uiSoundPlay(UiSound s);
+
 // --- Local audio (optional; boards without an onboard codec/speaker are no-ops) ---
 // Play a local audio file (e.g. off the SD card) through an onboard speaker. Async: playback
 // runs on a board-owned task, so this returns as soon as it has started. Returns false if the
@@ -71,6 +91,16 @@ const char *localManagerUrl();
 // but have no files to manage. nullptr on boards with no web UI at all (the nest), or before the
 // network is up. Pointer is owned by the board — copy it before the next call.
 const char *boardConfigUrl();
+
+// Root of a writable filesystem the firmware may use for its own data (caches, indexes), e.g.
+// "/sdcard". nullptr on boards with no storage, or when the card is missing or unreadable — callers
+// MUST treat nullptr as "this feature is unavailable", not as an error to retry.
+// Files underneath are accessed with plain stdio; the board only owns mounting it.
+//
+// *** Writers: 4 KB per write() call, maximum, and keep any single file under ~256 KB. ***
+// Larger chunks fail immediately on this hardware and sustained writes die past ~300 KB. Measured,
+// not folklore — see plans/08-music-service-integration.md.
+const char *localStorageRoot();
 
 // Local track library — playable files (e.g. .mp3) on the board's SD card. Empty on boards
 // without local storage. Call localTracksRefresh() to (re)scan before listing.
