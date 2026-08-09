@@ -17,6 +17,10 @@ struct DidlItem {
   bool   isContainer = false;
 };
 
+// Unescape XML entities (&lt; &gt; &amp; &quot; &apos;). Sonos escapes DIDL when embedding it in a
+// SOAP response, and escapes it AGAIN inside a GENA event — so callers routinely need two passes.
+String xmlUnescape(const String& in);
+
 // Scan a DIDL-Lite XML payload into items. Returns count parsed.
 size_t parseDidl(const String& didlXml, std::vector<DidlItem>& out);
 

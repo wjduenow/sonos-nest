@@ -3,7 +3,10 @@
 namespace sonos {
 
 // Unescape the XML entities Sonos uses when embedding DIDL inside a SOAP response.
-static String xmlUnescape(const String &in) {
+// Exported (see didl.h) because GENA needs the identical pass: a NOTIFY body is escaped at the
+// propertyset layer and each val="..." inside it is escaped AGAIN, which is the same
+// double-escaping this file already exists to unpick.
+String xmlUnescape(const String &in) {
   String o;
   o.reserve(in.length());
   for (size_t i = 0; i < in.length();) {

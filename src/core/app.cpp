@@ -23,6 +23,7 @@
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
+#include "sonos/gena.h"          // UPnP eventing — no-op unless -DGENA_EVENTS (see plans/09)
 #include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
 // Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
@@ -399,6 +400,9 @@ static void netTask(void *) {
       if (c.length() && c != s_coordIp) {
         s_coordIp = c;
         if (stateLock()) { g_player.coordinatorIp = c; stateUnlock(); }
+        // Subscriptions are per-coordinator, so they have to follow it. This is the one place the
+        // coordinator changes at runtime (grouping), and genaTick() does the actual resubscribe.
+        sonos::genaSetCoordinator(c);
       }
     }
 
@@ -408,6 +412,9 @@ static void netTask(void *) {
     // Per-room status for the Rooms screen. Costs nothing unless that page is actually open, and
     // polls at most one room per pass — see room_status.h for why it must not burst.
     roomstatus::tick();
+    // GENA subscribe/renew. No-op without -DGENA_EVENTS; self-rate-limited, one blocking call per
+    // pass at most.
+    sonos::genaTick();
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
@@ -529,6 +536,12 @@ void appBoot() {
   // is published for this unit, this flashes + reboots HERE — before playback starts — rather than
   // mid-run. Runtime checks (explicit approve / portal-approved) happen in netTask via updaterTick.
   updaterBegin();
+
+  // GENA callback listener. No-op unless -DGENA_EVENTS (jukebox only for now — see plans/09 for
+  // the per-unit sizing; the sleep-machine cannot afford it). Started after selectZone() so the
+  // coordinator below is the real one, and the listener task waits for Wi-Fi itself anyway.
+  sonos::genaBegin();
+  sonos::genaSetCoordinator(s_coordIp);
 }
 
 void appStartTasks() {
