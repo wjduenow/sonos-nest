@@ -9,6 +9,9 @@
 #include "didl.h"                 // parseNowPlaying() + xmlUnescape() — the inner escape layer
 #include "../player_state.h"
 #include "../net/wifi.h"
+#include "../net/logmirror.h"     // LOG — reaches the TCP mirror on the jukebox, plain Serial
+                                  // elsewhere. A wall-mounted unit has no cable, and these
+                                  // diagnostics are exactly what you need to read from it.
 
 namespace sonos {
 namespace {
@@ -206,7 +209,7 @@ void serveOne(WiFiClient &c) {
   // Refuse loudly rather than truncate. A half-parsed event would show wrong track info, which is
   // worse than a missed one — the backstop poll fixes a miss.
   if (chunked || clen < 0 || (size_t)clen > kMaxBody) {
-    Serial.printf("[gena  ] refusing body (len=%ld chunked=%d max=%u)\n",
+    LOG.printf("[gena  ] refusing body (len=%ld chunked=%d max=%u)\n",
                   clen, (int)chunked, (unsigned)kMaxBody);
     c.print(F("HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
     c.stop();
@@ -231,7 +234,7 @@ void serveOne(WiFiClient &c) {
   c.stop();
 
   if ((long)body.length() == clen) applyEvent(body);
-  else Serial.printf("[gena  ] short body %u/%ld\n", (unsigned)body.length(), clen);
+  else LOG.printf("[gena  ] short body %u/%ld\n", (unsigned)body.length(), clen);
 }
 
 void listenerTask(void *) {
@@ -242,7 +245,7 @@ void listenerTask(void *) {
   s_srv = new WiFiServer(s_port);
   s_srv->begin();
   s_srv->setNoDelay(true);
-  Serial.printf("[gena  ] callback listening on %s:%u\n",
+  LOG.printf("[gena  ] callback listening on %s:%u\n",
                 WiFi.localIP().toString().c_str(), (unsigned)s_port);
 
   for (;;) {
@@ -312,7 +315,7 @@ bool subscribe(Sub &s) {
   s.live = true;
   if (tmo == 0) tmo = kDefaultTimeoutS;
   s.renewAtMs = millis() + (tmo * 1000u) / kRenewFraction;
-  Serial.printf("[gena  ] %s subscribed sid=%s timeout=%us\n", s.label, s.sid.c_str(),
+  LOG.printf("[gena  ] %s subscribed sid=%s timeout=%us\n", s.label, s.sid.c_str(),
                 (unsigned)tmo);
   return true;
 }
@@ -325,7 +328,7 @@ bool renew(Sub &s) {
   if (!genaVerb("SUBSCRIBE", s_coordIp, s.path,
                 "SID: " + s.sid + "\r\nTIMEOUT: Second-" + String(kDefaultTimeoutS) + "\r\n",
                 nullptr, &tmo)) {
-    Serial.printf("[gena  ] %s renew failed -> resubscribing\n", s.label);
+    LOG.printf("[gena  ] %s renew failed -> resubscribing\n", s.label);
     s.sid = ""; s.live = false;
     s_resubs++;
     return subscribe(s);
@@ -359,7 +362,7 @@ void genaTick() {
     for (size_t i = 0; i < kNSubs; ++i) dropSub(s_subs[i]);
     s_coordIp = s_wantIp;
     s_nextTryMs = 0;
-    Serial.printf("[gena  ] coordinator -> %s\n", s_coordIp.c_str());
+    LOG.printf("[gena  ] coordinator -> %s\n", s_coordIp.c_str());
   }
   if (s_coordIp.length() == 0) return;
 

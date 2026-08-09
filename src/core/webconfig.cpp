@@ -7,6 +7,7 @@
 #include "board.h"          // localTrack* — the HAL's view of local storage (empty on most boards)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
+#include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
@@ -139,6 +140,26 @@ String webConfigJson() {
   h["lvMemUsed"]    = s_lvUsed;
   h["lvMemMax"]     = s_lvMaxUsed;
   h["lvMemFragPct"] = s_lvFragPct;
+
+  // GENA eventing (plans/09, issue #6). Emitted only on units that have it compiled in — port is
+  // 0 when the no-op stubs are linked, so its ABSENCE means "not built with -DGENA_EVENTS" rather
+  // than "built and broken". That distinction is the whole point of the block: eventing failing
+  // silently looks exactly like eventing working, because the backstop poll keeps the screen
+  // correct either way. Read it as: subscribed=false or a climbing resubscribes/failures means the
+  // poll is quietly carrying the device; a lastEventAgeMs that only ever grows means subscriptions
+  // are live but nothing is arriving (callback unreachable — check the speaker can reach US).
+  sonos::GenaDiag gd;
+  sonos::genaDiag(gd);
+  if (gd.port) {
+    JsonObject g = h["gena"].to<JsonObject>();
+    g["port"]         = gd.port;
+    g["subscribed"]   = gd.subscribed;
+    g["events"]       = gd.events;
+    g["renewals"]     = gd.renewals;
+    g["resubscribes"] = gd.resubscribes;
+    g["failures"]     = gd.failures;
+    if (gd.lastEventAgeMs != UINT32_MAX) g["lastEventAgeMs"] = gd.lastEventAgeMs;
+  }
 
   // OTA pull state (net/updater.cpp): the toggle, the source, what's running, and what's available
   // (null when up-to-date/disabled). Drives the config page's "Updates" section and its Approve
