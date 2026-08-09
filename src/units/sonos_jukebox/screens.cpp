@@ -140,11 +140,17 @@ static bool s_wasPlaying = false;
 // live, so a needless redraw is visible as flicker/tearing. Only touch a widget when its value
 // has actually changed.
 struct Shown {
-  String   room, title, meta, badge;
+  // Seeded to a sentinel no real value can equal, for the SAME reason pct/elapsed/playing below
+  // use out-of-range seeds: the first tick must always paint. An empty String here was a bug —
+  // the meta label is built showing "starting up", so a track with no artist AND no album (a
+  // direct Spotify track reports neither) rendered "" , compared equal to the empty cache, and the
+  // boot placeholder stayed on screen forever under a correct title.
+  String   room = "\x01", title = "\x01", meta = "\x01", badge = "\x01";
   int      pct = -1, volPct = -1;
   uint32_t elapsed = UINT32_MAX, remain = UINT32_MAX;
   int      playing = -1;      // tri-state so the first tick always paints
   uint8_t  volIcon = 0xFF;
+  uint8_t  fillOpa = 0;       // scrubber fill opacity; dimmed when the duration is unknown
 };
 static Shown s_shown;
 
@@ -2002,13 +2008,31 @@ void uiTick() {
   // sample would step the bar and the timecode in 15 s jumps. This advances it locally between
   // samples and the poll reconciles it. Identical behaviour when eventing is off — the sample is
   // then a second old at most.
+  // DURATION IS OFTEN 0, and not only for radio. Sonos reports TrackDuration 0:00:00 for anything
+  // it treats as an open-ended stream — live radio, but ALSO a direct Spotify track, which has a
+  // perfectly finite length Sonos simply does not tell us (no <res>, no duration attribute
+  // anywhere in its metadata; checked). The old code computed pct=0 in that case, so the bar sat
+  // empty at 0% while the elapsed timecode counted up beside it — visibly broken — and the
+  // remaining timecode read a nonsense "-0:00".
+  //
+  // With no duration there is no honest percentage to draw, so don't draw one: the bar goes to a
+  // dim full width (a track with no end, rather than a track that never starts) and the remaining
+  // side shows an em dash instead of a fabricated number. The design system asks for "LIVE · on
+  // air" here, which is right for radio but would be a lie on a Spotify track — and the two are
+  // indistinguishable from this field alone.
   const uint32_t posSec = playerPositionNow(p);
+  const bool unknownDur = (p.durationSec == 0);
   const lv_coord_t trackW = lv_obj_get_width(s_track);
-  int pct = (p.durationSec > 0) ? (int)((uint64_t)posSec * 100 / p.durationSec) : 0;
+  int pct = unknownDur ? 100 : (int)((uint64_t)posSec * 100 / p.durationSec);
   if (pct > 100) pct = 100;
   if (pct != s_shown.pct) {
     s_shown.pct = pct;
     lv_obj_set_width(s_fill, trackW * pct / 100);
+  }
+  const uint8_t fillOpa = unknownDur ? LV_OPA_40 : LV_OPA_COVER;
+  if (fillOpa != s_shown.fillOpa) {
+    s_shown.fillOpa = fillOpa;
+    lv_obj_set_style_bg_opa(s_fill, fillOpa, 0);
   }
 
   char buf[16];
@@ -2017,11 +2041,12 @@ void uiTick() {
     fmtTime(buf, sizeof(buf), posSec, false);
     lv_label_set_text(s_elapsed, buf);
   }
-  const uint32_t remain = (p.durationSec > posSec) ? p.durationSec - posSec : 0;
+  const uint32_t remain = unknownDur ? UINT32_MAX
+                                     : ((p.durationSec > posSec) ? p.durationSec - posSec : 0);
   if (remain != s_shown.remain) {
     s_shown.remain = remain;
-    fmtTime(buf, sizeof(buf), remain, true);
-    lv_label_set_text(s_remain, buf);
+    if (unknownDur) lv_label_set_text(s_remain, "—");
+    else { fmtTime(buf, sizeof(buf), remain, true); lv_label_set_text(s_remain, buf); }
   }
 
   // Volume.

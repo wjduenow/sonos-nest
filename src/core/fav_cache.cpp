@@ -105,10 +105,13 @@ bool refresh() {
   if (zs.empty()) return false;
   s_busy = true;
 
-  // Page FV:2 in SMALL pages. 20, not 50: a favourite's record carries its whole <r:resMD> DIDL
-  // (~700 bytes), so a 50-item page is a ~50 KB response held as a String and then COPIED again by
-  // the unescape — and min internal heap was measured dropping to 41 KB with 50. Internal SRAM is
-  // the scarce resource on this board; halving the page halves the spike for one extra round trip.
+  // Page FV:2 in SMALL pages. 10 — and this is not conservatism, it is measured. A favourite's
+  // record carries its whole <r:resMD> DIDL (~700 bytes), and the page is held as a String and
+  // then COPIED again by the unescape. 50 took min internal heap to 41 KB. 20 was still enough,
+  // in combination with everything else running, to take FREE heap to 25 KB and MIN to 1.4 KB on
+  // a live device — past the point where LWIP cannot get socket buffers, at which point the board
+  // answers ping and nothing else, and recovers only by rebooting. Each halving costs one extra
+  // round trip and nothing else. Do not raise it.
   std::vector<Fav> favs;
   int start = 0, total = 1, skipped = 0;
   while (start < total && favs.size() < 300) {
@@ -117,7 +120,7 @@ bool refresh() {
                            "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
                            String("<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
                                   "<Filter>*</Filter><StartingIndex>") + start +
-                           "</StartingIndex><RequestedCount>20</RequestedCount>"
+                           "</StartingIndex><RequestedCount>10</RequestedCount>"
                            "<SortCriteria></SortCriteria>", r)) {
       LOG.println("[favs  ] browse failed");
       s_busy = false; return false;
@@ -135,7 +138,18 @@ bool refresh() {
       f.title  = unesc(tag(rec, "dc:title"));
       f.uri    = unesc(tag(rec, "res"));
       f.artUrl = unesc(tag(rec, "upnp:albumArtURI"));
-      f.meta   = tag(rec, "r:resMD");          // already single-unescaped; Sonos wants it as-is
+      // *** unesc() HERE IS LOAD-BEARING. *** `didl` has had ONE unescape (of Browse's Result);
+      // the r:resMD inside it is escaped a second time, exactly like the three fields above, which
+      // is why they all call unesc() too. Storing it still-escaped meant soapAction escaped it
+      // AGAIN on the way out, so the speaker received `&lt;DIDL-Lite` as literal text.
+      //
+      // Proven on hardware, same favourite back to back: without this, AddURIToQueue answers HTTP
+      // 500 / UPnP errorCode 800; with it, 364 tracks are added. It only broke SOME favourites,
+      // which is what disguised it as a service problem: a station URI (x-sonosapi-radio:) plays
+      // from the URI alone and ignores bad metadata, but a CONTAINER (x-rincon-cpcontainer:, which
+      // is what all 28 YouTube Music favourites here are) can only be resolved THROUGH it.
+      // didl.cpp's parseDidl() always did this correctly; fav_cache parses separately and did not.
+      f.meta   = unesc(tag(rec, "r:resMD"));
       // A favourite with no <res> cannot be played — on this household "Discover Sonos Radio" and
       // "Sonos Presents" are both like this. Skip them, but say so: silently showing 40 of 42 with
       // no explanation is the kind of gap that gets reported as a bug.
@@ -215,11 +229,34 @@ int search(const String &query, std::vector<Fav> &out, int max) {
   return n;
 }
 
+// A refresh is by far the heaviest thing this module does, and on this board it runs close to the
+// edge: measured on a live device it took free internal heap to 25 KB and MIN to 1.4 KB. Below
+// ~15 KB LWIP cannot get socket buffers, the device answers ping and nothing else, and the only
+// recovery is a reboot. Two guards, both from watching that happen:
+//
+//   kSettleMs  Never refresh during the boot storm. LVGL, the art cache, the radio cache, GENA and
+//              the web server all come up in the first minute; a burst of SOAP and SD on top of
+//              that is what tips it over. This is also what makes the failure SELF-SUSTAINING —
+//              the reboot interrupts the refresh before it can write a valid cache, so !ready() is
+//              still true next boot and it tries again, forever. Deferring breaks that cycle.
+//
+//   kMinHeap   Refuse outright when heap is already low, wherever that came from. A stale
+//              favourites list is a cosmetic problem; taking the whole device down is not.
+static const uint32_t kSettleMs = 90000;
+static const uint32_t kMinHeap  = 90000;
+
 static void favTask(void *) {
   for (;;) {
     if (localStorageRoot() && wifiIsConnected() && sonos::zoneCount()) {
       bool due = s_want || !ready();
       s_want = false;
+      if (due && millis() < kSettleMs) {
+        due = false;                       // not now — retried on a later pass
+      } else if (due && ESP.getFreeHeap() < kMinHeap) {
+        LOG.printf("[favs  ] refresh deferred, only %lu B heap free\n",
+                   (unsigned long)ESP.getFreeHeap());
+        due = false;
+      }
       // Share the radio catalogue's daily slot: one overnight window for both keeps scheduled
       // traffic off the ESP-Hosted link at the times anyone is listening.
       const time_t now = time(nullptr);
