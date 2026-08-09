@@ -16,6 +16,11 @@ struct PlayerState {
   String        album;
   String        artUri;          // http://<ip>:1400/getaa?...  (plain HTTP, no TLS)
   uint32_t      positionSec = 0;
+  // millis() when positionSec was last sampled from the speaker. Playback position is the ONE
+  // now-playing field GENA never sends (measured: 83 s of playback, no event), so once the poll
+  // slows down the UI has to advance it locally between samples or the progress bar moves in
+  // visible steps. Writers MUST set this whenever they set positionSec — see playerPositionNow().
+  uint32_t      positionAtMs = 0;
   uint32_t      durationSec = 0;
   TransportState transport  = TransportState::Unknown;
   String        currentUri;      // AVTransport source (GetMediaInfo/CurrentURI); "x-rincon-queue:.."
@@ -82,6 +87,25 @@ extern PlayerState       g_player;
 extern PendingCmds       g_pending;
 
 void playerStateInit();
+
+// Playback position to DISPLAY: the last sampled value, advanced by the wall-clock time since that
+// sample while playing. Call it instead of reading positionSec directly on any screen.
+//
+// Only advances while Playing — a paused or stopped transport holds. Clamped to durationSec so a
+// track that ended between samples cannot show a position past its own length, and left alone when
+// duration is 0 (live radio, where there is nothing to run out of).
+//
+// This is what makes slowing the poll invisible. It is NOT dead reckoning of something we could
+// have asked for: an external seek is not evented either, so the periodic poll is still what
+// reconciles this back to truth.
+inline uint32_t playerPositionNow(const PlayerState &p) {
+  uint32_t pos = p.positionSec;
+  if (p.transport == TransportState::Playing && p.positionAtMs) {
+    pos += (millis() - p.positionAtMs) / 1000u;
+  }
+  if (p.durationSec && pos > p.durationSec) pos = p.durationSec;
+  return pos;
+}
 
 // RAII-ish helpers for the common short critical sections.
 inline bool stateLock()   { return xSemaphoreTake(g_stateMutex, portMAX_DELAY) == pdTRUE; }

@@ -1996,8 +1996,15 @@ void uiTick() {
   }
 
   // Scrubber — only the fill width and the two timecodes, and only when they move.
+  //
+  // playerPositionNow(), NOT p.positionSec: position is the one now-playing field Sonos never
+  // events, so with GENA carrying the state netTask only samples it every 15 s. Reading the raw
+  // sample would step the bar and the timecode in 15 s jumps. This advances it locally between
+  // samples and the poll reconciles it. Identical behaviour when eventing is off — the sample is
+  // then a second old at most.
+  const uint32_t posSec = playerPositionNow(p);
   const lv_coord_t trackW = lv_obj_get_width(s_track);
-  int pct = (p.durationSec > 0) ? (int)((uint64_t)p.positionSec * 100 / p.durationSec) : 0;
+  int pct = (p.durationSec > 0) ? (int)((uint64_t)posSec * 100 / p.durationSec) : 0;
   if (pct > 100) pct = 100;
   if (pct != s_shown.pct) {
     s_shown.pct = pct;
@@ -2005,12 +2012,12 @@ void uiTick() {
   }
 
   char buf[16];
-  if (p.positionSec != s_shown.elapsed) {
-    s_shown.elapsed = p.positionSec;
-    fmtTime(buf, sizeof(buf), p.positionSec, false);
+  if (posSec != s_shown.elapsed) {
+    s_shown.elapsed = posSec;
+    fmtTime(buf, sizeof(buf), posSec, false);
     lv_label_set_text(s_elapsed, buf);
   }
-  const uint32_t remain = (p.durationSec > p.positionSec) ? p.durationSec - p.positionSec : 0;
+  const uint32_t remain = (p.durationSec > posSec) ? p.durationSec - posSec : 0;
   if (remain != s_shown.remain) {
     s_shown.remain = remain;
     fmtTime(buf, sizeof(buf), remain, true);

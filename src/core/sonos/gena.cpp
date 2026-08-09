@@ -156,7 +156,8 @@ void applyEvent(const String &body) {
       // Position is NOT evented (measured: 83 s of playback, no event). A new track means the
       // position restarts; the UI's own interpolation carries it from here, and the backstop poll
       // reconciles drift.
-      g_player.positionSec = 0;
+      g_player.positionSec  = 0;
+      g_player.positionAtMs = millis();   // restart the interpolation clock with it
     }
   }
   g_player.dirty = true;
