@@ -326,6 +326,19 @@ Consequences worth knowing:
   `GetZoneGroupState` (deduped, satellites excluded) and stores each room's coordinator IP.
 - **DIDL is double-escaped:** unescape the SOAP layer, then unescape each field value again,
   or the album-art URL's `&` arrives as `&amp;` and the speaker returns nothing.
+- **…and `CurrentURIMetaData` is escaped a THIRD time.** Escape depth is not uniform across
+  fields: `TrackMetaData` arrives as `&lt;DIDL-Lite`, but `GetMediaInfo`'s `CurrentURIMetaData`
+  arrives as `&amp;lt;DIDL-Lite`. Feed the latter to `parseNowPlaying()` unchanged and it finds no
+  `<dc:title>` and returns **nothing, with no error** — a permanently blank Now Playing. Verified
+  on hardware. `getMediaInfo()` normalises it with one extra `xmlUnescape()` so callers can treat
+  both the same; don't "simplify" that away. **Count the layers on any new field before trusting it.**
+- **Now Playing needs a fallback source — `TrackMetaData` is a STUB for content playing outside
+  the queue.** A direct Spotify track reports `item id="-1"` with no `dc:title`, no `dc:creator`
+  and no art, while the speaker plays it perfectly happily; the real title is in
+  `GetMediaInfo`'s `CurrentURIMetaData` (poll path) and `AVTransportURIMetaData` (GENA event).
+  Symptom to recognise: **audio is fine, position advances, the screen says "Nothing playing".**
+  Both paths fall back automatically now, and the poll only pays the extra call when the primary
+  source came up empty.
 - **Sonos caches by URL — `localFileUrl()`'s `?v=N` is load-bearing, don't "clean it up".** The
   media route is a *fixed* path (`/ocean.mp3`), so every file would otherwise get the same URL,
   and Sonos keys both content **and** metadata off it. Without the counter, swapping the sleep

@@ -23,6 +23,7 @@
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
+#include "sonos/didl.h"          // parseNowPlaying() — the CurrentURIMetaData title fallback
 #include "sonos/gena.h"          // UPnP eventing — no-op unless -DGENA_EVENTS (see plans/09)
 #include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
@@ -490,6 +491,26 @@ static void netTask(void *) {
 
       const bool ok = sonos::getTransportInfo(s_coordIp, st);  processPending();
       sonos::getPositionInfo(s_coordIp, np);                   processPending();
+
+      // Fallback for content playing OUTSIDE the queue. A direct Spotify track's TrackMetaData is
+      // a stub — item id="-1", no dc:title, no dc:creator, no art — so the screen read "Nothing
+      // playing" while the speaker was audibly fine. The title is on the speaker, just in
+      // CurrentURIMetaData instead (verified: empty TrackMetaData alongside dc:title "Apologize").
+      // Costs an extra SOAP call ONLY when the primary source produced nothing, so normal content
+      // pays nothing at all.
+      if (np.title.length() == 0 && st != TransportState::Stopped) {
+        String uri, meta;
+        if (sonos::getMediaInfo(s_coordIp, uri, &meta) && meta.length() > 20) {
+          PlayerState alt;
+          sonos::parseNowPlaying(meta, alt);
+          if (alt.title.length() || alt.artist.length()) {
+            np.title = alt.title; np.artist = alt.artist;
+            np.album = alt.album; np.artUri = alt.artUri;
+          }
+        }
+        processPending();
+      }
+
       if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
       if (stateLock()) {

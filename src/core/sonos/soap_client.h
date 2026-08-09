@@ -22,7 +22,10 @@ bool getPositionInfo(const String& ip, PlayerState& out);   // track + pos + dur
 // The AVTransport source URI (GetMediaInfo/CurrentURI). Tells apart WHERE audio comes from:
 // "x-rincon-queue:..." = the coordinator's own queue (what a saved-playlist play sets up),
 // vs "x-sonos-htastream:" (TV), "x-rincon-stream:" (line-in), "x-rincon:" (grouped member), etc.
-bool getMediaInfo(const String& ip, String& currentUriOut);
+// currentUriMetaOut (optional) returns CurrentURIMetaData — the fallback source of now-playing
+// title/artist when GetPositionInfo's TrackMetaData is a stub, which is what Sonos serves for
+// content playing outside the queue (direct Spotify tracks). Escaped DIDL, same as TrackMetaData.
+bool getMediaInfo(const String& ip, String& currentUriOut, String* currentUriMetaOut = nullptr);
 
 // Grouping: join a speaker to a coordinator's group via
 //   setAvTransportUri(memberIp, "x-rincon:" + coordinatorUuid, "")

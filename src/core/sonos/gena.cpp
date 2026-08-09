@@ -132,6 +132,18 @@ void applyEvent(const String &body) {
   const String meta = tagVal(ev, "CurrentTrackMetaData");
   if (meta.length() > 20) { parseNowPlaying(meta, np); gotTrack = true; }
 
+  // Same fallback the poll uses, and free here: content playing outside the queue (a direct
+  // Spotify track) has a stub CurrentTrackMetaData with no dc:title, but the event ALSO carries
+  // AVTransportURIMetaData, which does have it. No extra round trip — it is already in this body.
+  if (np.title.length() == 0 && np.artist.length() == 0) {
+    const String alt = tagVal(ev, "AVTransportURIMetaData");
+    if (alt.length() > 20) {
+      PlayerState a;
+      parseNowPlaying(alt, a);
+      if (a.title.length() || a.artist.length()) { np = a; gotTrack = true; }
+    }
+  }
+
   const String v = channelVal(ev, "Volume", "Master");
   if (v.length()) { vol = (uint8_t)constrain(v.toInt(), 0, 100); gotVol = true; }
   const String m = channelVal(ev, "Mute", "Master");

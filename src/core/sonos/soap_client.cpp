@@ -178,12 +178,25 @@ bool getTransportInfo(const String &ip, TransportState &out) {
   else if (s == "TRANSITIONING")   out = TransportState::Transitioning;
   return true;
 }
-bool getMediaInfo(const String &ip, String &currentUriOut) {
+bool getMediaInfo(const String &ip, String &currentUriOut, String *currentUriMetaOut) {
   String r;
   currentUriOut = "";
+  if (currentUriMetaOut) *currentUriMetaOut = "";
   if (!soapAction(ip, PATH_AVT, SVC_AVT, "GetMediaInfo",
                   "<InstanceID>0</InstanceID>", r)) return false;
   currentUriOut = extractTag(r, "CurrentURI");
+  // CurrentURIMetaData is where the title lives for content playing OUTSIDE the queue — a direct
+  // Spotify track, for instance, whose GetPositionInfo TrackMetaData is a stub with item id="-1",
+  // no dc:title, no dc:creator and no art. Verified on hardware: TrackMetaData empty while this
+  // carried dc:title "Apologize".
+  //
+  // *** IT CARRIES ONE MORE ESCAPE LAYER THAN TrackMetaData. *** On the wire this field is
+  // `&amp;lt;DIDL-Lite` where TrackMetaData is `&lt;DIDL-Lite` — escaped twice, not once. Handing
+  // it straight to parseNowPlaying() (which unescapes once, then unescapes each field again) finds
+  // no <dc:title> at all and silently returns nothing: no error, just a permanently blank screen.
+  // Unescaping once here normalises it to TrackMetaData's depth, so every caller can treat the two
+  // identically. Do not "simplify" this away.
+  if (currentUriMetaOut) *currentUriMetaOut = xmlUnescape(extractTag(r, "CurrentURIMetaData"));
   return true;
 }
 bool becomeStandalone(const String &ip) {
