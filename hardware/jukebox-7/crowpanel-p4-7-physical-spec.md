@@ -147,6 +147,21 @@ only USB recovery path**. Decide deliberately whether the case exposes them; see
 | J21 | 30P 0.5 mm FPC | 89.60 | 44.51 | MIPI-DSI to panel |
 | J8 | TEST-PIN-4-2.0MM | 139.95 | 38.23 | test header |
 
+## Indicator LED — there is only one, and it is not controllable
+
+**D14**, a red 0603, is the board's *only* LED: `VDD5V → R26 (5.1 kΩ) → D14 → GND`. It is a
+power indicator with no GPIO in the path, lit whenever the board has 5 V. Back-view position
+**(174.52, 52.00)** — 2.38 mm from the edge, between the two USB-C ports.
+
+> ⚠️ **`src/boards/crowpanel_p4_7in/pins.h` is wrong about this.** It defines `PIN_LED 48` and
+> calls it "the first unit in this project with a software-controllable LED". The schematic has
+> **GPIO48 as `RXD1` on J2**, the Crowtail UART connector — there is no LED on it. Nothing in the
+> app build uses `PIN_LED` (only `display_test.cpp`, a bring-up env), so it is harmless today, but
+> it is exactly the kind of claim that costs someone hours. Verified against the V1.0 schematic.
+
+Because it cannot be switched off, it gets **masked at assembly** — see the assembly notes in
+[`README.md`](README.md).
+
 ## Power tree — VERIFIED from the schematic
 
 Three inputs, all **diode-OR'd into the same `VDD5V` rail** through identical Schottky pairs:

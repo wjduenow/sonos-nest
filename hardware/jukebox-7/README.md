@@ -184,6 +184,27 @@ y ≈ 96.57 — conveniently on the column side).
 > **unidentified device at 0x2F** (see `plans/07-sonos-jukebox.md`) and now the **Knob at 0x76**.
 > A collision would be silent and painful to diagnose.
 
+## Assembly notes
+
+### ⚠️ Mask the indicator LEDs before closing the case
+
+Two LEDs sit inside the sealed cavity, and their light escapes — bouncing around the white
+interior and out through the **0.3 mm clearance gap around the display module** (`SCREEN_CLR`)
+and, faintly, through the face plate itself. It reads as a glow around the screen edge and is
+easily mistaken for backlight bleed or under-infilled plastic. It is neither.
+
+| LED | where | can it be switched off? |
+|---|---|---|
+| **D14** on the CrowPanel — red power indicator | back of the board, **2.38 mm from the edge, between the two USB-C ports**. In case coords front-view **x ≈ 15.4, y ≈ 66.8** — in the left channel where the J10 power cable runs | **No.** Hard-wired `VDD5V → R26 (5.1 kΩ) → D14 → GND`. No GPIO in the path |
+| Power LED on the **Modulino Knob** | in the control column, directly behind the face | No |
+
+**Fix: cover both with black electrical tape** at assembly. Do **not** use Kapton — it is
+translucent amber and merely tints the leak. Removing `R26` would kill D14 properly, but it is an
+0603 and not worth the risk.
+
+This is an assembly step, not a print setting. Reprinting the face at 100 % infill does not fix
+it, because the dominant path is the module clearance gap, not translucency.
+
 ## Parts
 
 - **[`wall/`](wall/)** — the flush wall case: `shell.stl` (body + keyhole mount + breakout cradle)
