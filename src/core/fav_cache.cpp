@@ -113,62 +113,22 @@ bool refresh() {
   // a live device — past the point where LWIP cannot get socket buffers, at which point the board
   // answers ping and nothing else, and recovers only by rebooting. Each halving costs one extra
   // round trip and nothing else. Do not raise it.
-  std::vector<Fav> favs;
-  int start = 0, total = 1, skipped = 0;
-  while (start < total && favs.size() < 300) {
-    String r;
-    if (!sonos::soapAction(zs[0].ip, "/MediaServer/ContentDirectory/Control",
-                           "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
-                           String("<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
-                                  "<Filter>*</Filter><StartingIndex>") + start +
-                           "</StartingIndex><RequestedCount>10</RequestedCount>"
-                           "<SortCriteria></SortCriteria>", r)) {
-      LOG.println("[favs  ] browse failed");
-      s_busy = false; return false;
-    }
-    const String tm = tag(r, "TotalMatches");
-    if (tm.length()) total = tm.toInt();
-    const String didl = unesc(tag(r, "Result"));
-    heapwatch::note("favs.page");     // page response + unescaped copy both held
-
-    // Split on the record boundary, NOT on </item> — see the header comment.
-    int got = 0, p = didl.indexOf("<item id=\"FV:2/");
-    while (p >= 0) {
-      const int nxt = didl.indexOf("<item id=\"FV:2/", p + 1);
-      const String rec = (nxt < 0) ? didl.substring(p) : didl.substring(p, nxt);
-      Fav f;
-      f.title  = unesc(tag(rec, "dc:title"));
-      f.uri    = unesc(tag(rec, "res"));
-      f.artUrl = unesc(tag(rec, "upnp:albumArtURI"));
-      // *** unesc() HERE IS LOAD-BEARING. *** `didl` has had ONE unescape (of Browse's Result);
-      // the r:resMD inside it is escaped a second time, exactly like the three fields above, which
-      // is why they all call unesc() too. Storing it still-escaped meant soapAction escaped it
-      // AGAIN on the way out, so the speaker received `&lt;DIDL-Lite` as literal text.
-      //
-      // Proven on hardware, same favourite back to back: without this, AddURIToQueue answers HTTP
-      // 500 / UPnP errorCode 800; with it, 364 tracks are added. It only broke SOME favourites,
-      // which is what disguised it as a service problem: a station URI (x-sonosapi-radio:) plays
-      // from the URI alone and ignores bad metadata, but a CONTAINER (x-rincon-cpcontainer:, which
-      // is what all 28 YouTube Music favourites here are) can only be resolved THROUGH it.
-      // didl.cpp's parseDidl() always did this correctly; fav_cache parses separately and did not.
-      f.meta   = unesc(tag(rec, "r:resMD"));
-      // A favourite with no <res> cannot be played — on this household "Discover Sonos Radio" and
-      // "Sonos Presents" are both like this. Skip them, but say so: silently showing 40 of 42 with
-      // no explanation is the kind of gap that gets reported as a bug.
-      if (f.title.length() && f.uri.length()) favs.push_back(f);
-      else if (f.title.length())              ++skipped;
-      ++got;
-      p = nxt;
-    }
-    if (!got) break;
-    start += got;
-  }
-  if (favs.empty()) { LOG.println("[favs  ] no favourites returned"); s_busy = false; return false; }
-
+  // STREAM STRAIGHT TO DISK. This used to accumulate every record in a std::vector<Fav> and write
+  // the file afterwards — ~38 KB of Strings held for the whole crawl, stacked underneath each
+  // page's own transients. Measured with heapwatch: the refresh took free heap from ~110 KB to a
+  // minimum of 42 KB, and with the old 20-item pages it reached 1.4 KB and killed the device.
+  // Nothing needs the whole list in memory: the file is the output, so write each record as it is
+  // parsed and never hold more than one page.
   mkdir(root().c_str(), 0777);
   const String tmp = path() + ".tmp";
   FILE *f = fopen(tmp.c_str(), "wb");
   if (!f) { s_busy = false; return false; }
+
+  // Still "v1". A version bump WAS tried, to force stale caches (which held escaped r:resMD) to
+  // re-fetch — and rejecting the old version is what forced a refresh during the boot storm and
+  // put the device in a boot loop. The live cache has since been rebuilt correctly, so there is
+  // nothing to migrate; if a future format change ever does need one, force it from a settled
+  // device, never from ready()==false at boot.
   String buf = String("v1\t") + String((uint32_t)time(nullptr)) + "\n";
   bool ok = true;
   auto flush = [&](bool force) {
@@ -181,20 +141,79 @@ bool refresh() {
     }
     buf = "";
   };
-  for (const auto &v : favs) {
-    buf += clean(v.title) + "\t" + clean(v.uri) + "\t" + clean(v.artUrl) + "\t" + clean(v.meta) + "\n";
-    flush(false);
+  auto bail = [&]() { fclose(f); unlink(tmp.c_str()); s_busy = false; return false; };
+
+  int start = 0, total = 1, skipped = 0, kept = 0;
+  while (start < total && kept < 300 && ok) {
+    String didl;
+    {
+      // r is scoped so the raw response is released before the record loop runs — it is the same
+      // size again as didl, and holding both through the parse doubled the page's cost.
+      String r;
+      if (!sonos::soapAction(zs[0].ip, "/MediaServer/ContentDirectory/Control",
+                             "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
+                             String("<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                                    "<Filter>*</Filter><StartingIndex>") + start +
+                             "</StartingIndex><RequestedCount>10</RequestedCount>"
+                             "<SortCriteria></SortCriteria>", r)) {
+        LOG.println("[favs  ] browse failed");
+        return bail();
+      }
+      const String tm = tag(r, "TotalMatches");
+      if (tm.length()) total = tm.toInt();
+      didl = unesc(tag(r, "Result"));
+    }
+    heapwatch::note("favs.page");     // page held, raw response already released
+
+    // Split on the record boundary, NOT on </item> — see the header comment.
+    int got = 0, p = didl.indexOf("<item id=\"FV:2/");
+    while (p >= 0) {
+      const int nxt = didl.indexOf("<item id=\"FV:2/", p + 1);
+      const String rec = (nxt < 0) ? didl.substring(p) : didl.substring(p, nxt);
+      const String title  = unesc(tag(rec, "dc:title"));
+      const String uri    = unesc(tag(rec, "res"));
+      const String artUrl = unesc(tag(rec, "upnp:albumArtURI"));
+      // *** unesc() HERE IS LOAD-BEARING. *** `didl` has had ONE unescape (of Browse's Result);
+      // the r:resMD inside it is escaped a second time, exactly like the three fields above, which
+      // is why they all call unesc() too. Storing it still-escaped meant soapAction escaped it
+      // AGAIN on the way out, so the speaker received `&lt;DIDL-Lite` as literal text.
+      //
+      // Proven on hardware, same favourite back to back: without this, AddURIToQueue answers HTTP
+      // 500 / UPnP errorCode 800; with it, 364 tracks are added. It only broke SOME favourites,
+      // which is what disguised it as a service problem: a station URI (x-sonosapi-radio:) plays
+      // from the URI alone and ignores bad metadata, but a CONTAINER (x-rincon-cpcontainer:, which
+      // is what all 28 YouTube Music favourites here are) can only be resolved THROUGH it.
+      // didl.cpp's parseDidl() always did this correctly; fav_cache parses separately and did not.
+      const String meta = unesc(tag(rec, "r:resMD"));
+      // A favourite with no <res> cannot be played — on this household "Discover Sonos Radio" and
+      // "Sonos Presents" are both like this. Skip them, but say so: silently showing 40 of 42 with
+      // no explanation is the kind of gap that gets reported as a bug.
+      if (title.length() && uri.length()) {
+        buf += clean(title) + "\t" + clean(uri) + "\t" + clean(artUrl) + "\t" + clean(meta) + "\n";
+        ++kept;
+        flush(false);
+      } else if (title.length()) {
+        ++skipped;
+      }
+      ++got;
+      p = nxt;
+    }
+    if (!got) break;
+    start += got;
   }
   flush(true);
+  if (!ok || !kept) {
+    if (!kept) LOG.println("[favs  ] no favourites returned");
+    return bail();
+  }
   fclose(f);
-  if (!ok) { unlink(tmp.c_str()); s_busy = false; return false; }
 
   // Swap last, so an interrupted write never replaces a good cache with a partial one.
   unlink(path().c_str());
   rename(tmp.c_str(), path().c_str());
   s_count = -1;
   s_lastRefreshMs = millis();
-  LOG.printf("[favs  ] cached %u favourite(s)%s\n", (unsigned)favs.size(),
+  LOG.printf("[favs  ] cached %d favourite(s)%s\n", kept,
                 skipped ? String(String(", skipped ") + skipped + " with no playable URI").c_str() : "");
   s_busy = false;
   return true;
