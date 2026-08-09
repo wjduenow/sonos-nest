@@ -43,6 +43,11 @@
 #define GT911_ADDR_HIGH 0x14
 
 // --- Audio: NS4168 amp -> 2 speakers, I2S TX. Used for UI feedback (clicks/ticks). ---
+// NO GRILLE IN THE CASE, AND THAT IS FINE. The wall case seals the speakers in (a rear grille
+// would be sealed by the drywall anyway, since the unit mounts flush). Muffled is acceptable
+// because these only ever play UI feedback — short clicks confirming a control moved, not
+// content. They are deliberately clicks rather than tones for that reason; see ui_sound.cpp.
+// If a grille is ever wanted it has to be an EDGE, not the back — see hardware/jukebox-7/.
 // AUDIO_CTRL gates amp power. *** ACTIVE LOW *** — Elecrow's Arduino course is explicit:
 // "setting LOW enables audio power and HIGH disables it". This was originally written as active
 // high on the assumption that an "enable" line is active high; the result was silence (every
@@ -97,9 +102,20 @@
 // stock variant macros describe Espressif's board, not this one. Use the IDF sdmmc API directly
 // with the pins above, as Elecrow's own example does. See sd_test.cpp.
 
-// --- Onboard LED ---
-// The first unit in this project with a software-controllable LED (the nest has none).
-#define PIN_LED         48
+// --- Onboard LED --- *** THERE ISN'T ONE. GPIO48 IS NOT AN LED. ***
+// This was previously commented as "the first unit in this project with a software-controllable
+// LED". It is not. Verified against Elecrow's V1.0 schematic: GPIO48 is RXD1 on J2, the Crowtail
+// UART connector. Driving it fights that UART, and nothing lights up.
+//
+// The board's ONLY LED is D14, a red 0603 power indicator hard-wired VDD5V -> R26 (5.1k) -> D14
+// -> GND. No GPIO in the path, so it cannot be switched off in firmware — it is masked with tape
+// at assembly instead (see hardware/jukebox-7/README.md; its light otherwise escapes through the
+// display module's clearance gap and reads as backlight bleed).
+//
+// So this board is like the nest after all: no software-controllable LED. Don't try.
+// The define stays only because display_test.cpp (the jukebox-bringup env) toggles it as a
+// scope/probe point on an otherwise-free pin. Do NOT use it in the app.
+#define PIN_LED         48   // NOT an LED — J2's RXD1. See above before using.
 
 // --- Swappable radio module header (SPI) ---
 // Only relevant if the C6 Wi-Fi module is swapped for LoRa/nRF. The C6 itself talks SDIO,
