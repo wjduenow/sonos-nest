@@ -27,14 +27,15 @@
 // Cost: a few seconds of blank screen. Acceptable against a device that is otherwise dead until
 // somebody unplugs it.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 
 #include "core/board.h"
 #include "pins.h"
 
 bool netLinkRecover() {
-  Serial.println("[netlink] link is dead and cannot be repaired in place — restarting");
-  Serial.println("[netlink] (reboot resets the C6 via GPIO32 during esp_hosted init)");
-  Serial.flush();
+  LOG.println("[netlink] link is dead and cannot be repaired in place — restarting");
+  LOG.println("[netlink] (reboot resets the C6 via GPIO32 during esp_hosted init)");
+  LOG.flush();
   delay(50);        // let the log actually reach the wire
   ESP.restart();
   return false;     // not reached

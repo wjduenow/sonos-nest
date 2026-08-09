@@ -21,6 +21,7 @@
 //  2. THE FEEDBACK IS A CLICK, NOT A TONE. See click() below for why that distinction matters and
 //     how it is synthesised.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 #include <ESP_I2S.h>
 #include <math.h>
 
@@ -53,23 +54,23 @@ bool uiSoundInit() {
 
   s_i2s.setPins(PIN_AUDIO_BCLK, PIN_AUDIO_LRCLK, PIN_AUDIO_SDATA);
   if (!s_i2s.begin(I2S_MODE_STD, kSampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
-    Serial.println("[uisnd ] I2S begin failed — UI tones disabled");
+    LOG.println("[uisnd ] I2S begin failed — UI tones disabled");
     return false;
   }
   // Queue depth 4: a burst of taps should not block the caller, and cues older than a few are
   // worthless anyway — a late click is worse than no click.
   s_q = xQueueCreate(4, sizeof(UiSound));
-  if (!s_q) { Serial.println("[uisnd ] no queue — UI tones disabled"); return false; }
+  if (!s_q) { LOG.println("[uisnd ] no queue — UI tones disabled"); return false; }
 
   // Core 1 (with the UI), priority BELOW the UI task: the render loop must always win, and the
   // sound task only needs to top up the I2S DMA between frames. Core 0 is left to the network.
   if (xTaskCreatePinnedToCore(soundTask, "uisnd", 3072, nullptr, 2, nullptr, 1) != pdPASS) {
-    Serial.println("[uisnd ] no task — UI tones disabled");
+    LOG.println("[uisnd ] no task — UI tones disabled");
     return false;
   }
 
   s_ready = true;
-  Serial.println("[uisnd ] NS4168 ready (amp gated ACTIVE LOW, powers down when idle)");
+  LOG.println("[uisnd ] NS4168 ready (amp gated ACTIVE LOW, powers down when idle)");
 
   // Startup chime. Doubles as proof the whole path works — amp enable, I2S, speakers — without
   // needing someone to tap the screen and guess whether silence means "off" or "broken". It goes

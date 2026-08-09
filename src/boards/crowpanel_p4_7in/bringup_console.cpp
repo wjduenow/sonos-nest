@@ -12,6 +12,7 @@
 #ifdef JUKEBOX_BRINGUP_CONSOLE
 
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 
 #include "core/amazon.h"
 #include "core/radio_cache.h"
@@ -29,31 +30,31 @@ static void run(const String &cmd) {
   const String arg  = (sp2 < 0) ? "" : rest.substring(sp2 + 1);
 
   if (verb == "amz") {
-    if (noun == "hh")       { settingsSetHouseholdId(arg);  Serial.printf("[bringup] household=%s\n", arg.c_str()); }
-    else if (noun == "sn")  { settingsSetAmazonSerial((uint8_t)arg.toInt()); Serial.printf("[bringup] sn=%d\n", arg.toInt()); }
-    else if (noun == "tok") { settingsSetAmazonAuth(arg, settingsAmazonKey()); Serial.printf("[bringup] token set (%u chars)\n", (unsigned)arg.length()); }
-    else if (noun == "key") { settingsSetAmazonAuth(settingsAmazonToken(), arg); Serial.printf("[bringup] key set (%u chars)\n", (unsigned)arg.length()); }
+    if (noun == "hh")       { settingsSetHouseholdId(arg);  LOG.printf("[bringup] household=%s\n", arg.c_str()); }
+    else if (noun == "sn")  { settingsSetAmazonSerial((uint8_t)arg.toInt()); LOG.printf("[bringup] sn=%d\n", arg.toInt()); }
+    else if (noun == "tok") { settingsSetAmazonAuth(arg, settingsAmazonKey()); LOG.printf("[bringup] token set (%u chars)\n", (unsigned)arg.length()); }
+    else if (noun == "key") { settingsSetAmazonAuth(settingsAmazonToken(), arg); LOG.printf("[bringup] key set (%u chars)\n", (unsigned)arg.length()); }
     else if (noun == "status") {
-      Serial.printf("[bringup] household=%s sn=%u token=%u key=%u linked=%d\n",
+      LOG.printf("[bringup] household=%s sn=%u token=%u key=%u linked=%d\n",
                     settingsHouseholdId().c_str(), settingsAmazonSerial(),
                     (unsigned)settingsAmazonToken().length(),
                     (unsigned)settingsAmazonKey().length(), (int)amazon::linked());
-    } else Serial.println("[bringup] amz hh|sn|tok|key|status");
+    } else LOG.println("[bringup] amz hh|sn|tok|key|status");
     return;
   }
   if (verb == "radio") {
-    if (noun == "crawl") { Serial.println("[bringup] crawl requested"); radiocache::requestRefresh(); }
-    else Serial.printf("[bringup] ready=%d busy=%d genres=%d fetchedAt=%lu\n",
+    if (noun == "crawl") { LOG.println("[bringup] crawl requested"); radiocache::requestRefresh(); }
+    else LOG.printf("[bringup] ready=%d busy=%d genres=%d fetchedAt=%lu\n",
                        (int)radiocache::ready(), (int)radiocache::busy(),
                        radiocache::genreCount(), (unsigned long)radiocache::fetchedAt());
     return;
   }
-  Serial.println("[bringup] commands: amz hh|sn|tok|key|status | radio crawl|status");
+  LOG.println("[bringup] commands: amz hh|sn|tok|key|status | radio crawl|status");
 }
 
 void bringupConsoleTick() {
-  while (Serial.available()) {
-    const char c = (char)Serial.read();
+  while (LOG.available()) {
+    const char c = (char)LOG.read();
     if (c == '\r') continue;
     if (c == '\n') {
       String l = s_line; s_line = "";

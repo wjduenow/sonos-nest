@@ -2,6 +2,7 @@
 // experience (lib/esp_lcd_ek79007/VENDORING.md) another managed component is more friction than
 // ~60 lines of I2C, and the protocol is trivial.
 #include "touch.h"
+#include "core/net/logmirror.h"
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -90,13 +91,13 @@ bool touchInit() {
 
   uint8_t probe = 0;
   if (!readReg(REG_STATUS, &probe, 1)) {
-    Serial.println("[touch ] GT911 not answering at 0x5D — FPC seated? reset sequence ran?");
+    LOG.println("[touch ] GT911 not answering at 0x5D — FPC seated? reset sequence ran?");
     return false;
   }
 
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, readCb);
-  Serial.println("[touch ] GT911 up, LVGL pointer indev registered");
+  LOG.println("[touch ] GT911 up, LVGL pointer indev registered");
   return true;
 }

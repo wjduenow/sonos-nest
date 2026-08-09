@@ -14,6 +14,7 @@
 // that took a while to find — come from variants/crowpanel_p4_7in/pins_arduino.h. Do not add a
 // WiFi.setPins() call here; the variant is the single source of truth.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 #include <Wire.h>
 
 #include "core/board.h"
@@ -27,7 +28,7 @@
 #include "ui_sound.h"
 
 bool boardInit() {
-  Serial.printf("[board ] CrowPanel Advance 7\" ESP32-P4 — %s, %lu KB internal heap free\n",
+  LOG.printf("[board ] CrowPanel Advance 7\" ESP32-P4 — %s, %lu KB internal heap free\n",
                 ESP.getChipModel(), (unsigned long)(ESP.getFreeHeap() / 1024));
 
   // Shared I2C bus: GT911 touch, and whatever else is on the Crowtail connectors. (An
@@ -36,15 +37,15 @@ bool boardInit() {
   i2cBusInit();   // before ANY driver touches the bus — see i2c_bus.h
 
   if (!displayInit()) {
-    Serial.println("[board ] display init FAILED — see the [display] line above");
+    LOG.println("[board ] display init FAILED — see the [display] line above");
     return false;
   }
   // Touch failing is not fatal: a jukebox that renders but cannot be touched is still worth
   // booting (it shows what is playing, and the physical controls are the eventual primary input).
-  if (!touchInit()) Serial.println("[board ] continuing without touch");
+  if (!touchInit()) LOG.println("[board ] continuing without touch");
 
   // Nor is audio: silent feedback is a downgrade, not a failure.
-  if (!uiSoundInit()) Serial.println("[board ] continuing without UI tones");
+  if (!uiSoundInit()) LOG.println("[board ] continuing without UI tones");
 
   // Nor is the dial. knobInit() returning false only means it is not plugged in *yet* — its task
   // keeps rescanning the bus, so the dial can be connected later without a reflash.
@@ -52,10 +53,10 @@ bool boardInit() {
 
   // Nor is storage: without a card the Radio page has no cache and says so, but everything that
   // talks to Sonos directly is unaffected. localStorageRoot() returns nullptr and callers skip.
-  if (!sdCardInit()) Serial.println("[board ] continuing without SD storage");
+  if (!sdCardInit()) LOG.println("[board ] continuing without SD storage");
 
   // Config page. Its task waits for WiFi itself, since appBoot() connects after this returns.
-  if (!webConfigServerInit()) Serial.println("[board ] continuing without the config server");
+  if (!webConfigServerInit()) LOG.println("[board ] continuing without the config server");
 
   return true;
 }

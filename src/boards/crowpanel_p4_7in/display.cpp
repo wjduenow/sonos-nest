@@ -1,6 +1,7 @@
 // See display.h. Lifted from the staged bring-up in display_test.cpp once each layer was proven
 // on hardware; that file remains as the `jukebox-bringup` env for diagnosing a dead panel.
 #include "display.h"
+#include "core/net/logmirror.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -63,7 +64,7 @@ bool displayInit() {
   ldoCfg.chan_id = 3;
   ldoCfg.voltage_mv = 2500;
   if (esp_ldo_acquire_channel(&ldoCfg, &phyLdo) != ESP_OK) {
-    Serial.println("[display] FAIL: LDO3 (MIPI D-PHY)");
+    LOG.println("[display] FAIL: LDO3 (MIPI D-PHY)");
     return false;
   }
 
@@ -77,7 +78,7 @@ bool displayInit() {
   busCfg.phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
   busCfg.lane_bit_rate_mbps = 900;
   if (esp_lcd_new_dsi_bus(&busCfg, &bus) != ESP_OK) {
-    Serial.println("[display] FAIL: esp_lcd_new_dsi_bus");
+    LOG.println("[display] FAIL: esp_lcd_new_dsi_bus");
     return false;
   }
 
@@ -85,7 +86,7 @@ bool displayInit() {
   esp_lcd_panel_io_handle_t io = nullptr;
   esp_lcd_dbi_io_config_t dbiCfg = EK79007_PANEL_IO_DBI_CONFIG();
   if (esp_lcd_new_panel_io_dbi(bus, &dbiCfg, &io) != ESP_OK) {
-    Serial.println("[display] FAIL: esp_lcd_new_panel_io_dbi");
+    LOG.println("[display] FAIL: esp_lcd_new_panel_io_dbi");
     return false;
   }
 
@@ -105,15 +106,15 @@ bool displayInit() {
   panelCfg.vendor_config = &vendorCfg;
 
   if (esp_lcd_new_panel_ek79007(io, &panelCfg, &s_panel) != ESP_OK) {
-    Serial.println("[display] FAIL: esp_lcd_new_panel_ek79007");
+    LOG.println("[display] FAIL: esp_lcd_new_panel_ek79007");
     return false;
   }
   if (esp_lcd_panel_reset(s_panel) != ESP_OK || esp_lcd_panel_init(s_panel) != ESP_OK) {
-    Serial.println("[display] FAIL: panel reset/init");
+    LOG.println("[display] FAIL: panel reset/init");
     return false;
   }
   if (esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, (void **)&s_fb) != ESP_OK || !s_fb) {
-    Serial.println("[display] FAIL: no frame buffer");
+    LOG.println("[display] FAIL: no frame buffer");
     return false;
   }
 
@@ -126,7 +127,7 @@ bool displayInit() {
   lv_display_set_buffers(disp, s_fb, nullptr, (uint32_t)LCD_WIDTH * LCD_HEIGHT * 2,
                          LV_DISPLAY_RENDER_MODE_DIRECT);
 
-  Serial.printf("[display] EK79007 %dx%d up, LVGL direct into the DSI buffer\n",
+  LOG.printf("[display] EK79007 %dx%d up, LVGL direct into the DSI buffer\n",
                 LCD_WIDTH, LCD_HEIGHT);
   return true;
 }

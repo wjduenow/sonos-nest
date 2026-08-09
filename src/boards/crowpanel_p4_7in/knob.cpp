@@ -23,6 +23,7 @@
 // The position is a free-running int16 that wraps. Subtracting in int16_t makes the wrap a
 // non-event: 32767 -> -32768 is a delta of +1, which is what actually happened.
 #include "knob.h"
+#include "core/net/logmirror.h"
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -104,7 +105,7 @@ static bool probe(uint8_t addr) {
   while (Wire.available()) Wire.read();
   i2cBusUnlock();
 #if KNOB_DEBUG
-  if (got) Serial.printf("[knob  ] probe 0x%02X: requestFrom=%u avail=%u bytes %02X %02X %02X %02X\n",
+  if (got) LOG.printf("[knob  ] probe 0x%02X: requestFrom=%u avail=%u bytes %02X %02X %02X %02X\n",
                          addr, (unsigned)got, (unsigned)n, b[0], b[1], b[2], b[3]);
 #endif
   // THE PHANTOM: requestFrom() to a NACKing address still reports 4 readable bytes, because it
@@ -158,7 +159,7 @@ static void knobTask(void *) {
           if (!probeConfirmed(a)) continue;
           s_addr = a;
           s_seeded = false;
-          Serial.printf("[knob  ] Modulino Knob found at 0x%02X\n", a);
+          LOG.printf("[knob  ] Modulino Knob found at 0x%02X\n", a);
           break;
         }
       }
@@ -169,7 +170,7 @@ static void knobTask(void *) {
     int16_t pos = 0;
     bool    pressed = false;
     if (!readState(pos, pressed)) {
-      Serial.println("[knob  ] dial stopped answering — rescanning");
+      LOG.println("[knob  ] dial stopped answering — rescanning");
       portENTER_CRITICAL(&s_mux);
       s_addr = 0; s_down = false; s_event = KnobEvent::None;
       portEXIT_CRITICAL(&s_mux);
@@ -190,7 +191,7 @@ static void knobTask(void *) {
     s_lastPos = pos;
 
 #if KNOB_DEBUG
-    if (delta) Serial.printf("[knob  ] pos=%d delta=%d pressed=%d\n", (int)pos, (int)delta, (int)pressed);
+    if (delta) LOG.printf("[knob  ] pos=%d delta=%d pressed=%d\n", (int)pos, (int)delta, (int)pressed);
 #endif
 
     const uint32_t now = millis();
@@ -222,7 +223,7 @@ static void knobTask(void *) {
 // One-shot census of the bus. Two probe styles side by side, because they disagree: the
 // write-probe is the one that invents devices.
 static void busScan() {
-  Serial.println("[knob  ] bus scan (W = address-only write ACK, R = 4-byte read returned 4)");
+  LOG.println("[knob  ] bus scan (W = address-only write ACK, R = 4-byte read returned 4)");
   for (uint8_t a = 0x08; a <= 0x77; a++) {
     if (!i2cBusLock()) continue;
     Wire.beginTransmission(a);
@@ -230,9 +231,9 @@ static void busScan() {
     const bool r = (Wire.requestFrom(a, (size_t)4) == 4);
     while (Wire.available()) Wire.read();
     i2cBusUnlock();
-    if (w || r) Serial.printf("[knob  ]   0x%02X  W=%d R=%d\n", a, (int)w, (int)r);
+    if (w || r) LOG.printf("[knob  ]   0x%02X  W=%d R=%d\n", a, (int)w, (int)r);
   }
-  Serial.println("[knob  ] scan done");
+  LOG.println("[knob  ] scan done");
 }
 #endif
 
@@ -245,14 +246,14 @@ bool knobInit() {
     s_addr = a;
     break;
   }
-  if (s_addr) Serial.printf("[knob  ] Modulino Knob at 0x%02X\n", s_addr);
-  else        Serial.println("[knob  ] no dial on the bus — will keep looking (plug it in any time)");
+  if (s_addr) LOG.printf("[knob  ] Modulino Knob at 0x%02X\n", s_addr);
+  else        LOG.println("[knob  ] no dial on the bus — will keep looking (plug it in any time)");
 
   // Core 0, with the rest of the I/O: the bus is shared with the GT911, which LVGL reads on the UI
   // task. arduino-esp32's Wire holds a per-bus mutex so the two cannot interleave mid-transaction,
   // but a blocking I2C read still has no business on the render task.
   if (xTaskCreatePinnedToCore(knobTask, "knob", 3072, nullptr, 1, nullptr, 0) != pdPASS) {
-    Serial.println("[knob  ] could not start the poll task");
+    LOG.println("[knob  ] could not start the poll task");
     return false;
   }
   return s_addr != 0;

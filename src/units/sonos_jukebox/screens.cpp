@@ -15,6 +15,7 @@
 // reads the mutex-guarded g_player, posts work to g_pending, and reaches hardware only through
 // core/board.h.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 #include <lvgl.h>
 
 #include <vector>
@@ -493,7 +494,7 @@ static void roomCheckCb(lv_event_t *e) {
   if (a < 0 || (int)i == a) return;    // the anchor cannot leave its own group
   const bool joining = !roomInActiveGroup(i, a);
   uiSoundPlay(UiSound::Confirm);
-  Serial.printf("[ui    ] group %s %s\n", joining ? "+" : "-", s_roomsData[i].name.c_str());
+  LOG.printf("[ui    ] group %s %s\n", joining ? "+" : "-", s_roomsData[i].name.c_str());
   if (stateLock()) {
     g_pending.groupOps.push_back({s_roomsData[i].ip, joining});
     stateUnlock();
@@ -577,7 +578,7 @@ static void roomPlayCb(lv_event_t *e) {
 static void ungroupCb(lv_event_t *e) {
   (void)e;
   uiSoundPlay(UiSound::Confirm);
-  Serial.println("[ui    ] ungroup all");
+  LOG.println("[ui    ] ungroup all");
   if (stateLock()) { g_pending.ungroupAll = true; stateUnlock(); }
 }
 
@@ -1550,7 +1551,7 @@ static void radioShowStations(int genreIdx) {
   radioLayout(false, true);
   radioPaintArt();
   lv_mem_monitor_t mon; lv_mem_monitor(&mon);
-  Serial.printf("[ui    ] radio: %s, %u stations, lvgl_free=%uKB\n", gname.c_str(),
+  LOG.printf("[ui    ] radio: %s, %u stations, lvgl_free=%uKB\n", gname.c_str(),
                 (unsigned)s_radioStations.size(), (unsigned)(mon.free_size / 1024));
 }
 
@@ -1578,7 +1579,7 @@ static void radioRunSearch(const String &q) {
   // The status line sits where the first result now is, and the list needs the space the keyboard
   // was using — but the keyboard stays up, since refining the query is the common next action.
   radioLayout(true, false);
-  Serial.printf("[ui    ] radio search \"%s\": %d hit(s)\n", q.c_str(), n);
+  LOG.printf("[ui    ] radio search \"%s\": %d hit(s)\n", q.c_str(), n);
 }
 
 static void radioSearchCb(lv_event_t *) {
@@ -1835,6 +1836,10 @@ static void buildSettings() {
 }
 
 void uiInit() {
+  // Serial log -> TCP :2323, so the health heartbeat below is readable on a
+  // wall-mounted unit without a cable. Starts a task that waits for WiFi itself.
+  logMirrorBegin();
+
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(JB_SCREEN_BG), 0);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -2229,8 +2234,8 @@ void uiTick() {
       // be a blocking co-processor RPC and an unlocked read of a vector netTask rewrites, i.e.
       // this log would stall or crash the UI task in exactly the fault it exists to report.
       const uint32_t ip = g_linkIp;
-      Serial.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
-                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB\n",
+      LOG.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
+                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu\n",
                     (unsigned long)(millis() / 1000),
                     (unsigned long)(ESP.getFreeHeap() / 1024),
                     (unsigned long)(ESP.getMinFreeHeap() / 1024),
@@ -2238,7 +2243,8 @@ void uiTick() {
                     g_linkStatus, g_linkRssi,
                     (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
                     (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
-                    (unsigned)g_linkZones, (unsigned)(mon.free_size / 1024));
+                    (unsigned)g_linkZones, (unsigned)(mon.free_size / 1024),
+                    logMirrorClients(), (unsigned long)logMirrorDropped());
     }
   }
 

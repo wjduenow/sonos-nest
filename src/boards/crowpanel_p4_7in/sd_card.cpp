@@ -16,6 +16,7 @@
 //   * format_if_mount_failed is FALSE and must stay that way. A controller that silently eats the
 //     owner's card on a bad boot is not acceptable behaviour.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 
 #include <driver/sdmmc_host.h>
 #include <esp_vfs_fat.h>
@@ -53,12 +54,12 @@ bool sdCardInit() {
     s_card = nullptr;
     // Distinguish the two failures worth acting on: no card at all vs a card we cannot read.
     if (err == ESP_FAIL)
-      Serial.println("[sd    ] card present but no FAT32 filesystem — format it FAT32 (not exFAT)");
+      LOG.println("[sd    ] card present but no FAT32 filesystem — format it FAT32 (not exFAT)");
     else
-      Serial.printf("[sd    ] no card (%s)\n", esp_err_to_name(err));
+      LOG.printf("[sd    ] no card (%s)\n", esp_err_to_name(err));
     return false;
   }
-  Serial.printf("[sd    ] mounted %s — %s, %llu MB\n", SD_MOUNT_POINT, s_card->cid.name,
+  LOG.printf("[sd    ] mounted %s — %s, %llu MB\n", SD_MOUNT_POINT, s_card->cid.name,
                 ((uint64_t)s_card->csd.capacity * s_card->csd.sector_size) >> 20);
   return true;
 }

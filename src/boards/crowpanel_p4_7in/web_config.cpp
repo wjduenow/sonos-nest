@@ -10,6 +10,7 @@
 // server must not reach into settings or g_pending itself. The two Radio fields it exposes are
 // therefore the same ones the on-screen Settings page writes, through the same code path.
 #include <Arduino.h>
+#include "core/net/logmirror.h"
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -204,7 +205,7 @@ static void serverTask(void *) {
   s_server->on("/api/knob", HTTP_GET, handleKnob);
   s_server->begin();
   s_url = String("http://") + WiFi.localIP().toString();
-  Serial.printf("[web   ] config server on %s\n", s_url.c_str());
+  LOG.printf("[web   ] config server on %s\n", s_url.c_str());
 
   for (;;) {
     s_server->handleClient();
