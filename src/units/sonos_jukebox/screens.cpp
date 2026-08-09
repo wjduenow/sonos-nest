@@ -1904,15 +1904,32 @@ static void handleDial(PlayerState &p) {
   if (d == 0 && ev == KnobEvent::None) return;
 
   if (d != 0) {
-    // Acceleration, matching the nest's curve: a slow hunt trims 1% per click, a fast spin crosses
-    // the range without needing a dozen revolutions.
+    // Acceleration: a slow hunt trims 1% per click, a fast spin crosses the range without needing
+    // a dozen revolutions. A full 0-100 sweep is ~100 detents slow, ~25 at speed.
+    //
+    // *** DELIBERATELY GENTLER THAN THE NEST'S CURVE, AND IT MUST NOT BE "UNIFIED" WITH IT. ***
+    // The nest reads an EC11 through hardware PCNT on the UI task's ~5 ms tick, so it essentially
+    // always sees d == 1 and the multiplier IS the acceleration. This board reads a Modulino over
+    // I2C at 50 Hz (kPollMs = 20) and encoderDelta() drains an ACCUMULATOR, so any spin faster than
+    // 50 detents/s hands us d = 2, 3, 4... in one call — which the multiplier then compounds. The
+    // nest's 6/3/2/1 curve therefore behaved completely differently here: at d=3 and dt<35 a single
+    // tick moved 18%, which is what made the dial feel twitchy. Same numbers, different hardware,
+    // different result.
     static uint32_t s_lastTurn = 0;
     const uint32_t now = lv_tick_get();
     const uint32_t dt  = now - s_lastTurn;
     s_lastTurn = now;
-    const int mult = (dt < 35) ? 6 : (dt < 70) ? 3 : (dt < 130) ? 2 : 1;
+    const int mult = (dt < 35) ? 4 : (dt < 100) ? 2 : 1;
 
-    int v = (int)p.volume + (int)d * mult;
+    // Cap the per-tick move. This is the half of the fix that addresses BATCHING rather than
+    // speed: it bounds what one accumulated read can do without touching the feel of a slow,
+    // precise turn, which never comes close to the limit.
+    static const int kMaxStep = 8;
+    int step = (int)d * mult;
+    if (step >  kMaxStep) step =  kMaxStep;
+    if (step < -kMaxStep) step = -kMaxStep;
+
+    int v = (int)p.volume + step;
     v = v < 0 ? 0 : (v > 100 ? 100 : v);
 
     if (stateLock()) {
