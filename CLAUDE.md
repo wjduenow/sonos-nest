@@ -92,6 +92,22 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **Don't guess which subsystem is eating the heap — `core/heap_watch.h` will tell you.**
+  > `heapwatch::note("tag")` records the tag owning the internal-heap low-water; read it back as
+  > **`health.heapLow`** in `/api/config`. Put notes *after* an allocation while it is still held.
+  > It has already overturned one confident guess: GENA's NOTIFY buffering, the obvious suspect,
+  > bottoms out at ~113 KB free (~4 KB) and was never the problem. If `heapMin` is lower than any
+  > recorded tag, the cause is in code you have not tagged — that gap is the clue, not noise.
+  > ⚠️ **mbedTLS allocates from PSRAM here, and that is load-bearing — don't revert it.** The stock
+  > config is `MBEDTLS_INTERNAL_MEM_ALLOC` with `SSL_MAX_CONTENT_LEN=16384`, i.e. a 16 KB in + 16 KB
+  > out buffer per TLS connection taken from the one resource this board lacks. Measured: the
+  > Amazon crawl went 102 KB → 45 KB free *before reading a byte*, then to **min 9,828 B / largest
+  > 14,324** — through the LWIP floor — and the device rebooted half way through the genres, every
+  > night. `jukebox_base`'s `custom_sdkconfig` now sets `MBEDTLS_EXTERNAL_MEM_ALLOC=y` plus
+  > `ASYMMETRIC_CONTENT_LEN` (out 4 KB): same crawl now **completes all 26 genres / 1055 stations
+  > in one pass at min 50,536**. Verify a config change actually applied by grepping the generated
+  > `sdkconfig.sonos-jukebox`, not the ini — a `custom_sdkconfig` line that is ignored fails
+  > silently and you will be measuring nothing.
   > ⚠️ **microSD (slot 0; the C6 is slot 1, so they don't share a bus).** Pins CLK 43 / CMD 44 /
   > D0 39, 1-bit @ 10 MHz, no LDO power handle. **Never use Arduino's `SD_MMC`** — it takes its pins
   > and a power-enable pin from the board variant, whose stock `BOARD_SDMMC_POWER_PIN 45` is this
