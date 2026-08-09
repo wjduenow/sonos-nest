@@ -32,6 +32,16 @@ void    settingsSetRadioAutoRefresh(bool on);
 uint8_t settingsRadioRefreshHour();          // 0-23 local
 void    settingsSetRadioRefreshHour(uint8_t hour);
 
+// Favourites get their OWN schedule rather than sharing the radio one. They are cheap and change
+// often (anything edited in the Sonos app), where the Amazon station crawl is expensive and
+// changes rarely — so the useful cadences differ. Defaults to 05:00, an hour after the radio
+// default, deliberately: running both heavy refreshes in the same hour is what this board's
+// internal SRAM cannot afford (see kMinHeap in fav_cache.cpp).
+bool    settingsFavAutoRefresh();
+void    settingsSetFavAutoRefresh(bool on);
+uint8_t settingsFavRefreshHour();            // 0-23 local
+void    settingsSetFavRefreshHour(uint8_t hour);
+
 // --- Amazon Music (SMAPI DeviceLink) ------------------------------------------------------------
 // Our OWN account credentials, not the household's — Sonos never discloses those (plans/08). The
 // token expires in under an hour and is refreshed in-band by core/amazon.cpp, so these are written

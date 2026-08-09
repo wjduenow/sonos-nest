@@ -264,16 +264,20 @@ static void favTask(void *) {
                    (unsigned long)ESP.getFreeHeap());
         due = false;
       }
-      // Share the radio catalogue's daily slot: one overnight window for both keeps scheduled
-      // traffic off the ESP-Hosted link at the times anyone is listening.
+      // Favourites have their OWN daily slot now, rather than sharing the radio catalogue's.
+      // They are cheap and change often (anything edited in the Sonos app); the station crawl is
+      // expensive and changes rarely, so one schedule could not suit both. Keeping them on
+      // SEPARATE hours also matters on this board: two heavy refreshes in the same hour is more
+      // internal SRAM pressure than it can take (see kMinHeap above). Defaults are 04:00 radio,
+      // 05:00 favourites.
       const time_t now = time(nullptr);
-      if (!due && settingsRadioAutoRefresh() && now > 1600000000) {
+      if (!due && settingsFavAutoRefresh() && now > 1600000000) {
         struct tm lt {}, ft {};
         localtime_r(&now, &lt);
         const time_t fa = (time_t)fetchedAt();
         localtime_r(&fa, &ft);
         const bool ranToday = fetchedAt() && lt.tm_year == ft.tm_year && lt.tm_yday == ft.tm_yday;
-        due = (lt.tm_hour == (int)settingsRadioRefreshHour()) && !ranToday;
+        due = (lt.tm_hour == (int)settingsFavRefreshHour()) && !ranToday;
       }
       if (due) refresh();
     }

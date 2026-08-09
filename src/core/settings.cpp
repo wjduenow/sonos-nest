@@ -31,6 +31,12 @@ void settingsSetRadioAutoRefresh(bool on) { s_prefs.putUChar("rdauto", on ? 1 : 
 uint8_t settingsRadioRefreshHour()        { uint8_t h = s_prefs.getUChar("rdhour", 4); return h > 23 ? 4 : h; }
 void settingsSetRadioRefreshHour(uint8_t hour) { s_prefs.putUChar("rdhour", hour > 23 ? 4 : hour); }
 
+// NVS keys are capped at 15 chars; "fvauto"/"fvhour" match the "rd*" pair above.
+bool settingsFavAutoRefresh()             { return s_prefs.getUChar("fvauto", 1) != 0; }
+void settingsSetFavAutoRefresh(bool on)   { s_prefs.putUChar("fvauto", on ? 1 : 0); }
+uint8_t settingsFavRefreshHour()          { uint8_t h = s_prefs.getUChar("fvhour", 5); return h > 23 ? 5 : h; }
+void settingsSetFavRefreshHour(uint8_t hour) { s_prefs.putUChar("fvhour", hour > 23 ? 5 : hour); }
+
 // Amazon Music DeviceLink credentials. NVS keys are capped at 15 chars.
 String settingsAmazonToken() { return s_prefs.getString("amztok", ""); }
 String settingsAmazonKey()   { return s_prefs.getString("amzkey", ""); }

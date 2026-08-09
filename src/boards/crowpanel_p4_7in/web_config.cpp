@@ -7,8 +7,10 @@
 //
 // LAYERING, per CLAUDE.md: this does sockets and routing and nothing else. What is configurable,
 // where it persists, and how a change is applied all live in core/webconfig — a board's HTTP
-// server must not reach into settings or g_pending itself. The two Radio fields it exposes are
-// therefore the same ones the on-screen Settings page writes, through the same code path.
+// server must not reach into settings or g_pending itself. The Radio and Favorites schedule fields
+// it exposes are therefore the same ones the on-screen Settings page writes, through the same code
+// path — which is also why adding the Favorites schedule needed a core/webconfig change and not
+// just markup here.
 #include <Arduino.h>
 #include "core/net/logmirror.h"
 #include <WebServer.h>
@@ -84,10 +86,16 @@ button.ghost{background:var(--elev2);color:var(--text)}
 
 <section>
   <h2>Favorites</h2>
-  <p style="color:var(--dim);font-size:14px;margin:0 0 12px">
-    Refreshed automatically a few minutes after you edit them in the Sonos app, and on the
-    schedule above.</p>
-  <button class="ghost" id="favnow" type="button">Refresh favorites now</button>
+  <div class="sw"><label for="favauto" style="margin:0">Refresh the favorites list daily</label>
+    <input type="checkbox" id="favauto"></div>
+  <label for="favhour">At (device local time)</label>
+  <div class="row">
+    <select id="favhour"></select>
+    <button class="ghost" id="favnow" type="button">Refresh now</button>
+  </div>
+  <p style="color:var(--dim);font-size:13px;margin:10px 0 0">
+    Pick a different hour from the station refresh — running both at once is more memory than
+    the device has to spare.</p>
 </section>
 
 <section>
@@ -106,7 +114,9 @@ async function put(field,value){
   const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({field,value:String(value)})});
   const j=await r.json().catch(()=>({}));
-  msg(r.ok&&j.ok!==false ? 'Saved.' : ('Could not save: '+(j.error||r.status)));
+  // A save can succeed AND carry a note (e.g. both refreshes scheduled in the same hour).
+  msg(r.ok&&j.ok!==false ? ('Saved.'+(j.note?' '+j.note:''))
+                         : ('Could not save: '+(j.error||r.status)));
 }
 async function load(){
   const c=await (await fetch('/api/config')).json();
@@ -114,11 +124,14 @@ async function load(){
   const rs=$('#room'); rs.innerHTML='';
   (c.zones||[]).forEach(z=>{const o=document.createElement('option');
     o.value=o.textContent=z.name; if(z.name===c.room)o.selected=true; rs.append(o)});
-  const hs=$('#hour'); hs.innerHTML='';
-  for(let h=0;h<24;h++){const o=document.createElement('option');
-    o.value=h; o.textContent=String(h).padStart(2,'0')+':00';
-    if(h===c.radio_refresh_hour)o.selected=true; hs.append(o)}
+  const fillHours=(sel,cur)=>{sel.innerHTML='';
+    for(let h=0;h<24;h++){const o=document.createElement('option');
+      o.value=h; o.textContent=String(h).padStart(2,'0')+':00';
+      if(h===cur)o.selected=true; sel.append(o)}};
+  fillHours($('#hour'), c.radio_refresh_hour);
+  fillHours($('#favhour'), c.fav_refresh_hour);
   $('#auto').checked=!!c.radio_auto_refresh;
+  $('#favauto').checked=!!c.fav_auto_refresh;
   $('#snd').value=c.uiSound??40; $('#sndv').textContent=($('#snd').value)+'%';
   $('#scroll').checked=!!c.scrollSound; $('#scroll').disabled=Number(c.uiSound)===0;
   $('#name').value=c.deviceName||''; $('#bright').value=c.brightness??100;
@@ -130,6 +143,8 @@ $('#scroll').onchange=e=>put('scrollSound',e.target.checked?'1':'0');
 $('#room').onchange=e=>put('room',e.target.value);
 $('#hour').onchange=e=>put('radio_refresh_hour',e.target.value);
 $('#auto').onchange=e=>put('radio_auto_refresh',e.target.checked?'1':'0');
+$('#favhour').onchange=e=>put('fav_refresh_hour',e.target.value);
+$('#favauto').onchange=e=>put('fav_auto_refresh',e.target.checked?'1':'0');
 $('#bright').onchange=e=>put('brightness',e.target.value);
 $('#savename').onclick=()=>put('deviceName',$('#name').value)
   .then(()=>msg('Saved. The device reboots to register the new name.'));
@@ -174,6 +189,14 @@ static void handlePost() {
   if (field.isEmpty()) { s_server->send(400, "application/json", "{\"ok\":false,\"error\":\"no field\"}"); return; }
   if (!webConfigApply(field, value, err)) {
     s_server->send(400, "application/json", String("{\"ok\":false,\"error\":\"") + err + "\"}");
+    return;
+  }
+  // webConfigApply may fill err on SUCCESS as a non-blocking note — a setting that is legal but
+  // worth warning about, like scheduling both refreshes in the same hour. Pass it through rather
+  // than dropping it; the page shows it beside "Saved.".
+  if (err.length()) {
+    String e = err; e.replace("\"", "'");
+    s_server->send(200, "application/json", String("{\"ok\":true,\"note\":\"") + e + "\"}");
     return;
   }
   s_server->send(200, "application/json", "{\"ok\":true}");

@@ -96,6 +96,8 @@ String webConfigJson() {
   doc["scrollSound"] = settingsScrollSound();
   doc["radio_refresh_hour"] = settingsRadioRefreshHour();
   doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
+  doc["fav_refresh_hour"]   = settingsFavRefreshHour();
+  doc["fav_auto_refresh"]   = settingsFavAutoRefresh();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
   // NVS value — a page showing "" when the router says "sonos-button" would just be wrong.
   doc["deviceName"] = wifiHostname();
@@ -308,6 +310,24 @@ bool webConfigApply(const String &field, const String &value, String &err) {
 
     return true;
 
+  }
+
+  // Favourites keep a schedule of their own — see settings.h for why they no longer share the
+  // radio one.
+  if (field == "fav_refresh_hour") {
+    const int h = value.toInt();
+    if (h < 0 || h > 23) { err = "hour must be 0-23"; return false; }
+    // Warn rather than refuse: two heavy refreshes in the same hour is real memory pressure on the
+    // P4, but it is the owner's call and a same-hour setting is not invalid.
+    if (h == (int)settingsRadioRefreshHour())
+      err = "note: same hour as the station refresh — they will compete for memory";
+    settingsSetFavRefreshHour((uint8_t)h);
+    return true;
+  }
+
+  if (field == "fav_auto_refresh") {
+    settingsSetFavAutoRefresh(value == "1" || value == "true" || value == "on");
+    return true;
   }
 
   if (field == "room") {
