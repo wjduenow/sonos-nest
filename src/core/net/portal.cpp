@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 namespace {
 
@@ -92,11 +93,11 @@ void handleJoin() {
                    pageResult("Pick a network", "No Wi-Fi network was selected.", true));
     return;
   }
-  Serial.printf("[portal ] joining \"%s\"...\n", ssid.c_str());
+  LOG.printf("[portal ] joining \"%s\"...\n", ssid.c_str());
   wifiApplyResultReset();
   wifiApply(ssid, pass);   // AP stays up (disconnect() drops STA only), so we can still respond
   if (wifiApplyResult() == WIFI_APPLY_OK) {
-    Serial.printf("[portal ] joined \"%s\" as %s\n", ssid.c_str(),
+    LOG.printf("[portal ] joined \"%s\" as %s\n", ssid.c_str(),
                   WiFi.localIP().toString().c_str());
     s_server->send(200, "text/html",
                    pageResult("Connected",
@@ -106,7 +107,7 @@ void handleJoin() {
                               false));
     // portalRun()'s loop sees wifiIsConnected() next tick and tears the AP down.
   } else {
-    Serial.printf("[portal ] join failed for \"%s\"\n", ssid.c_str());
+    LOG.printf("[portal ] join failed for \"%s\"\n", ssid.c_str());
     s_server->send(200, "text/html",
                    pageResult("Couldn't join",
                               "Couldn't connect to <b>" + esc(ssid) +
@@ -125,14 +126,14 @@ void handleCaptive() {
 }  // namespace
 
 void portalRun(const char *apSsid) {
-  Serial.printf("[portal ] no usable WiFi — raising setup AP \"%s\"\n", apSsid);
+  LOG.printf("[portal ] no usable WiFi — raising setup AP \"%s\"\n", apSsid);
 
   // AP_STA so we can scan real networks (WiFi.scanNetworks) while serving the AP.
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(apSsid);                 // open network
   delay(100);
   s_apIp = WiFi.softAPIP();            // 192.168.4.1
-  Serial.printf("[portal ] join \"%s\", then open http://%s/\n", apSsid,
+  LOG.printf("[portal ] join \"%s\", then open http://%s/\n", apSsid,
                 s_apIp.toString().c_str());
 
   s_dns = new DNSServer();
@@ -159,5 +160,5 @@ void portalRun(const char *apSsid) {
   s_dns->stop();     delete s_dns;    s_dns    = nullptr;
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
-  Serial.println("[portal ] provisioned — continuing boot");
+  LOG.println("[portal ] provisioned — continuing boot");
 }

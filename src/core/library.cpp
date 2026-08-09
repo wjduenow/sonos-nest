@@ -3,6 +3,7 @@
 #include "sonos/didl.h"
 #include "sonos/soap_client.h"
 #include <Arduino.h>
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 namespace library {
 
@@ -185,7 +186,7 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
         }
       }
       if (hit && !warm) {
-        Serial.printf("[lib    ] play \"%s\" %s res=%.40s\n", name.c_str(),
+        LOG.printf("[lib    ] play \"%s\" %s res=%.40s\n", name.c_str(),
                       (s_cacheValid && s_cacheName == name) ? "(cached)" : "(cold)",
                       item.resUri.c_str());
         playItem(coordIp, coordUuid, item);  // fast on a warm cache

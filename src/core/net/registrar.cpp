@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <esp_arduino_version.h>   // ESP_ARDUINO_VERSION_MAJOR — see mdnsResultIp() below
+#include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 // Arduino-ESP32 3.x renamed MDNSResponder::IP(idx) to address(idx). This file has to compile on
 // both: the ESP32-S3 units (nest, sleep-machine) are pinned to Arduino 2.0.17, while sonos-jukebox
@@ -30,7 +31,7 @@ static inline IPAddress mdnsResultIp(int idx) {
     String host = MDNS.hostname(idx);
     if (host.length()) {
       ip = MDNS.queryHost(host);
-      Serial.printf("[registrar] service result had no A record; resolved %s -> %s\n",
+      LOG.printf("[registrar] service result had no A record; resolved %s -> %s\n",
                     host.c_str(), ip.toString().c_str());
     }
   }
@@ -78,12 +79,12 @@ static bool resolvePortal() {
     if (ip == IPAddress((uint32_t)0)) {
       // Never cache 0.0.0.0: settingsSetPortal() would persist it to NVS and every later boot
       // would "resolve" the portal to a dead address without ever retrying mDNS.
-      Serial.println("[registrar] mDNS hit but no usable address — falling back to cache");
+      LOG.println("[registrar] mDNS hit but no usable address — falling back to cache");
     } else {
       s_host = ip.toString();
       s_port = MDNS.port(0);
       settingsSetPortal(s_host + ":" + String(s_port));
-      Serial.printf("[registrar] portal @ %s:%u (mDNS)\n", s_host.c_str(), s_port);
+      LOG.printf("[registrar] portal @ %s:%u (mDNS)\n", s_host.c_str(), s_port);
       return true;
     }
   }
@@ -93,7 +94,7 @@ static bool resolvePortal() {
     s_host = cached.substring(0, c);
     s_port = (uint16_t)cached.substring(c + 1).toInt();
     if (s_host.length() && s_port) {
-      Serial.printf("[registrar] portal @ %s:%u (cached)\n", s_host.c_str(), s_port);
+      LOG.printf("[registrar] portal @ %s:%u (cached)\n", s_host.c_str(), s_port);
       return true;
     }
   }
@@ -121,9 +122,9 @@ static bool httpPostJson(const char *path, const String &body, String *respOut =
 
 static void postRegister() {
   if (httpPostJson("/api/register", registrationJson()))
-    Serial.println("[registrar] registered with portal");
+    LOG.println("[registrar] registered with portal");
   else
-    Serial.println("[registrar] register POST failed");
+    LOG.println("[registrar] register POST failed");
 }
 
 // Minimal liveness payload. The stable id (mdnsName) matches the register payload so the portal
@@ -146,7 +147,7 @@ static String heartbeatJson() {
 void registrarBegin() {
   if (WiFi.status() != WL_CONNECTED) return;
   if (!resolvePortal()) {
-    Serial.println("[registrar] portal not found yet — will retry on heartbeat");
+    LOG.println("[registrar] portal not found yet — will retry on heartbeat");
     return;
   }
   postRegister();
@@ -170,7 +171,7 @@ void registrarTick() {
       uint32_t wait = kHeartbeatMs << s_resolveFails;
       if (wait > kResolveBackoffMaxMs) wait = kResolveBackoffMaxMs;
       s_nextResolveMs = millis() + wait;
-      Serial.printf("[registrar] portal not found (%u) — next mDNS attempt in %lus\n",
+      LOG.printf("[registrar] portal not found (%u) — next mDNS attempt in %lus\n",
                     (unsigned)s_resolveFails, (unsigned long)(wait / 1000));
     }
     return;
@@ -179,7 +180,7 @@ void registrarTick() {
   // the next tick re-resolves via mDNS and re-registers from scratch.
   String resp;
   if (!httpPostJson("/api/heartbeat", heartbeatJson(), &resp)) {
-    Serial.println("[registrar] heartbeat failed — will re-resolve portal");
+    LOG.println("[registrar] heartbeat failed — will re-resolve portal");
     s_host = ""; s_port = 0;
     // We were talking to a portal a moment ago, so it is worth one prompt re-resolve; don't
     // inherit a long backoff from whenever this device last booted with no portal on the LAN.
@@ -191,7 +192,7 @@ void registrarTick() {
   // heartbeat (~45 s). Cheap to parse — the body is a few bytes.
   JsonDocument rd;
   if (!deserializeJson(rd, resp) && rd["recheck"].as<bool>()) {
-    Serial.println("[registrar] portal requests firmware re-check");
+    LOG.println("[registrar] portal requests firmware re-check");
     updaterForceCheck();
   }
 }

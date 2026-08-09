@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
+#include "../net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 // Set -DSONOS_SOAP_TRACE=1 to log every SOAP request/response over serial (plan §7 dev
 // affordance). Off by default.
@@ -86,8 +87,8 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
       "</u:" + action + "></s:Body></s:Envelope>";
 
   if (SONOS_SOAP_TRACE) {
-    Serial.printf("[soap] POST %s  action=%s\n", url.c_str(), action.c_str());
-    Serial.println(body);
+    LOG.printf("[soap] POST %s  action=%s\n", url.c_str(), action.c_str());
+    LOG.println(body);
   }
 
   // Try the kept-alive socket; if it's stale the POST returns a negative code. Sonos closes idle
@@ -116,8 +117,8 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
 
     if (code > 0) {
       if (SONOS_SOAP_TRACE) {
-        Serial.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
-        if (code != 200) Serial.println(responseOut);
+        LOG.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
+        if (code != 200) LOG.println(responseOut);
       }
       return code == 200;
     }

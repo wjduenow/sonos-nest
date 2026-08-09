@@ -26,6 +26,7 @@
 #include "settings.h"
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 namespace favcache {
 
@@ -118,7 +119,7 @@ bool refresh() {
                                   "<Filter>*</Filter><StartingIndex>") + start +
                            "</StartingIndex><RequestedCount>20</RequestedCount>"
                            "<SortCriteria></SortCriteria>", r)) {
-      Serial.println("[favs  ] browse failed");
+      LOG.println("[favs  ] browse failed");
       s_busy = false; return false;
     }
     const String tm = tag(r, "TotalMatches");
@@ -146,7 +147,7 @@ bool refresh() {
     if (!got) break;
     start += got;
   }
-  if (favs.empty()) { Serial.println("[favs  ] no favourites returned"); s_busy = false; return false; }
+  if (favs.empty()) { LOG.println("[favs  ] no favourites returned"); s_busy = false; return false; }
 
   mkdir(root().c_str(), 0777);
   const String tmp = path() + ".tmp";
@@ -177,7 +178,7 @@ bool refresh() {
   rename(tmp.c_str(), path().c_str());
   s_count = -1;
   s_lastRefreshMs = millis();
-  Serial.printf("[favs  ] cached %u favourite(s)%s\n", (unsigned)favs.size(),
+  LOG.printf("[favs  ] cached %u favourite(s)%s\n", (unsigned)favs.size(),
                 skipped ? String(String(", skipped ") + skipped + " with no playable URI").c_str() : "");
   s_busy = false;
   return true;

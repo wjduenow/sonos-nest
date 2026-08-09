@@ -27,6 +27,10 @@
 #include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
 // Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+// NB above the secrets conditional on purpose: inside it, LOG would only be defined on
+// machines that happen to have include/secrets.h, which is gitignored.
+
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -71,13 +75,13 @@ static bool selectZoneByIp(const String &ip) {
       stateUnlock();
     }
     settingsSetRoom(z.name);   // persist so the pick survives reboot
-    Serial.printf("[zone] switched to %s @ %s (coord %s)\n",
+    LOG.printf("[zone] switched to %s @ %s (coord %s)\n",
                   s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
     return true;
   }
   // Silent failure here is a trap: the UI has already given the user feedback (a tone, a screen
   // change) and nothing happens. Say which IP was asked for and what was actually known.
-  Serial.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
+  LOG.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
                 (unsigned)sonos::zones().size());
   return false;
 }
@@ -99,7 +103,7 @@ static bool selectZone() {
     for (size_t i = 0; i < zs.size(); ++i)
       if (zs[i].name == want) { idx = i; found = true; break; }
     if (!found) {
-      Serial.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
+      LOG.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
                     want.c_str(), (unsigned)zs.size());
       return false;
     }
@@ -115,7 +119,7 @@ static bool selectZone() {
     g_player.coordinatorUuid = s_coordUuid;
     stateUnlock();
   }
-  Serial.printf("[boot] zone %s @ %s, coordinator @ %s\n",
+  LOG.printf("[boot] zone %s @ %s, coordinator @ %s\n",
                 s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
   return true;
 }
@@ -242,7 +246,7 @@ static void processPending() {
     // A device-name change: reboot so the DHCP hostname, mDNS and OTA name all come up fresh
     // from the new name. The web handler has already sent its HTTP response by now; the short
     // delay lets that TCP flush before the reset drops the link.
-    Serial.println("[app] rebooting to apply new device name");
+    LOG.println("[app] rebooting to apply new device name");
     delay(800);
     ESP.restart();
   }
@@ -320,14 +324,14 @@ static void netTask(void *) {
       const uint32_t now = millis();
       if (now - s_lastWifiKick > 10000) {
         s_lastWifiKick = now;
-        Serial.println("[net] wifi down — reconnecting");
+        LOG.println("[net] wifi down — reconnecting");
         wifiReconnect();
       }
       // A genuine disconnect is NOT the fault netLinkRecover() exists for, and the RSSI-0 readings
       // around a reconnect are normal. Disarm, or an ordinary router reboot ends in a device
       // reboot — exactly what the "requires the symptom twice" rule was written to prevent.
       if (s_deadLinkStreak) {
-        Serial.println("[net] wifi genuinely down — clearing the dead-link streak");
+        LOG.println("[net] wifi genuinely down — clearing the dead-link streak");
         s_deadLinkStreak = 0;
       }
       vTaskDelay(pdMS_TO_TICKS(500));
@@ -343,7 +347,7 @@ static void netTask(void *) {
     if (s_zoneIp.length() == 0 || s_coordStale) {
       const bool recovering = s_coordStale;
       s_coordStale = false;
-      if (recovering) Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
+      if (recovering) LOG.println("[net] coordinator unreachable x3 — re-discovering Sonos");
 
       // Before blaming Sonos, check whether OUR link is the thing that died. A board whose radio
       // is a separate co-processor can report WL_CONNECTED with a live IP while the transport to
@@ -358,16 +362,16 @@ static void netTask(void *) {
       // effectively permanent: one transient RSSI 0 now and another an hour later would add up to
       // a reboot, and the two would have nothing to do with each other.
       if (s_deadLinkStreak && millis() - s_deadLinkFirstMs > kDeadLinkWindowMs) {
-        Serial.println("[net] dead-link streak expired — starting over");
+        LOG.println("[net] dead-link streak expired — starting over");
         s_deadLinkStreak = 0;
       }
       if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
         if (s_deadLinkStreak == 0) s_deadLinkFirstMs = millis();
         if (++s_deadLinkStreak >= 2) {
-          Serial.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
+          LOG.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
           if (netLinkRecover()) {   // may not return: see the board implementation
             wifiConnect();
-            Serial.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
+            LOG.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
                           (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
           }
           s_deadLinkStreak = 0;
@@ -377,7 +381,7 @@ static void netTask(void *) {
           // radio, and re-entering this branch would then cost another 3 failed polls — which is
           // why an obviously-dead link used to take ~3 minutes of empty room list to recover.
           // Skip the doomed discovery, re-arm the recovery flag, and look again shortly.
-          Serial.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
+          LOG.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
           s_coordStale = true;
           vTaskDelay(pdMS_TO_TICKS(3000));
           continue;

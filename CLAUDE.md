@@ -12,6 +12,18 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
+- **sonos-button** (`sleep-button` env) — **headless**: one button, an LED ring, no screen, on an
+  ESP32-S3-CAM board (`boards/esp32s3cam/`). Press → the configured room starts the configured
+  saved playlist, looped, at the configured volume; press again → stop. Configured from a web page
+  on **:8080**, and readable over the **TCP log mirror on :2323** (it has no screen, so that is the
+  only way to watch it — see the log-mirror section below). `core/unit.h` is LVGL-free, so a
+  screenless unit is a first-class citizen and `app.cpp` needs no `#ifdef` for it; `-DHEADLESS`
+  drops album art and slows the poll to one call every 3 s. Plan: `plans/04-sonos-button-plan.md`.
+  > ⚠️ **It is the env that silently breaks.** `+<core/>` sweeps every core file into it, but its
+  > `lib_deps` is overridden to just ArduinoJson — no LVGL, no TJpg. So any new core file touching
+  > graphics breaks THIS env and only this env, and it is the one nobody builds by habit. That is
+  > exactly how `art_cache.cpp` broke it for weeks (issue #7). Build it before you push core
+  > changes; the exclusion list lives in its `build_src_filter`.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -220,8 +232,36 @@ Key modules (all under `src/core/` — device-agnostic):
   themselves** — a board's HTTP server does sockets + routing and calls this. Also clears a
   sleep/wake pick when its file is deleted, so a pick can't dangle.
 - `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
-- `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env).
+- `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env), `logmirror`
+  (see below).
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.
+
+### Reading a running device: the TCP log mirror (`core/net/logmirror.{h,cpp}`)
+
+`LOG` is a drop-in for `Serial` that also writes to anyone connected on **TCP :2323**
+(`nc <ip> 2323`). Non-blocking by construction — writes go to an 8 KB ring drained by its own
+task, and overflow drops the *oldest* bytes and counts them, because a diagnostic that can stall
+its caller is how you freeze the UI task with the very thing meant to explain the freeze.
+
+**Which units have it, and why — the numbers are measured free / minimum-ever internal heap:**
+
+| unit | heap | mirror | why |
+|---|---|---|---|
+| **sonos-jukebox** | 98 / 74 KB | **yes** | wall-mounted; rear port is power-only, so this and OTA are the only ways in |
+| **sleep-button** | 243 / 226 KB | **yes** | **headless** — no screen at all, so without a cable it is unobservable; also the most headroom of any unit |
+| sonos-nest | 78 / 60 KB | no | has a screen showing its own state; `heapLargest` still unknown on it (pre-`ccfe157` firmware). Viable later — read that first |
+| sleep-machine | 30 / **14.5 KB** | **no** | 14.5 KB min is already the range where LWIP cannot get socket buffers and the symptom is Sonos **`connection refused`**. Also has a screen and sits within cable reach |
+
+> ⚠️ **Enabling it is TWO things, and the flag is only one of them.** Add `-DLOG_MIRROR` to the env
+> *and* call `logMirrorBegin()` from that unit's `uiInit()`. The flag alone compiles the module in
+> and nothing ever starts the listener.
+> ⚠️ **It tees `LOG`, never `Serial`.** Any file still calling `Serial.print*` is invisible to a
+> remote reader — which on a headless unit means invisible full stop. `core/` and the units that
+> enable this use `LOG` throughout; bring-up/test sources deliberately keep `Serial`, because those
+> run with a cable attached anyway.
+> ⚠️ **Put the include ABOVE any `#if __has_include("secrets.h")` block.** Inside one, `LOG` is only
+> defined on machines that happen to have the gitignored `include/secrets.h` — so it builds for you
+> and fails for everyone else. Cost real time once already; a fresh worktree has no `secrets.h`.
 
 Boards: `src/boards/crowpanel_rotary/` (display · touch · encoder · pcf8574 · pins.h ·
 bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card · local_audio

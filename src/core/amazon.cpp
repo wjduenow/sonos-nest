@@ -23,6 +23,7 @@
 #include "settings.h"
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 namespace amazon {
 
@@ -222,7 +223,7 @@ static String post(const String &action, const String &header, const String &bod
   // keep-alive connection looks identical to a failure until we try to write to it.
   for (int attempt = 0; attempt < 2; ++attempt) {
     const bool reused = (s_cli != nullptr);
-    if (!ensureSession()) { Serial.println("[amazon] connect failed"); return ""; }
+    if (!ensureSession()) { LOG.println("[amazon] connect failed"); return ""; }
 
     s_cli->print(req);
     s_cli->print(env);
@@ -257,11 +258,11 @@ static String request(const String &action, const String &body) {
   const String tok = unescapeXml(tagValue(r, "authToken"));
   const String key = unescapeXml(tagValue(r, "privateKey"));
   if (tok.length() == 0) {
-    Serial.println("[amazon] token expired and the fault carried no replacement — re-link needed");
+    LOG.println("[amazon] token expired and the fault carried no replacement — re-link needed");
     return r;
   }
   settingsSetAmazonAuth(tok, key);
-  Serial.printf("[amazon] token refreshed in-band (%u/%u chars), retrying\n",
+  LOG.printf("[amazon] token refreshed in-band (%u/%u chars), retrying\n",
                 (unsigned)tok.length(), (unsigned)key.length());
   return post(action, credsHeader(), body);
 }
@@ -280,7 +281,7 @@ void adopt() {
     if (sonos::soapAction(ip, "/DeviceProperties/Control",
                    "urn:schemas-upnp-org:service:DeviceProperties:1", "GetHouseholdID", "", r)) {
       const String hh = tagValue(r, "CurrentHouseholdID");
-      if (hh.length()) { settingsSetHouseholdId(hh); Serial.printf("[amazon] household %s\n", hh.c_str()); }
+      if (hh.length()) { settingsSetHouseholdId(hh); LOG.printf("[amazon] household %s\n", hh.c_str()); }
     }
   }
 
@@ -299,7 +300,7 @@ void adopt() {
       const int sn = (at < 0) ? -1 : r.indexOf("sn=", at);
       if (sn > 0) {
         const uint8_t v = (uint8_t)strtoul(r.substring(sn + 3, sn + 6).c_str(), nullptr, 10);
-        if (v) { settingsSetAmazonSerial(v); Serial.printf("[amazon] account serial sn=%u\n", v); }
+        if (v) { settingsSetAmazonSerial(v); LOG.printf("[amazon] account serial sn=%u\n", v); }
       }
     }
   }
@@ -323,7 +324,7 @@ bool linkBegin(String &regUrlOut) {
   // linkDeviceId is per-request AND required to redeem the code. Losing it makes a completed
   // authorisation unredeemable and forces the owner to approve a second time — which happened.
   if (regUrlOut.length() == 0 || s_linkCode.length() == 0 || s_linkDeviceId.length() == 0) {
-    Serial.println("[amazon] link begin failed (missing regUrl/linkCode/linkDeviceId)");
+    LOG.println("[amazon] link begin failed (missing regUrl/linkCode/linkDeviceId)");
     return false;
   }
   return true;
@@ -342,7 +343,7 @@ bool linkPoll() {
   if (tok.length() == 0) return false;      // NOT_LINKED_RETRY while the owner is still approving
   settingsSetAmazonAuth(tok, unescapeXml(tagValue(r, "privateKey")));
   s_linkCode = ""; s_linkDeviceId = "";
-  Serial.println("[amazon] linked");
+  LOG.println("[amazon] linked");
   return true;
 }
 

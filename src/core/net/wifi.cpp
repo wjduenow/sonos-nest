@@ -5,6 +5,10 @@
 // Credentials come from NVS (set on-device via Settings), falling back to include/secrets.h
 // (gitignored) when NVS has none — so a fresh unit connects with the dev creds, and a WiFi
 // change made on the device persists and wins thereafter.
+#include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+// NB above the secrets conditional on purpose: inside it, LOG would only be defined on
+// machines that happen to have include/secrets.h, which is gitignored.
+
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -59,7 +63,7 @@ bool wifiConnect() {
   if (!beginFromStored()) return false;
   const bool ok = waitConnected(10000);
   if (ok) {
-    Serial.printf("[wifi   ] connected as \"%s\"  ip=%s\n", wifiHostname().c_str(),
+    LOG.printf("[wifi   ] connected as \"%s\"  ip=%s\n", wifiHostname().c_str(),
                   WiFi.localIP().toString().c_str());
 #if defined(WIFI_SSID) && defined(WIFI_PASS)
     // If we connected using the compiled-in secrets.h creds (NVS was empty — beginFromStored()
@@ -72,7 +76,7 @@ bool wifiConnect() {
     // re-provision (that overwrites NVS) if you need to point a device at a different network.
     if (settingsWifiSsid().length() == 0) {
       settingsSetWifi(WIFI_SSID, WIFI_PASS);
-      Serial.println("[wifi   ] persisted compiled-in creds to NVS (survives credential-less OTA)");
+      LOG.println("[wifi   ] persisted compiled-in creds to NVS (survives credential-less OTA)");
     }
 #endif
   }
