@@ -16,10 +16,29 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
   discovery/switching, transport, album art, OTA, portal registration, UI click feedback on the
-  onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). `core/` runs
+  onboard speakers, and four screens (Now Playing · Radio · Rooms · Settings). **Rooms does
+  grouping**: a checkbox per room joins/leaves the active group, plus UNGROUP, per-room volume
+  (±5) and per-room play/pause, over a group summary bar. Live per-room volume + play state come
+  from **`core/room_status.{h,cpp}`**, polled by netTask one room per step and ONLY while the page
+  asks (`keepAlive()`), so it costs nothing when you are elsewhere. `core/` runs
   **unmodified** — Arduino 3.x needed one shim in `net/registrar.cpp`. The **rotary dial works**:
   an Arduino Modulino Knob on the **shared I2C bus via J13** (not the 11-pin GPIO header), twist =
   volume and press = play/pause from any page — `boards/crowpanel_p4_7in/knob.cpp`.
+  > ⚠️ **Rooms is latency-bound by SOAP, so the fixes are all about NOT waiting and NOT blanking.**
+  > Three things were each worth a visible second. (1) A fixed poll gate made the first fill 3.6 s
+  > when the calls themselves cost ~150 ms/room — it now steps fast until one full round completes,
+  > then backs off to 400 ms. The switch is on "a round finished", NOT "every room has a reading":
+  > an off speaker never answers and would pin it fast forever. (2) A `roomstatus::invalidate()`
+  > after each grouping op blanked all nine rooms to `--` and refilled — deleted, because volume is
+  > unaffected by grouping and transport is re-derived from the new coordinator. (3) A checkbox
+  > cannot be confirmed until netTask runs the SOAP op **and** a full `ssdpDiscover()` topology
+  > re-read, so every optimistic edit (volume, transport, group membership) is held over the poller
+  > for a few seconds or the UI snaps back and the tap reads as ignored. The `g_zonesGen` rebuild
+  > is what ends a group hold — that bump IS the confirmation.
+  > ⚠️ **`soapAction`'s keep-alive only helps for consecutive calls to the SAME host**
+  > (one static `WiFiClient`, `setReuse(true)`). Anything that round-robins speakers — the Rooms
+  > poller — pays a fresh TCP connect per step over the SDIO bridge. Ordering calls so a room's
+  > volume and transport go back-to-back is why they share one connection.
   > ⚠️ **It answers at 7-bit `0x3A`, NOT the `0x76` its datasheet advertises** — those are 8-bit
   > addresses and Arduino's `Wire` is 7-bit (`0x74 >> 1 == 0x3A`, and the pinstrap byte it returns
   > is literally `0x74`). Probing only the documented values found nothing and the driver reported
@@ -50,7 +69,17 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > ⚠️ **Power-cycle after every upload**, and read the `[health]` heartbeat before diagnosing any
   > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
   > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
-  > different faults, identical on screen.
+  > different faults, identical on screen. The same numbers are on the wire without a serial cable:
+  > **`GET /api/config` → `.health`** (`core/webconfig.cpp`) carries heap/PSRAM/LVGL/SOAP counters.
+  > ⚠️ **Know which resource you are actually spending — they are nowhere near equal.** Measured on
+  > hardware: **PSRAM 32 MB, ~29.6 MB free** (frame buffer 1.17 MB + LVGL pool 512 KB + album art
+  > 526 KB + station tile cache 170 KB ≈ 2.4 MB); **app slot 6.25 MB, ~4.3 MB free** (and the
+  > 3.375 MB `spiffs` partition is *unused* — nothing mounts it — if you ever need more);
+  > **internal SRAM is the only tight one.** ~115 KB free but the `heapLargest` block is only
+  > ~32-49 KB, and `core/amazon.cpp` notes the crawl runs at **~40 KB free**. New buffers go in
+  > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
+  > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
+  > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
   > ⚠️ **microSD (slot 0; the C6 is slot 1, so they don't share a bus).** Pins CLK 43 / CMD 44 /
   > D0 39, 1-bit @ 10 MHz, no LDO power handle. **Never use Arduino's `SD_MMC`** — it takes its pins
   > and a power-enable pin from the board variant, whose stock `BOARD_SDMMC_POWER_PIN 45` is this

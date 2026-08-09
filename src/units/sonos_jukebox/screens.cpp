@@ -31,6 +31,7 @@
 #include "core/art_cache.h"
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
+#include "core/room_status.h"   // per-room volume + play state for the Rooms page (netTask polls)
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
 #include "core/webconfig.h"    // webConfigReportLvMem — the LVGL pool sample for the health JSON
@@ -77,11 +78,49 @@ static int s_cur = PAGE_NOW;
 static lv_obj_t *s_nameTa = nullptr, *s_kb = nullptr, *s_soundSlider = nullptr,
                 *s_soundVal = nullptr, *s_saveHint = nullptr;
 
-// Rooms
+// Rooms — see the block above buildRooms() for the layout and the rebuild/refresh split.
 static lv_obj_t *s_roomsWrap = nullptr;
-static std::vector<String> s_roomIps;      // parallel to the chips
-static uint32_t s_roomsGen = UINT32_MAX;   // last-rendered g_zonesGen
-static String   s_roomsActive;             // last-rendered active zone (the amber outline)
+static uint32_t s_roomsGen = UINT32_MAX;   // last-rendered g_zonesGen (topology => full rebuild)
+static uint32_t s_roomsStatusGen = UINT32_MAX;   // last-rendered roomstatus::gen() (=> refresh)
+static String   s_roomsActive;             // last-rendered active zone
+
+// Group summary bar.
+static lv_obj_t *s_grpCount = nullptr, *s_grpMembers = nullptr, *s_grpVolFill = nullptr,
+                *s_grpVolPct = nullptr, *s_grpUngroup = nullptr, *s_grpUngroupLbl = nullptr,
+                *s_grpPlay = nullptr, *s_grpPlayLbl = nullptr;
+
+// One entry per room row. Rows are built ONLY when the topology changes and then updated in
+// place: the status poller bumps its generation every ~400 ms, and tearing down nine rows of a
+// dozen objects each at that rate would churn the LVGL pool continuously (CLAUDE.md: browse lists
+// cost ~1 KB/row, and pool exhaustion freezes the UI rather than failing).
+struct RoomRowUi {
+  lv_obj_t *row = nullptr, *check = nullptr, *checkGlyph = nullptr, *name = nullptr,
+           *badge = nullptr, *caption = nullptr, *volFill = nullptr, *volPct = nullptr,
+           *minus = nullptr, *plus = nullptr, *play = nullptr, *playLbl = nullptr;
+};
+static std::vector<RoomRowUi> s_roomRows;
+// The snapshot the rows were last drawn from. Callbacks read the room's IP/coordinator/volume
+// from here, so they never touch sonos:: or roomstatus:: state directly on the UI task.
+static std::vector<roomstatus::Room> s_roomsData;
+// Optimistic transport, held briefly against the poller. Tapping play must light the button NOW,
+// but the reading already in flight (or the one taken before Sonos acted) still says the old
+// state, and refreshRooms() merges the poller over s_roomsData on every pass — without this the
+// icon flicks straight back and only settles a round later. Volume has the same problem and is
+// held inside roomstatus; transport is held here because only the UI knows a tap happened.
+// Parallel to s_roomsData; resized with it in rebuildRooms().
+static std::vector<uint32_t>       s_roomTransHoldUntil;
+static std::vector<TransportState> s_roomTransOpt;
+static const uint32_t kRoomTransHoldMs = 3000;
+
+// Optimistic GROUP MEMBERSHIP, same idea, and it is what makes the checkbox feel instant. A tap
+// cannot be confirmed until netTask has issued the SOAP op AND re-read the whole topology
+// (ssdpDiscover is a full GetZoneGroupState fetch + parse) — easily a second. Until then every
+// snapshot still reports the OLD coordinator, so without this the box stays unticked and the tap
+// reads as ignored. Held longer than the others because a topology re-read is the slowest thing
+// on this path; the g_zonesGen bump ends the hold early by forcing a full rebuild anyway.
+static std::vector<uint32_t> s_roomGroupHoldUntil;
+static std::vector<String>   s_roomGroupOpt;      // optimistic coordinatorUuid
+static const uint32_t kRoomGroupHoldMs = 6000;
 
 // Status bar
 static lv_obj_t *s_dot = nullptr, *s_room = nullptr, *s_group = nullptr, *s_clock = nullptr;
@@ -373,80 +412,528 @@ static void railCb(lv_event_t *e) {
   showPage((int)(intptr_t)lv_event_get_user_data(e));
 }
 
-// Tapping a room chip switches the controlled zone. The net task resolves the coordinator and
-// re-polls; the UI just states the intent.
-static void roomCb(lv_event_t *e) {
-  int idx = (int)(intptr_t)lv_event_get_user_data(e);
-  if (idx < 0 || idx >= (int)s_roomIps.size()) return;
-  uiSoundPlay(UiSound::Confirm);
-  Serial.printf("[ui    ] room chip %d -> %s\n", idx, s_roomIps[idx].c_str());
-  if (stateLock()) { g_pending.requestZoneIp = s_roomIps[idx]; stateUnlock(); }
-  showPage(PAGE_NOW);      // the design treats picking a room as "now show me that room"
-}
+// --- Rooms ------------------------------------------------------------------------------------
+// Per `ui_kits/jukebox-screen/RoomPicker.jsx`: a group summary bar over a scrolling list of room
+// rows, each with a group checkbox, name + state, volume and controls.
+//
+// TWO-PHASE RENDER, and the split matters. rebuildRooms() creates the LVGL tree and runs only when
+// the TOPOLOGY changes (g_zonesGen); refreshRooms() only sets text, colours and bar widths, and
+// runs whenever the status poller reports new readings (~every 400 ms). Rebuilding on every poll
+// would recycle ~12 objects x N rooms several times a second through the LV_MEM pool.
+//
+// DEVIATIONS from the design, all deliberate:
+//   - Controls are bigger than the mock's 26/32 px: this is a wall panel, and the design system's
+//     own --hit-min is 44. Same reasoning already applied to the nav rail (48 -> 72).
+//   - Per-row play/pause appears ONLY on group coordinators and ungrouped rooms. Sonos transport
+//     is a property of the GROUP — there is no way to pause one member of a group — so a button on
+//     a grouped member would silently act on its whole group. The design puts one on every row;
+//     showing a control that lies about its scope is worse than omitting it.
+//   - The active room's checkbox is disabled: a group's own anchor cannot be removed from it.
+static const lv_coord_t RM_W       = SCREEN_W - RAIL_W - PAD_X * 2;   // 868
+static const lv_coord_t RM_BAR_Y   = 76;
+static const lv_coord_t RM_BAR_H   = 80;
+static const lv_coord_t RM_LIST_Y  = 192;
+static const lv_coord_t RM_ROW_H   = 62;
+static const lv_coord_t RM_ROW_PITCH = 66;
 
-// Room chips, per the design's RoomChip: pill, status dot, accent tint + accent border when it is
-// the controlled zone. Rebuilt only when discovery reports a change (g_zonesGen).
-static void rebuildRooms() {
-  lv_obj_clean(s_roomsWrap);
-  s_roomIps.clear();
+// Row geometry (x offsets within a row of width RM_W).
+static const lv_coord_t RX_CHECK = 8,   RC_SZ    = 28;
+static const lv_coord_t RX_NAME  = 52,  RN_W     = 156;
+static const lv_coord_t RX_BADGE = 214;
+static const lv_coord_t RX_VOL   = 272, RV_W     = 300;
+static const lv_coord_t RX_VPCT  = 584;
+static const lv_coord_t RX_MINUS = 708, RX_PLUS  = 760, R_STEP_SZ = 44;
+static const lv_coord_t RX_PLAY  = 812, R_PLAY_SZ = 48;
 
+static void rebuildRooms();
+static void refreshRooms();
+
+// Which room is the active one, and what group is it in? Both come from the snapshot the rows were
+// drawn from, so every callback agrees with what is on screen.
+static int activeRoomIdx() {
   String cur;
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
+  for (size_t i = 0; i < s_roomsData.size(); ++i)
+    if (s_roomsData[i].name == cur) return (int)i;
+  return -1;
+}
 
-  s_roomsActive = cur;
+// Takes the anchor index rather than looking it up: the render loop calls this once per row, and
+// activeRoomIdx() acquires g_stateMutex — nine takes per repaint, at ~2.5 repaints a second, for a
+// value that cannot change within a single pass.
+static bool roomInActiveGroup(size_t i, int a) {
+  if (a < 0 || i >= s_roomsData.size()) return false;
+  return s_roomsData[i].coordinatorUuid == s_roomsData[(size_t)a].coordinatorUuid;
+}
 
-  std::vector<sonos::Zone> zs;
-  sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
-  if (zs.empty()) {
-    lv_obj_t *l = label(s_roomsWrap, "Searching for speakers" LV_SYMBOL_REFRESH,
-                        &lv_font_montserrat_22, JB_TEXT_MUTED);
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
-    return;
+// Record an optimistic transport state for a row and start its hold window. Applies to the whole
+// GROUP, not just the row: Sonos moves every member together, so holding only the tapped row would
+// let its group-mates flicker to the stale reading instead.
+static void noteRoomTransport(size_t i, TransportState st) {
+  if (i >= s_roomsData.size() || s_roomTransOpt.size() != s_roomsData.size()) return;
+  const String coord = s_roomsData[i].coordinatorUuid;
+  const uint32_t until = lv_tick_get() + kRoomTransHoldMs;
+  for (size_t k = 0; k < s_roomsData.size(); ++k) {
+    if (s_roomsData[k].coordinatorUuid != coord) continue;
+    s_roomsData[k].transport = st;
+    s_roomsData[k].transportOk = true;
+    s_roomTransOpt[k] = st;
+    s_roomTransHoldUntil[k] = until;
+  }
+}
+
+// --- Row callbacks ------------------------------------------------------------------------------
+
+// The checkbox: add this room to the active group, or split it back out. Queued (not assigned) so
+// several quick taps all survive — see PendingCmds::groupOps.
+static void roomCheckCb(lv_event_t *e) {
+  const size_t i = (size_t)(intptr_t)lv_event_get_user_data(e);
+  if (i >= s_roomsData.size()) return;
+  const int a = activeRoomIdx();
+  if (a < 0 || (int)i == a) return;    // the anchor cannot leave its own group
+  const bool joining = !roomInActiveGroup(i, a);
+  uiSoundPlay(UiSound::Confirm);
+  Serial.printf("[ui    ] group %s %s\n", joining ? "+" : "-", s_roomsData[i].name.c_str());
+  if (stateLock()) {
+    g_pending.groupOps.push_back({s_roomsData[i].ip, joining});
+    stateUnlock();
   }
 
-  const lv_coord_t chipW = 220, chipH = 56, gapX = 14, gapY = 12;
-  const int cols = 3;
-  for (size_t i = 0; i < zs.size(); ++i) {
-    const bool active = (zs[i].name == cur);
-    s_roomIps.push_back(zs[i].ip);
-
-    lv_obj_t *chip = lv_button_create(s_roomsWrap);
-    lv_obj_remove_style_all(chip);
-    lv_obj_set_size(chip, chipW, chipH);
-    lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(chip, lv_color_hex(JB_SCREEN_ELEV), 0);
-    lv_obj_set_style_border_width(chip, 1, 0);
-    lv_obj_set_style_border_color(chip, lv_color_hex(active ? JB_ACCENT : JB_SCREEN_LINE), 0);
-    lv_obj_set_style_bg_color(chip, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
-    // set_pos, not align: aligned children are positioned relative to the parent but do not
-    // extend its scrollable content area, so the rows past the fold would still be unreachable.
-    lv_obj_set_pos(chip, (lv_coord_t)((i % cols) * (chipW + gapX)),
-                   (lv_coord_t)((i / cols) * (chipH + gapY)));
-    lv_obj_add_event_cb(chip, roomCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-
-    lv_obj_t *dot = panel(chip, 8, 8, active ? JB_ACCENT : JB_TEXT_DIM, LV_RADIUS_CIRCLE);
-    lv_obj_align(dot, LV_ALIGN_LEFT_MID, 16, 0);
-
-    lv_obj_t *nm = label(chip, zs[i].name.c_str(), &lv_font_montserrat_16,
-                         active ? JB_TEXT : JB_TEXT_MUTED);
-    lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(nm, chipW - 44);
-    lv_obj_align(nm, LV_ALIGN_LEFT_MID, 32, 0);
+  // Show it NOW. Joining adopts the active group's coordinator and stops being one; leaving makes
+  // the room its own coordinator. Both are exactly what the topology re-read will confirm.
+  if (s_roomGroupOpt.size() == s_roomsData.size()) {
+    s_roomsData[i].coordinatorUuid = joining ? s_roomsData[(size_t)a].coordinatorUuid
+                                             : s_roomsData[i].uuid;
+    s_roomsData[i].isCoordinator = !joining;
+    if (joining) {
+      // A room that just joined inherits the group's play state; leaving it on its own old
+      // reading would caption it "Idle" next to rooms that are playing the same thing.
+      s_roomsData[i].transport   = s_roomsData[(size_t)a].transport;
+      s_roomsData[i].transportOk = s_roomsData[(size_t)a].transportOk;
+    }
+    s_roomGroupOpt[i] = s_roomsData[i].coordinatorUuid;
+    s_roomGroupHoldUntil[i] = lv_tick_get() + kRoomGroupHoldMs;
   }
+  refreshRooms();
+}
+
+// The name: make this the controlled room. Unlike the old chip grid this does NOT jump to Now
+// Playing — the new design keeps you on Rooms (the MAIN badge is the feedback) so that picking a
+// room and then grouping to it is one uninterrupted gesture.
+static void roomNameCb(lv_event_t *e) {
+  const size_t i = (size_t)(intptr_t)lv_event_get_user_data(e);
+  if (i >= s_roomsData.size()) return;
+  uiSoundPlay(UiSound::Confirm);
+  if (stateLock()) { g_pending.requestZoneIp = s_roomsData[i].ip; stateUnlock(); }
+}
+
+// Volume steppers, +/-5 per the design. The new level is computed from the DISPLAYED value and
+// pushed back into the status cache immediately, so repeated taps accumulate instead of all
+// deriving from the same stale reading, and the bar tracks the finger.
+static void roomVolStep(size_t i, int delta) {
+  if (i >= s_roomsData.size()) return;
+  const int next = constrain((int)s_roomsData[i].vol + delta, 0, 100);
+  if (next == (int)s_roomsData[i].vol && s_roomsData[i].volOk) return;
+  uiSoundPlay(UiSound::Tick);
+  s_roomsData[i].vol = (uint8_t)next;
+  s_roomsData[i].volOk = true;
+  roomstatus::noteVolume(s_roomsData[i].ip, (uint8_t)next);
+  if (stateLock()) {
+    g_pending.roomVolIp = s_roomsData[i].ip;
+    g_pending.roomVolTarget = next;
+    stateUnlock();
+  }
+  refreshRooms();   // paint this frame, not on the next poll
+}
+static void roomVolDownCb(lv_event_t *e) {
+  roomVolStep((size_t)(intptr_t)lv_event_get_user_data(e), -5);
+}
+static void roomVolUpCb(lv_event_t *e) {
+  roomVolStep((size_t)(intptr_t)lv_event_get_user_data(e), +5);
+}
+
+// Per-row play/pause. Only built for coordinators/ungrouped rooms, and always addressed to the
+// coordinator IP — that is the only thing Sonos will accept a transport command on.
+static void roomPlayCb(lv_event_t *e) {
+  const size_t i = (size_t)(intptr_t)lv_event_get_user_data(e);
+  if (i >= s_roomsData.size()) return;
+  const bool playing = s_roomsData[i].transportOk &&
+                       s_roomsData[i].transport == TransportState::Playing;
+  uiSoundPlay(UiSound::Confirm);
+  const String target = s_roomsData[i].coordIp.length() ? s_roomsData[i].coordIp
+                                                        : s_roomsData[i].ip;
+  if (stateLock()) {
+    g_pending.roomPlayCoordIp = target;
+    g_pending.roomSetPlay = playing ? 0 : 1;
+    stateUnlock();
+  }
+  // Optimistic, and held so the merge in refreshRooms() can't immediately undo it.
+  noteRoomTransport(i, playing ? TransportState::Paused : TransportState::Playing);
+  refreshRooms();
+}
+
+// --- Group summary callbacks ---------------------------------------------------------------------
+
+static void ungroupCb(lv_event_t *e) {
+  (void)e;
+  uiSoundPlay(UiSound::Confirm);
+  Serial.println("[ui    ] ungroup all");
+  if (stateLock()) { g_pending.ungroupAll = true; stateUnlock(); }
+}
+
+static void groupPlayCb(lv_event_t *e) {
+  (void)e;
+  const int a = activeRoomIdx();
+  if (a < 0) return;
+  const bool playing = s_roomsData[a].transportOk &&
+                       s_roomsData[a].transport == TransportState::Playing;
+  uiSoundPlay(UiSound::Confirm);
+  const String target = s_roomsData[a].coordIp.length() ? s_roomsData[a].coordIp
+                                                        : s_roomsData[a].ip;
+  if (stateLock()) {
+    g_pending.roomPlayCoordIp = target;
+    g_pending.roomSetPlay = playing ? 0 : 1;
+    stateUnlock();
+  }
+  noteRoomTransport((size_t)a, playing ? TransportState::Paused : TransportState::Playing);
+  refreshRooms();
+}
+
+// --- Builders -------------------------------------------------------------------------------------
+
+// A square, elevated control (the design's stepper: r-10, --screen-line border, --screen-elev-2).
+static lv_obj_t *roomStepBtn(lv_obj_t *parent, const char *sym, lv_coord_t sz, lv_event_cb_t cb,
+                             size_t idx) {
+  lv_obj_t *b = lv_button_create(parent);
+  lv_obj_remove_style_all(b);
+  lv_obj_set_size(b, sz, sz);
+  lv_obj_set_style_radius(b, 10, 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_border_width(b, 1, 0);
+  lv_obj_set_style_border_color(b, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
+  lv_obj_t *l = label(b, sym, &lv_font_montserrat_20, JB_TEXT_MUTED);
+  lv_obj_center(l);
+  return b;
+}
+
+// Round play/pause, sized for touch. Kept local rather than reusing transportBtn() because these
+// need a per-row index in user_data.
+static lv_obj_t *roomPlayBtn(lv_obj_t *parent, lv_coord_t sz, lv_event_cb_t cb, size_t idx,
+                             lv_obj_t **lblOut) {
+  lv_obj_t *b = lv_button_create(parent);
+  lv_obj_remove_style_all(b);
+  lv_obj_set_size(b, sz, sz);
+  lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
+  *lblOut = label(b, LV_SYMBOL_PLAY, &lv_font_montserrat_20, JB_TEXT);
+  lv_obj_center(*lblOut);
+  return b;
+}
+
+// Full teardown + rebuild. Topology changes only.
+static void rebuildRooms() {
+  lv_obj_clean(s_roomsWrap);
+  s_roomRows.clear();
+
+  roomstatus::snapshot(s_roomsData);
+  if (s_roomsData.empty()) {
+    // Fall back to plain discovery so the page says something useful before the first poll round
+    // (roomstatus only populates once netTask has seen the page asking).
+    std::vector<sonos::Zone> zs;
+    sonos::zonesSnapshot(zs);
+    if (zs.empty()) {
+      lv_obj_t *l = label(s_roomsWrap, "Searching for speakers" LV_SYMBOL_REFRESH,
+                          &lv_font_montserrat_22, JB_TEXT_MUTED);
+      lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
+      return;
+    }
+    for (const auto &z : zs) {
+      roomstatus::Room r;
+      r.name = z.name; r.ip = z.ip; r.uuid = z.uuid;
+      r.coordinatorUuid = z.coordinatorUuid; r.coordIp = z.coordIp;
+      r.isCoordinator = z.isCoordinator;
+      s_roomsData.push_back(r);
+    }
+  }
+
+  s_roomRows.resize(s_roomsData.size());
+  // Held optimistic state is per-row and the row set just changed — start clean. A rebuild is
+  // triggered by the g_zonesGen bump, i.e. the topology re-read that CONFIRMS a pending checkbox
+  // tap, so dropping the holds here is exactly right: the real answer has arrived.
+  s_roomTransHoldUntil.assign(s_roomsData.size(), 0);
+  s_roomTransOpt.assign(s_roomsData.size(), TransportState::Unknown);
+  s_roomGroupHoldUntil.assign(s_roomsData.size(), 0);
+  s_roomGroupOpt.assign(s_roomsData.size(), String());
+  for (size_t i = 0; i < s_roomsData.size(); ++i) {
+    RoomRowUi &u = s_roomRows[i];
+
+    u.row = panel(s_roomsWrap, RM_W, RM_ROW_H, JB_SCREEN_ELEV, JB_R_MD);
+    lv_obj_set_style_border_width(u.row, 1, 0);
+    // set_pos, not align: aligned children don't extend the scrollable content area, so rows past
+    // the fold would be unreachable (the same trap the old chip grid hit).
+    lv_obj_set_pos(u.row, 0, (lv_coord_t)(i * RM_ROW_PITCH));
+
+    u.check = lv_button_create(u.row);
+    lv_obj_remove_style_all(u.check);
+    lv_obj_set_size(u.check, RC_SZ, RC_SZ);
+    lv_obj_set_style_radius(u.check, 8, 0);
+    lv_obj_set_style_bg_opa(u.check, LV_OPA_COVER, 0);
+    lv_obj_align(u.check, LV_ALIGN_LEFT_MID, RX_CHECK, 0);
+    lv_obj_add_event_cb(u.check, roomCheckCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    u.checkGlyph = label(u.check, LV_SYMBOL_OK, &lv_font_montserrat_16, JB_ACCENT_INK);
+    lv_obj_center(u.checkGlyph);
+
+    // The name is a button so the whole block is a comfortable target, not just the glyph.
+    lv_obj_t *nameBtn = lv_button_create(u.row);
+    lv_obj_remove_style_all(nameBtn);
+    lv_obj_set_size(nameBtn, RN_W + 40, RM_ROW_H);
+    lv_obj_align(nameBtn, LV_ALIGN_LEFT_MID, RX_NAME, 0);
+    lv_obj_add_event_cb(nameBtn, roomNameCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    u.name = label(u.row, s_roomsData[i].name.c_str(), &lv_font_montserrat_16, JB_TEXT);
+    lv_label_set_long_mode(u.name, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(u.name, RN_W);
+    lv_obj_align(u.name, LV_ALIGN_LEFT_MID, RX_NAME, -10);
+
+    u.badge = label(u.row, "MAIN", &lv_font_montserrat_12, JB_ACCENT);
+    lv_obj_align(u.badge, LV_ALIGN_LEFT_MID, RX_BADGE, -10);
+
+    u.caption = label(u.row, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(u.caption, LV_ALIGN_LEFT_MID, RX_NAME, 12);
+
+    lv_obj_t *track = panel(u.row, RV_W, 6, JB_SCREEN_ELEV_2, 3);
+    lv_obj_align(track, LV_ALIGN_LEFT_MID, RX_VOL, 0);
+    u.volFill = panel(track, 0, 6, JB_ACCENT, 3);
+    lv_obj_align(u.volFill, LV_ALIGN_LEFT_MID, 0, 0);
+
+    u.volPct = label(u.row, "--", &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(u.volPct, LV_ALIGN_LEFT_MID, RX_VPCT, 0);
+
+    u.minus = roomStepBtn(u.row, LV_SYMBOL_MINUS, R_STEP_SZ, roomVolDownCb, i);
+    lv_obj_align(u.minus, LV_ALIGN_LEFT_MID, RX_MINUS, 0);
+    u.plus = roomStepBtn(u.row, LV_SYMBOL_PLUS, R_STEP_SZ, roomVolUpCb, i);
+    lv_obj_align(u.plus, LV_ALIGN_LEFT_MID, RX_PLUS, 0);
+
+    u.play = roomPlayBtn(u.row, R_PLAY_SZ, roomPlayCb, i, &u.playLbl);
+    lv_obj_align(u.play, LV_ALIGN_LEFT_MID, RX_PLAY, 0);
+  }
+
+  refreshRooms();
+}
+
+// Cheap in-place update: text, colours, bar widths. No allocation, no object churn.
+static void refreshRooms() {
+  if (s_roomRows.empty()) return;
+
+  // Re-read the poller, but keep the existing row count: if discovery has changed the room set,
+  // rebuildRooms() will run on the g_zonesGen bump and this pass would only mis-index.
+  std::vector<roomstatus::Room> fresh;
+  roomstatus::snapshot(fresh);
+  if (fresh.size() == s_roomsData.size()) {
+    for (size_t i = 0; i < fresh.size(); ++i) {
+      // Preserve an optimistic volume the user just set; roomstatus holds it too, but this pass
+      // may run from the stepper callback before the poller has seen it at all.
+      // Keep a local reading the poller does not have yet — either seeded from g_player on page
+      // entry, or set optimistically by a stepper. Only ever when fresh has nothing: a real
+      // reading always wins.
+      const bool keepVol = s_roomsData[i].volOk && !fresh[i].volOk;
+      const uint8_t v = s_roomsData[i].vol;
+      const bool keepTrans = s_roomsData[i].transportOk && !fresh[i].transportOk;
+      const TransportState ts = s_roomsData[i].transport;
+      // Within its hold window a tapped row keeps the state the user just asked for.
+      const bool holdTrans = i < s_roomTransHoldUntil.size() &&
+                             (int32_t)(lv_tick_get() - s_roomTransHoldUntil[i]) < 0;
+      const TransportState opt = holdTrans ? s_roomTransOpt[i] : TransportState::Unknown;
+      s_roomsData[i] = fresh[i];
+      if (keepVol) { s_roomsData[i].vol = v; s_roomsData[i].volOk = true; }
+      if (keepTrans) { s_roomsData[i].transport = ts; s_roomsData[i].transportOk = true; }
+      if (holdTrans) { s_roomsData[i].transport = opt; s_roomsData[i].transportOk = true; }
+    }
+
+    // Re-apply any still-pending checkbox taps over the freshly merged topology.
+    for (size_t i = 0; i < s_roomsData.size() && i < s_roomGroupHoldUntil.size(); ++i) {
+      if ((int32_t)(lv_tick_get() - s_roomGroupHoldUntil[i]) >= 0) continue;
+      s_roomsData[i].coordinatorUuid = s_roomGroupOpt[i];
+      s_roomsData[i].isCoordinator = (s_roomGroupOpt[i] == s_roomsData[i].uuid);
+    }
+
+    // Group sizes come from the snapshot, which predates those optimistic edits — recount over
+    // what is actually about to be drawn, or a just-joined room still captions itself ungrouped.
+    for (auto &r : s_roomsData) {
+      uint8_t n = 0;
+      for (const auto &o : s_roomsData) if (o.coordinatorUuid == r.coordinatorUuid) n++;
+      r.groupSize = n ? n : 1;
+    }
+  }
+
+  const int a = activeRoomIdx();
+  int    groupSize = 0;
+  String members;
+  int    groupVolSum = 0, groupVolN = 0;
+
+  for (size_t i = 0; i < s_roomRows.size() && i < s_roomsData.size(); ++i) {
+    RoomRowUi &u = s_roomRows[i];
+    const roomstatus::Room &r = s_roomsData[i];
+    const bool active  = ((int)i == a);
+    const bool inGroup = roomInActiveGroup(i, a);
+    const bool playing = r.transportOk && r.transport == TransportState::Playing;
+
+    if (inGroup) {
+      groupSize++;
+      if (members.length()) members += "  ·  ";
+      members += r.name;
+      if (r.volOk) { groupVolSum += r.vol; groupVolN++; }
+    }
+
+    // Row surface: in-group rows are elevated, the active one takes the accent hairline.
+    lv_obj_set_style_bg_opa(u.row, inGroup ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(u.row,
+        lv_color_hex(active ? JB_ACCENT : (inGroup ? JB_SCREEN_LINE : JB_SCREEN_BG)), 0);
+
+    // Checkbox: accent fill + tick when grouped, hollow outline when not.
+    lv_obj_set_style_bg_opa(u.check, inGroup ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(u.check, lv_color_hex(JB_ACCENT), 0);
+    lv_obj_set_style_border_width(u.check, inGroup ? 0 : 2, 0);
+    lv_obj_set_style_border_color(u.check, lv_color_hex(JB_TEXT_DIM), 0);
+    if (inGroup) lv_obj_remove_flag(u.checkGlyph, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_add_flag(u.checkGlyph, LV_OBJ_FLAG_HIDDEN);
+    // The anchor cannot be removed from its own group, so its box is inert and reads as such.
+    if (active) {
+      lv_obj_add_state(u.check, LV_STATE_DISABLED);
+      lv_obj_set_style_bg_opa(u.check, LV_OPA_40, 0);
+    } else {
+      lv_obj_remove_state(u.check, LV_STATE_DISABLED);
+    }
+
+    lv_obj_set_style_text_color(u.name, lv_color_hex(inGroup ? JB_TEXT : JB_TEXT_MUTED), 0);
+    if (active) lv_obj_remove_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
+    else        lv_obj_add_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
+
+    // Caption, per the design: "Playing · grouped" only when the group really has >1 member.
+    const char *cap;
+    if (!r.transportOk)   cap = "--";
+    else if (!playing)    cap = "Idle";
+    else if (r.groupSize > 1) cap = "Playing  ·  grouped";
+    else                  cap = "Playing";
+    lv_label_set_text(u.caption, cap);
+
+    // Volume. Dimmed when the room is idle, per the design's opacity .45.
+    lv_obj_set_width(u.volFill, r.volOk ? (lv_coord_t)(RV_W * r.vol / 100) : 0);
+    lv_obj_set_style_bg_opa(u.volFill, playing ? LV_OPA_COVER : LV_OPA_50, 0);
+    char pb[8];
+    if (r.volOk) snprintf(pb, sizeof(pb), "%u", (unsigned)r.vol);
+    else         snprintf(pb, sizeof(pb), "--");
+    lv_label_set_text(u.volPct, pb);
+
+    // Play/pause only where it is honest — see the header comment.
+    const bool showPlay = r.isCoordinator || r.groupSize <= 1;
+    if (showPlay) {
+      lv_obj_remove_flag(u.play, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(u.playLbl, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+      lv_obj_set_style_bg_color(u.play, lv_color_hex(playing ? JB_ACCENT : JB_SCREEN_ELEV_2), 0);
+      lv_obj_set_style_text_color(u.playLbl, lv_color_hex(playing ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
+    } else {
+      lv_obj_add_flag(u.play, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  // --- Group summary bar ---
+  if (!s_grpCount) return;
+  const bool grouped = groupSize > 1;
+  char cb[32];
+  if (a < 0)        snprintf(cb, sizeof(cb), "No room");
+  else if (grouped) snprintf(cb, sizeof(cb), "%d rooms", groupSize);
+  else              snprintf(cb, sizeof(cb), "%s", s_roomsData[a].name.c_str());
+  lv_label_set_text(s_grpCount, cb);
+  lv_label_set_text(s_grpMembers, grouped ? members.c_str() : "Playing alone");
+
+  const int gv = groupVolN ? (groupVolSum / groupVolN) : 0;
+  lv_obj_set_width(s_grpVolFill, (lv_coord_t)(320 * gv / 100));
+  char gb[8];
+  if (groupVolN) snprintf(gb, sizeof(gb), "%d", gv);
+  else           snprintf(gb, sizeof(gb), "--");
+  lv_label_set_text(s_grpVolPct, gb);
+
+  // UNGROUP is meaningless on a group of one — dim it rather than let it no-op silently.
+  if (grouped) {
+    lv_obj_remove_state(s_grpUngroup, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(s_grpUngroupLbl, lv_color_hex(JB_TEXT), 0);
+    lv_obj_set_style_border_color(s_grpUngroup, lv_color_hex(JB_SCREEN_LINE), 0);
+  } else {
+    lv_obj_add_state(s_grpUngroup, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(s_grpUngroupLbl, lv_color_hex(JB_TEXT_DIM), 0);
+    lv_obj_set_style_border_color(s_grpUngroup, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  }
+
+  const bool anyPlaying = (a >= 0) && s_roomsData[a].transportOk &&
+                          s_roomsData[a].transport == TransportState::Playing;
+  lv_label_set_text(s_grpPlayLbl, anyPlaying ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 }
 
 static void buildRooms() {
   lv_obj_t *pg = s_page[PAGE_ROOMS];
-  lv_obj_t *h = label(pg, "Rooms", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);   // clear of the status bar
 
-  s_roomsWrap = panel(pg, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - 150, JB_SCREEN_BG, 0);
-  lv_obj_align(s_roomsWrap, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 82);
-  // Scrollable, like the Radio list. panel() clears SCROLLABLE, and with a fixed 3-column grid at
-  // a 68 px row pitch this container shows exactly 6 rows = 18 chips. Zone 19 onward was drawn
-  // outside the clip area with no scroll and no notice — a house with more than 18 rooms simply
-  // could not reach the later ones. Silent, and worse than the Radio list's honest "showing N of M".
+  // Group summary bar. No "Rooms" heading: the design drops it, and the shared status bar already
+  // names the controlled room.
+  lv_obj_t *bar = panel(pg, RM_W, RM_BAR_H, JB_SCREEN_ELEV, JB_R_LG);
+  lv_obj_align(bar, LV_ALIGN_TOP_LEFT, 0, RM_BAR_Y);
+  lv_obj_set_style_border_width(bar, 1, 0);
+  lv_obj_set_style_border_color(bar, lv_color_hex(JB_SCREEN_LINE), 0);
+
+  s_grpCount = label(bar, "--", &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_align(s_grpCount, LV_ALIGN_TOP_LEFT, 18, 14);
+  s_grpMembers = label(bar, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_label_set_long_mode(s_grpMembers, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(s_grpMembers, 260);
+  lv_obj_align(s_grpMembers, LV_ALIGN_TOP_LEFT, 18, 48);
+
+  lv_obj_t *gvl = label(bar, "GROUP VOLUME", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(gvl, LV_ALIGN_TOP_LEFT, 300, 18);
+  lv_obj_t *gtrack = panel(bar, 320, 6, JB_SCREEN_ELEV_2, 3);
+  lv_obj_align(gtrack, LV_ALIGN_TOP_LEFT, 300, 46);
+  s_grpVolFill = panel(gtrack, 0, 6, JB_ACCENT, 3);
+  lv_obj_align(s_grpVolFill, LV_ALIGN_LEFT_MID, 0, 0);
+  s_grpVolPct = label(bar, "--", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_align(s_grpVolPct, LV_ALIGN_TOP_LEFT, 628, 42);
+
+  s_grpUngroup = lv_button_create(bar);
+  lv_obj_remove_style_all(s_grpUngroup);
+  lv_obj_set_size(s_grpUngroup, 120, 44);
+  lv_obj_set_style_radius(s_grpUngroup, 10, 0);
+  lv_obj_set_style_bg_opa(s_grpUngroup, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_grpUngroup, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_border_width(s_grpUngroup, 1, 0);
+  lv_obj_set_style_border_color(s_grpUngroup, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_bg_color(s_grpUngroup, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
+  lv_obj_align(s_grpUngroup, LV_ALIGN_RIGHT_MID, -(16 + R_PLAY_SZ + 10), 0);
+  lv_obj_add_event_cb(s_grpUngroup, ungroupCb, LV_EVENT_CLICKED, nullptr);
+  s_grpUngroupLbl = label(s_grpUngroup, "UNGROUP", &lv_font_montserrat_12, JB_TEXT);
+  lv_obj_center(s_grpUngroupLbl);
+
+  s_grpPlay = lv_button_create(bar);
+  lv_obj_remove_style_all(s_grpPlay);
+  lv_obj_set_size(s_grpPlay, R_PLAY_SZ, R_PLAY_SZ);
+  lv_obj_set_style_radius(s_grpPlay, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(s_grpPlay, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(s_grpPlay, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_set_style_bg_color(s_grpPlay, lv_color_hex(JB_ACCENT_INK), LV_STATE_PRESSED);
+  lv_obj_align(s_grpPlay, LV_ALIGN_RIGHT_MID, -16, 0);
+  lv_obj_add_event_cb(s_grpPlay, groupPlayCb, LV_EVENT_CLICKED, nullptr);
+  s_grpPlayLbl = label(s_grpPlay, LV_SYMBOL_PLAY, &lv_font_montserrat_20, JB_ACCENT_INK);
+  lv_obj_center(s_grpPlayLbl);
+
+  lv_obj_t *sec = label(pg, "ALL ROOMS  ·  TAP THE BOX TO GROUP", &lv_font_montserrat_12,
+                        JB_TEXT_DIM);
+  lv_obj_align(sec, LV_ALIGN_TOP_LEFT, 2, RM_LIST_Y - 24);
+
+  s_roomsWrap = panel(pg, RM_W, SCREEN_H - RM_LIST_Y - 16, JB_SCREEN_BG, 0);
+  lv_obj_align(s_roomsWrap, LV_ALIGN_TOP_LEFT, 0, RM_LIST_Y);
   lv_obj_add_flag(s_roomsWrap, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_scroll_dir(s_roomsWrap, LV_DIR_VER);
   lv_obj_set_scrollbar_mode(s_roomsWrap, LV_SCROLLBAR_MODE_AUTO);
@@ -1556,13 +2043,42 @@ void uiTick() {
     }
   }
 
-  // Rooms: rebuild only when discovery actually changed (g_zonesGen), and only while the page is
-  // visible — rebuilding a hidden tree is pure churn on the LVGL pool.
-  // g_zonesGen covers discovery changes; the active-room compare covers a zone SWITCH, which does
-  // not bump that generation and would otherwise leave the amber outline on the previous room.
-  if (s_cur == PAGE_ROOMS && (s_roomsGen != g_zonesGen || s_roomsActive != p.zoneName)) {
-    s_roomsGen = g_zonesGen;
-    rebuildRooms();
+  // Rooms. Only while the page is visible — a hidden tree is pure churn on the LVGL pool, and the
+  // per-room SOAP poll must not run for a page nobody is looking at.
+  if (s_cur == PAGE_ROOMS) {
+    // Tells netTask to keep polling per-room volume/transport. Lapses ~2 s after we stop asking,
+    // so every exit path (rail tap, screensaver, OTA overlay) stops the traffic without needing
+    // its own teardown call. See room_status.h.
+    roomstatus::keepAlive();
+
+    // FULL rebuild on a topology change or a zone switch (neither of which the status generation
+    // covers): both change the row set or which row is the anchor.
+    if (s_roomsGen != g_zonesGen || s_roomsActive != p.zoneName) {
+      s_roomsGen = g_zonesGen;
+      s_roomsActive = p.zoneName;
+      s_roomsStatusGen = roomstatus::gen();
+      rebuildRooms();
+      // The active room's volume and transport are ALREADY known — netTask polls both every
+      // second for Now Playing — so the summary bar and the MAIN row can be right on the FIRST
+      // frame instead of reading "--" until their turn comes round.
+      //
+      // Seeded into s_roomsData directly, not via roomstatus::noteVolume(): on the first open the
+      // poller has not run a tick yet, so its table is empty and a note would land nowhere. The
+      // merge in refreshRooms() keeps a local reading that the poller does not have yet.
+      const int a = activeRoomIdx();
+      if (a >= 0) {
+        s_roomsData[(size_t)a].vol = p.volume;
+        s_roomsData[(size_t)a].volOk = true;
+        s_roomsData[(size_t)a].transport = p.transport;
+        s_roomsData[(size_t)a].transportOk = true;
+        roomstatus::prioritise(s_roomsData[(size_t)a].ip);   // and read that room first
+        refreshRooms();
+      }
+    } else if (s_roomsStatusGen != roomstatus::gen()) {
+      // CHEAP refresh: new readings only. Text, colours and bar widths — no object churn.
+      s_roomsStatusGen = roomstatus::gen();
+      refreshRooms();
+    }
   }
 
   if (s_cur == PAGE_SETTINGS && s_amzStatus) {

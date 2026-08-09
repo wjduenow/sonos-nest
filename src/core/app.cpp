@@ -23,6 +23,7 @@
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
+#include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
 // Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
 #if __has_include("secrets.h")
@@ -167,19 +168,45 @@ static void processPending() {
     s_lastPoll = 0;                        // reflect the new track immediately
   }
 
-  // Grouping: join a speaker to the active group, or split one off. Re-discover topology
-  // and refresh the active room's coordinator afterward, then signal the UI.
-  if (p.groupJoinIp.length()) {
-    sonos::setAvTransportUri(p.groupJoinIp, "x-rincon:" + s_coordUuid, "");
-    sonos::ssdpDiscover();
-    selectZoneByIp(s_zoneIp);
-    g_zonesGen++;
+  // Grouping. Every op in the batch is applied first, and the topology is re-read ONCE at the
+  // end: ssdpDiscover() is a full GetZoneGroupState fetch + parse (tens of KB of XML in a big
+  // house), so doing it per room made ungrouping a four-room group four times slower than it
+  // needed to be, for a result only the last pass could be correct about anyway.
+  if (p.ungroupAll) {
+    // Split off every OTHER member of the active group; the active room stays put and becomes a
+    // group of one. Leaving it grouped to a coordinator we just dissolved is what "Ungroup"
+    // must not do, and standalone-ing it too would needlessly interrupt its own playback.
+    std::vector<sonos::Zone> zs;
+    sonos::zonesSnapshot(zs);
+    for (const auto &z : zs) {
+      if (z.coordinatorUuid != s_coordUuid) continue;   // not in our group
+      if (z.ip == s_zoneIp) continue;                   // the active room keeps playing
+      sonos::becomeStandalone(z.ip);
+    }
   }
-  if (p.groupLeaveIp.length()) {
-    sonos::becomeStandalone(p.groupLeaveIp);
+  for (const auto &op : p.groupOps) {
+    if (!op.ip.length()) continue;
+    if (op.join) sonos::setAvTransportUri(op.ip, "x-rincon:" + s_coordUuid, "");
+    else         sonos::becomeStandalone(op.ip);
+  }
+  if (p.ungroupAll || !p.groupOps.empty()) {
     sonos::ssdpDiscover();
     selectZoneByIp(s_zoneIp);
     g_zonesGen++;
+    // Deliberately NOT dropping the per-room status cache here: roomstatus carries volume and
+    // still-valid transport across the topology change itself. Blanking it made every checkbox
+    // tap wipe the page back to "--" for a second and a half.
+  }
+
+  // Per-room controls from the Rooms page.
+  if (p.roomVolIp.length() && p.roomVolTarget >= 0) {
+    sonos::setVolume(p.roomVolIp, (uint8_t)constrain(p.roomVolTarget, 0, 100));
+  }
+  if (p.roomPlayCoordIp.length() && p.roomSetPlay >= 0) {
+    if (p.roomSetPlay) sonos::play(p.roomPlayCoordIp);
+    else               sonos::pause(p.roomPlayCoordIp);
+    // If that was the room we are following, reflect it on Now Playing without waiting a second.
+    if (p.roomPlayCoordIp == s_coordIp) s_lastPoll = 0;
   }
   // Play a locally-served file (the ES3C28P's HTTP media server) on the group coordinator,
   // looped. Enqueue it with minimal DIDL so Sonos accepts the http mp3, switch the transport
@@ -378,6 +405,9 @@ static void netTask(void *) {
     processPending();
     registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
     updaterTick();     // OTA pull check (self-rate-limited ~6 h; applies only on explicit approve)
+    // Per-room status for the Rooms screen. Costs nothing unless that page is actually open, and
+    // polls at most one room per pass — see room_status.h for why it must not burst.
+    roomstatus::tick();
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just

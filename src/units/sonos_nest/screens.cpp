@@ -416,8 +416,9 @@ static void groupSelect(int idx) {
   if (idx < 0 || idx >= (int)s_groupIps.size()) return;
   if (s_groupIsActive[idx]) return;   // can't group/ungroup the anchor itself
   if (stateLock()) {
-    if (s_groupInGroup[idx]) g_pending.groupLeaveIp = s_groupIps[idx];
-    else                     g_pending.groupJoinIp  = s_groupIps[idx];
+    // Queued, not assigned: two taps before netTask's next pass used to overwrite each other and
+    // the first room silently never moved. See PendingCmds::groupOps.
+    g_pending.groupOps.push_back({s_groupIps[idx], !s_groupInGroup[idx]});
     stateUnlock();
   }
   // Stay on the screen; it re-populates when netTask re-discovers (g_zonesGen bumps).
