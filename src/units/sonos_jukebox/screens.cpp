@@ -33,6 +33,7 @@
 #include "core/radio_cache.h"
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
+#include "core/webconfig.h"    // webConfigReportLvMem — the LVGL pool sample for the health JSON
 #include "../../boards/crowpanel_p4_7in/bringup_console.h"   // no-op unless the
                                                             // bring-up flag is set
 #include "ui_scale.h"
@@ -1699,6 +1700,14 @@ void uiTick() {
       lastHealth = millis();
       lv_mem_monitor_t mon;
       lv_mem_monitor(&mon);   // LVGL pool: exhaustion here freezes the UI, not the network
+      // Publish the same sample to the health JSON, so the pool is readable over HTTP and not only
+      // off a serial cable. mon.max_used is LVGL's own running peak, so this 10 s cadence loses
+      // nothing that matters — it is the number to size LV_MEM_SIZE against, and the one that would
+      // have named the 70-row Favourites freeze immediately. Deliberately reusing this monitor call
+      // rather than adding a 2 s sampler like the nest: lv_mem_monitor walks the whole free list,
+      // and this pool is 512 KB against the nest's 96 KB.
+      webConfigReportLvMem((uint32_t)(mon.total_size - mon.free_size), (uint32_t)mon.max_used,
+                           mon.frag_pct);
       // Every link field is netTask's published snapshot (g_link*, core/app.h) — reading them
       // here is a plain memory load. Calling WiFi.RSSI()/localIP()/sonos::zones() directly would
       // be a blocking co-processor RPC and an unlocked read of a vector netTask rewrites, i.e.

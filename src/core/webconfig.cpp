@@ -110,6 +110,23 @@ String webConfigJson() {
   h["uptimeSec"] = (uint32_t)(millis() / 1000);
   h["heapFree"]  = (uint32_t)ESP.getFreeHeap();
   h["heapMin"]   = (uint32_t)ESP.getMinFreeHeap();
+  // Largest contiguous internal block. Watch this alongside heapFree, not instead of it: the way
+  // internal SRAM actually kills this project is FRAGMENTATION, not exhaustion. On the nest, ~15 KB
+  // free with a 7.6 KB largest block left LWIP unable to get socket buffers, and the symptom was
+  // Sonos "connection refused" — heapFree alone never showed the fault coming.
+  h["heapLargest"] = (uint32_t)ESP.getMaxAllocHeap();
+  // PSRAM. Wide open on every unit here (the jukebox uses ~2.4 MB of 32 MB), which is exactly why
+  // it belongs in the readout: it's where new work SHOULD land, and this is how you confirm a new
+  // buffer went there rather than quietly onto the internal heap.
+  h["psramSize"] = (uint32_t)ESP.getPsramSize();
+  h["psramFree"] = (uint32_t)ESP.getFreePsram();
+  // psramMin is EMITTED ONLY WHEN IT IS REAL. heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)
+  // returns a flat 0 on the P4 — IDF doesn't track a low-water for that heap there — and a
+  // published 0 reads as "PSRAM was fully exhausted at some point", the opposite of the truth (an
+  // actual 0 would have failed allocations). Absent means "not tracked on this target"; present
+  // means trustworthy. Verified non-zero paths keep the field; don't "fix" this by always emitting.
+  const uint32_t psMin = (uint32_t)ESP.getMinFreePsram();
+  if (psMin) h["psramMin"] = psMin;
   h["resetReason"] = (int)esp_reset_reason();   // 4=PANIC 6=TASK_WDT 9=BROWNOUT (esp_reset_reason_t)
   uint32_t sCalls, sRe, sLast, sMax;
   sonos::soapDiag(sCalls, sRe, sLast, sMax);
