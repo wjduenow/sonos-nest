@@ -242,8 +242,15 @@ int search(const String &query, std::vector<Fav> &out, int max) {
 //
 //   kMinHeap   Refuse outright when heap is already low, wherever that came from. A stale
 //              favourites list is a cosmetic problem; taking the whole device down is not.
+//
+// kMinHeap MUST sit BELOW this board's idle free heap, or the refresh can never run at all. The
+// first attempt used 90 KB, taken from a reading seconds after boot — but the device settles at
+// ~87 KB free, so every refresh was silently deferred forever and the cache could never be
+// rebuilt. Idle ~87 KB, a 10-item page wants ~30 KB of headroom, the cliff is ~15 KB: 55 KB clears
+// the cliff with margin and still lets the guard actually fire. If you raise it, check it against
+// a device that has been up for a while, not one that just booted.
 static const uint32_t kSettleMs = 90000;
-static const uint32_t kMinHeap  = 90000;
+static const uint32_t kMinHeap  = 55000;
 
 static void favTask(void *) {
   for (;;) {
