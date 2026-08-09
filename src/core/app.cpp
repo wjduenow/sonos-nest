@@ -150,6 +150,10 @@ static void processPending() {
   if (p.targetVolume >= 0) {
     sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume);   // volume -> the speaker
     s_lastVolCmd = millis();
+    // Restart the hold at the moment the command actually goes out, not just when the UI queued
+    // it: the RenderingControl event this provokes comes back AFTER this point, and it is that
+    // echo which used to overwrite the level the user had already dialled past.
+    if (stateLock()) { g_player.volumeSetAtMs = millis(); stateUnlock(); }
   }
   // Explicit play/pause decided by the UI (no round-trip, correct action).
   if (p.setPlay == 0)      sonos::pause(s_coordIp);
@@ -515,17 +519,23 @@ static void netTask(void *) {
         processPending();
       }
 
-      if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
+      // Same hold the GENA handler uses, so the two readers of speaker volume cannot disagree
+      // about whether the user is mid-turn. Reading it here also avoids spending a SOAP call on an
+      // answer we would discard.
+      bool volHeld;
+      if (stateLock()) { volHeld = playerVolumeHeld(g_player); stateUnlock(); } else volHeld = true;
+      if (!volHeld) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
       if (stateLock()) {
         g_player.transport    = st;
         g_player.positionSec  = np.positionSec;
         g_player.positionAtMs = millis();
         g_player.durationSec  = np.durationSec;
-        g_player.title        = np.title;
-        g_player.artist       = np.artist;
-        g_player.album        = np.album;
-        g_player.artUri       = np.artUri;
+        // Same sticky-art rule the event path uses. The poll re-reads metadata every time, and for
+        // content whose title only comes from the CurrentURIMetaData fallback there is no
+        // albumArtURI in it — assigning unconditionally would drop the cover on every poll.
+        // Position is set above from the poll's own authoritative RelTime, so the return is unused.
+        (void)playerApplyTrack(g_player, np);
         if (gotVol) g_player.volume = vol;
         g_player.dirty = true;
         stateUnlock();

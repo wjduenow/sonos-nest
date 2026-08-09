@@ -27,6 +27,12 @@ struct PlayerState {
                                  // = the coordinator's own queue. Only the headless button polls it.
   uint8_t       volume      = 0; // 0-100
   bool          muted       = false;
+  // millis() when volume was last set LOCALLY (the dial, or a UI control). Anything that learns
+  // volume from the speaker — the poll and GENA events — must leave it alone for a moment after,
+  // or it fights the user: every setVolume makes Sonos emit a RenderingControl event, so during a
+  // spin those events arrive carrying levels the dial has already moved past and the bar jumps
+  // backwards. See playerVolumeHeld().
+  uint32_t      volumeSetAtMs = 0;
 
   // Target zone (resolves to the group COORDINATOR for transport calls — see §3)
   String        zoneName;
@@ -98,6 +104,41 @@ void playerStateInit();
 // This is what makes slowing the poll invisible. It is NOT dead reckoning of something we could
 // have asked for: an external seek is not evented either, so the periodic poll is still what
 // reconciles this back to truth.
+// Is a locally-set volume still authoritative? Both readers of speaker volume — netTask's poll and
+// the GENA RenderingControl handler — must consult this before writing g_player.volume/muted.
+//
+// The window is generous on purpose. It restarts on every turn, so a continuous spin holds
+// throughout and this is really "3 s after the LAST change". Short enough that a volume changed on
+// a phone still appears promptly; long enough to outlast the echo of our own setVolume, which is
+// what was fighting the dial.
+inline bool playerVolumeHeld(const PlayerState &p) {
+  return p.volumeSetAtMs && (millis() - p.volumeSetAtMs) < 3000u;
+}
+
+// Apply freshly-learned now-playing metadata onto the shared state, from either netTask's poll or
+// a GENA event. Call with the state lock held. Returns true if this is a DIFFERENT track.
+//
+// Two rules, both because these sources routinely deliver PARTIAL metadata:
+//
+//   ALBUM ART IS STICKY. Sonos happily sends a title with no albumArtURI — a pause event on a
+//   direct Spotify track does exactly that, because its title comes from the AVTransportURIMetaData
+//   fallback, which carries no art. Assigning artUri unconditionally made the cover vanish the
+//   instant you pressed pause. Art is replaced only when the new metadata actually has one, or when
+//   the track genuinely changed (a new track with no art must clear the old cover).
+//
+//   THE CALLER OWNS POSITION. It is returned rather than set here because the two sources know
+//   different things: the poll carries an authoritative RelTime, while an event carries none at all
+//   and can only infer "back to zero" from the track having changed. Resetting it on every event
+//   that happened to carry a title is what sent the scrubber to 0:00 on pause.
+inline bool playerApplyTrack(PlayerState &dst, const PlayerState &src) {
+  const bool changed = (src.title != dst.title) || (src.artist != dst.artist);
+  dst.title  = src.title;
+  dst.artist = src.artist;
+  dst.album  = src.album;
+  if (src.artUri.length() || changed) dst.artUri = src.artUri;
+  return changed;
+}
+
 inline uint32_t playerPositionNow(const PlayerState &p) {
   uint32_t pos = p.positionSec;
   if (p.transport == TransportState::Playing && p.positionAtMs) {

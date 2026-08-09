@@ -1919,6 +1919,7 @@ static void handleDial(PlayerState &p) {
       // Optimistic. netTask confirms the real level on its ~1 Hz poll; waiting for that would make
       // the dial feel like it was dropping most of the turns.
       g_player.volume        = (uint8_t)v;
+      g_player.volumeSetAtMs = millis();   // hold off the poll AND incoming GENA volume events
       g_pending.targetVolume = v;
       stateUnlock();
     }

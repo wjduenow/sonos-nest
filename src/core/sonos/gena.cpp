@@ -157,21 +157,26 @@ void applyEvent(const String &body) {
   if (!stateLock()) return;
   if (gotTransport) g_player.transport = st;
   if (gotDur)       g_player.durationSec = durSec;
-  if (gotVol)       g_player.volume = vol;
-  if (gotMute)      g_player.muted = muted;
+  // *** Volume events must NOT override a level the user just dialled. *** Every setVolume we send
+  // makes Sonos emit a RenderingControl event, so during a spin these arrive carrying levels the
+  // dial has already moved past — writing them made the bar run backwards and fight the knob. The
+  // poll has always had this guard (s_lastVolCmd); eventing was added without it, which is the
+  // regression. Held state is dropped, not queued: the next event or poll carries the truth.
+  const bool volHeld = playerVolumeHeld(g_player);
+  if (gotVol  && !volHeld) g_player.volume = vol;
+  if (gotMute && !volHeld) g_player.muted = muted;
   if (gotTrack) {
     // Only overwrite when the event actually carried a track. An empty DIDL (between tracks, or a
     // volume-only event) must not blank Now Playing.
     if (np.title.length() || np.artist.length()) {
-      g_player.title  = np.title;
-      g_player.artist = np.artist;
-      g_player.album  = np.album;
-      g_player.artUri = np.artUri;
-      // Position is NOT evented (measured: 83 s of playback, no event). A new track means the
-      // position restarts; the UI's own interpolation carries it from here, and the backstop poll
-      // reconciles drift.
-      g_player.positionSec  = 0;
-      g_player.positionAtMs = millis();   // restart the interpolation clock with it
+      // Sticky art, and position only on a real track change — see playerApplyTrack(). Doing this
+      // by hand here is what made pause blank the cover and zero the scrubber.
+      if (playerApplyTrack(g_player, np)) {
+        // Position is NOT evented (measured: 83 s of playback, no event). A NEW track restarts it;
+        // the UI's interpolation carries it from here and the backstop poll reconciles drift.
+        g_player.positionSec  = 0;
+        g_player.positionAtMs = millis();
+      }
     }
   }
   g_player.dirty = true;
