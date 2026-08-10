@@ -99,6 +99,26 @@ button.ghost{background:var(--elev2);color:var(--text)}
 </section>
 
 <section>
+  <h2>Screensaver</h2>
+  <label for="ssmode">Show when idle</label>
+  <select id="ssmode">
+    <option value="3">Album art when playing, clock otherwise</option>
+    <option value="2">Album art</option>
+    <option value="1">Clock</option>
+    <option value="0">Nothing</option>
+  </select>
+  <label for="ssdelay">Appears after</label>
+  <select id="ssdelay"></select>
+  <label for="ssdim">Brightness while it is up <span id="ssdimv" style="color:var(--text)"></span></label>
+  <input type="range" id="ssdim" min="5" max="100" step="5">
+  <label for="ssblank">Turn the screen off after</label>
+  <select id="ssblank"></select>
+  <p style="color:var(--dim);font-size:13px;margin:10px 0 0">
+    Touching the screen or turning the dial wakes it, even with the backlight off. This panel is an
+    IPS LCD, so image retention is temporary — the screen-off timer is what actually prevents it.</p>
+</section>
+
+<section>
   <h2>Device</h2>
   <label for="name">Name (also the network hostname)</label>
   <div class="row"><input type="text" id="name" maxlength="31">
@@ -135,6 +155,17 @@ async function load(){
   $('#snd').value=c.uiSound??40; $('#sndv').textContent=($('#snd').value)+'%';
   $('#scroll').checked=!!c.scrollSound; $('#scroll').disabled=Number(c.uiSound)===0;
   $('#name').value=c.deviceName||''; $('#bright').value=c.brightness??100;
+  // Screensaver. The two timers are presets rather than free numbers — nobody wants to type 1800,
+  // and "Never" (0) has to be reachable without discovering that 0 is special.
+  const fillOpts=(sel,opts,cur)=>{sel.innerHTML='';
+    opts.forEach(([v,t])=>{const o=document.createElement('option');
+      o.value=v; o.textContent=t; if(Number(v)===Number(cur))o.selected=true; sel.append(o)})};
+  fillOpts($('#ssdelay'),[[0,'Never'],[30,'30 seconds'],[60,'1 minute'],[120,'2 minutes'],
+    [300,'5 minutes'],[600,'10 minutes'],[1800,'30 minutes']], c.saver_delay_sec??120);
+  fillOpts($('#ssblank'),[[0,'Never'],[5,'5 minutes'],[15,'15 minutes'],[30,'30 minutes'],
+    [60,'1 hour'],[120,'2 hours'],[480,'8 hours']], c.saver_blank_min??60);
+  $('#ssmode').value=String(c.saver_mode??3);
+  $('#ssdim').value=c.saver_dim??40; $('#ssdimv').textContent=($('#ssdim').value)+'%';
 }
 $('#snd').oninput=e=>$('#sndv').textContent=e.target.value+'%';
 $('#snd').onchange=e=>{put('uiSound',e.target.value);
@@ -146,6 +177,11 @@ $('#auto').onchange=e=>put('radio_auto_refresh',e.target.checked?'1':'0');
 $('#favhour').onchange=e=>put('fav_refresh_hour',e.target.value);
 $('#favauto').onchange=e=>put('fav_auto_refresh',e.target.checked?'1':'0');
 $('#bright').onchange=e=>put('brightness',e.target.value);
+$('#ssmode').onchange=e=>put('saver_mode',e.target.value);
+$('#ssdelay').onchange=e=>put('saver_delay_sec',e.target.value);
+$('#ssblank').onchange=e=>put('saver_blank_min',e.target.value);
+$('#ssdim').oninput=e=>$('#ssdimv').textContent=e.target.value+'%';
+$('#ssdim').onchange=e=>put('saver_dim',e.target.value);
 $('#savename').onclick=()=>put('deviceName',$('#name').value)
   .then(()=>msg('Saved. The device reboots to register the new name.'));
 $('#favnow').onclick=async()=>{msg('Refreshing favorites...');

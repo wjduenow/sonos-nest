@@ -18,6 +18,8 @@
 #include "core/net/logmirror.h"
 #include <lvgl.h>
 
+#include <math.h>       // sinf — the screensaver's drift path
+#include <time.h>       // localtime_r — the screensaver clock (NTP + CLOCK_TZ, set in appBoot)
 #include <vector>
 
 #include "core/ui/album_art.h"
@@ -43,6 +45,9 @@
 
 // Two-glyph Lucide subset — see lv_font_lucide_28.c for why and how to regenerate.
 LV_FONT_DECLARE(lv_font_lucide_28);
+// Digits-only Montserrat at 120 px for the screensaver clock. Real font rather than a scaled 48 px
+// label — see lv_font_clock_120.c for why that distinction is load-bearing here.
+LV_FONT_DECLARE(lv_font_clock_120);
 #define ICON_HEART "\xEE\x83\xB2"   // U+E0F2
 #define ICON_RADIO "\xEE\x85\x82"   // U+E142
 #define ICON_SPEAKER "\xEE\x85\xA6" // U+E166
@@ -60,6 +65,34 @@ static const lv_coord_t PAD_TOP   = 22;
 static const lv_coord_t PAD_BOT   = 18;
 static const lv_coord_t ART       = 280;   // album art tile, radius --r-lg
 static const lv_coord_t GAP       = 34;    // art -> text column
+
+// LVGL's built-in Montserrat fonts carry ASCII 0x20-0x7F and exactly two extras: 0xB0 (degree) and
+// 0x2022 (bullet). Anything else — the U+00B7 MIDDLE DOT this file used as a separator, an em dash,
+// an ellipsis — has no glyph and draws as a MISSING-GLYPH BOX on the panel. It looks like mojibake
+// and there is no build warning. Use these, or extend the font's range; do not paste a nicer
+// character in and assume it renders.
+#define JB_SEP  "  \xE2\x80\xA2  "   // U+2022 BULLET, in range
+#define JB_DASH "--"                 // stands in for an em dash
+
+// --- Now Playing vertical rhythm --------------------------------------------------------------
+// The text column is laid out against the ART TILE, not the page centre: the playhead's timecodes
+// bottom-align with the bottom edge of the cover, so the two columns read as one block. Every
+// value below is an absolute page Y, so the relationships are visible without running it.
+//
+// The title reserves TWO lines permanently. LV_LABEL_LONG_DOT only ellipsises when the label has a
+// fixed height — without one the label grows downwards and a two-line title lands on top of the
+// metadata line, which is exactly what it was doing.
+static const lv_coord_t NP_ART_TOP  = (SCREEN_H - ART) / 2;            // 160
+static const lv_coord_t NP_ART_BOT  = NP_ART_TOP + ART;                // 440
+static const lv_coord_t NP_TITLE_LH = 52;   // lv_font_montserrat_48 .line_height
+static const lv_coord_t NP_TITLE_H  = NP_TITLE_LH * 2;
+static const lv_coord_t NP_META_H   = 24;   // lv_font_montserrat_22 .line_height
+static const lv_coord_t NP_SMALL_H  = 15;   // lv_font_montserrat_12 .line_height
+static const lv_coord_t NP_BADGE_Y  = NP_ART_TOP + 26;                 // 186
+static const lv_coord_t NP_TITLE_Y  = NP_BADGE_Y + NP_SMALL_H + 13;    // 214
+static const lv_coord_t NP_META_Y   = NP_TITLE_Y + NP_TITLE_H + 18;    // 336
+static const lv_coord_t NP_TIMES_Y  = NP_ART_BOT - NP_SMALL_H;         // 425 -> bottom == art bottom
+static const lv_coord_t NP_TRACK_Y  = NP_TIMES_Y - 8 - 6;              // 411
 
 static lv_obj_t *s_content = nullptr;
 static lv_obj_t *s_provisioning = nullptr;
@@ -129,6 +162,18 @@ static lv_obj_t *s_dot = nullptr, *s_room = nullptr, *s_group = nullptr, *s_cloc
 // Now playing
 static lv_obj_t *s_art = nullptr, *s_artImg = nullptr, *s_artPh = nullptr, *s_badgeSrc = nullptr, *s_title = nullptr, *s_meta = nullptr;
 static lv_obj_t *s_elapsed = nullptr, *s_remain = nullptr, *s_track = nullptr, *s_fill = nullptr;
+static lv_coord_t s_textW = 0;   // width of the Now Playing text column; placeTitle() measures against it
+// The decoded cover, kept after Now Playing consumes it. albumArtTake() reports a CHANGE and hands
+// the descriptor over once, so a second consumer (the screensaver) cannot ask for it again later —
+// it has to be remembered here. nullptr means "no art", which the screensaver treats as "no cover
+// layout available" rather than drawing an empty tile.
+static const lv_image_dsc_t *s_artDsc = nullptr;
+
+// Screensaver hooks, defined next to the screensaver itself further down. Forward-declared because
+// the Settings page (built above it) has to tell it a setting moved.
+static void saverArtChanged();
+static void saverConfigChanged();
+static void saverPreviewBrightness(int pct);
 // Transport + volume
 static lv_obj_t *s_play = nullptr, *s_playLbl = nullptr;
 static lv_obj_t *s_volIcon = nullptr, *s_volFill = nullptr, *s_volPct = nullptr;
@@ -159,6 +204,20 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
   if (cache == next) return;
   cache = next;
   lv_label_set_text(l, next.c_str());
+}
+
+// The title slot is two lines tall whether or not the title needs both (LV_LABEL_LONG_DOT can only
+// ellipsise against a FIXED height). A one-line title left at the top of that slot reads as a
+// mis-alignment against the badge above and the metadata below, so measure the wrapped text and
+// drop a short one by half a line to sit centred. Called on every title change, not per frame.
+static void placeTitle() {
+  if (!s_title || !s_textW) return;
+  lv_point_t sz;
+  lv_text_get_size(&sz, lv_label_get_text(s_title), &lv_font_montserrat_48,
+                   lv_obj_get_style_text_letter_space(s_title, LV_PART_MAIN),
+                   lv_obj_get_style_text_line_space(s_title, LV_PART_MAIN),
+                   s_textW, LV_TEXT_FLAG_NONE);
+  lv_obj_set_y(s_title, NP_TITLE_Y + (sz.y <= NP_TITLE_LH ? NP_TITLE_LH / 2 : 0));
 }
 
 // --- Commands ---------------------------------------------------------------------------------
@@ -310,7 +369,7 @@ static void buildStatusBar() {
   s_dot = panel(s_content, 9, 9, JB_ACCENT, LV_RADIUS_CIRCLE);
   lv_obj_align(s_dot, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 6);
 
-  s_room = label(s_content, "—", &lv_font_montserrat_16, JB_TEXT);
+  s_room = label(s_content, JB_DASH, &lv_font_montserrat_16, JB_TEXT);
   lv_obj_align(s_room, LV_ALIGN_TOP_LEFT, 18, PAD_TOP);
 
   s_group = label(s_content, "", &lv_font_montserrat_12, JB_TEXT_DIM);
@@ -324,7 +383,7 @@ static void buildNowPlaying() {
   // Album art. Solid --screen-elev until core/album_art delivers a real cover; the design uses a
   // rounded tile with a hairline, never a bare rectangle.
   s_art = panel(s_page[PAGE_NOW], ART, ART, JB_SCREEN_ELEV, JB_R_LG);
-  lv_obj_align(s_art, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align(s_art, LV_ALIGN_TOP_LEFT, 0, NP_ART_TOP);
   lv_obj_set_style_border_width(s_art, 1, 0);
   lv_obj_set_style_border_color(s_art, lv_color_hex(JB_SCREEN_LINE), 0);
   s_artPh = label(s_art, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, JB_SCREEN_LINE);
@@ -340,30 +399,40 @@ static void buildNowPlaying() {
 
   const lv_coord_t textX = ART + GAP;
   const lv_coord_t textW = SCREEN_W - RAIL_W - PAD_X * 2 - textX;
+  s_textW = textW;
 
   s_badgeSrc = label(s_page[PAGE_NOW], "", &lv_font_montserrat_12, JB_ACCENT);
-  lv_obj_align(s_badgeSrc, LV_ALIGN_LEFT_MID, textX, -118);
+  lv_obj_align(s_badgeSrc, LV_ALIGN_TOP_LEFT, textX, NP_BADGE_Y);
 
+  // Two reserved lines, ellipsised past that (see NP_TITLE_H). placeTitle() re-centres a one-line
+  // title inside the slot on every change so a short title isn't pinned to the top of a hole.
   s_title = label(s_page[PAGE_NOW], "Sonos Jukebox", &lv_font_montserrat_48, JB_TEXT);
   lv_label_set_long_mode(s_title, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(s_title, textW);
-  lv_obj_align(s_title, LV_ALIGN_LEFT_MID, textX, -64);
+  lv_obj_set_size(s_title, textW, NP_TITLE_H);
+  lv_obj_align(s_title, LV_ALIGN_TOP_LEFT, textX, NP_TITLE_Y);
 
+  // Artist · album, ONE line. It used to be height-less too, so a long album name wrapped onto a
+  // second line and landed on the scrubber.
   s_meta = label(s_page[PAGE_NOW], "starting up", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_label_set_long_mode(s_meta, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(s_meta, textW);
-  lv_obj_align(s_meta, LV_ALIGN_LEFT_MID, textX, -8);
+  lv_obj_set_size(s_meta, textW, NP_META_H);
+  lv_obj_align(s_meta, LV_ALIGN_TOP_LEFT, textX, NP_META_Y);
 
-  // Scrubber: 6px track, accent fill, mono-ish timecodes beneath.
+  // Scrubber: 6px track, accent fill, timecodes beneath. The timecodes' baseline is the bottom of
+  // the album art — anchor them to the track so the pair stays glued if the rhythm is retuned.
   s_track = panel(s_page[PAGE_NOW], textW, 6, JB_SCREEN_ELEV_2, 3);
-  lv_obj_align(s_track, LV_ALIGN_LEFT_MID, textX, 48);
+  lv_obj_align(s_track, LV_ALIGN_TOP_LEFT, textX, NP_TRACK_Y);
   s_fill = panel(s_track, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_fill, LV_ALIGN_LEFT_MID, 0, 0);
 
   s_elapsed = label(s_page[PAGE_NOW], "0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
-  lv_obj_align(s_elapsed, LV_ALIGN_LEFT_MID, textX, 68);
+  lv_obj_align_to(s_elapsed, s_track, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+  // Right-aligned against the end of the track. The old fixed -44 offset guessed the width of the
+  // string, so "-1:08" and "-12:08" did not end in the same place.
   s_remain = label(s_page[PAGE_NOW], "-0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
-  lv_obj_align(s_remain, LV_ALIGN_LEFT_MID, textX + textW - 44, 68);
+  lv_obj_align_to(s_remain, s_track, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 8);
+
+  placeTitle();
 }
 
 static void buildTransport() {
@@ -794,7 +863,7 @@ static void refreshRooms() {
 
     if (inGroup) {
       groupSize++;
-      if (members.length()) members += "  ·  ";
+      if (members.length()) members += JB_SEP;
       members += r.name;
       if (r.volOk) { groupVolSum += r.vol; groupVolN++; }
     }
@@ -823,11 +892,11 @@ static void refreshRooms() {
     if (active) lv_obj_remove_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
     else        lv_obj_add_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
 
-    // Caption, per the design: "Playing · grouped" only when the group really has >1 member.
+    // Caption, per the design: "Playing / grouped" only when the group really has >1 member.
     const char *cap;
     if (!r.transportOk)   cap = "--";
     else if (!playing)    cap = "Idle";
-    else if (r.groupSize > 1) cap = "Playing  ·  grouped";
+    else if (r.groupSize > 1) cap = "Playing" JB_SEP "grouped";
     else                  cap = "Playing";
     lv_label_set_text(u.caption, cap);
 
@@ -936,7 +1005,7 @@ static void buildRooms() {
   s_grpPlayLbl = label(s_grpPlay, LV_SYMBOL_PLAY, &lv_font_montserrat_20, JB_ACCENT_INK);
   lv_obj_center(s_grpPlayLbl);
 
-  lv_obj_t *sec = label(pg, "ALL ROOMS  ·  TAP THE BOX TO GROUP", &lv_font_montserrat_12,
+  lv_obj_t *sec = label(pg, "ALL ROOMS" JB_SEP "TAP THE BOX TO GROUP", &lv_font_montserrat_12,
                         JB_TEXT_DIM);
   lv_obj_align(sec, LV_ALIGN_TOP_LEFT, 2, RM_LIST_Y - 24);
 
@@ -1304,7 +1373,7 @@ static void saveNameCb(lv_event_t *) {
   }
   uiSoundPlay(UiSound::Confirm);
   settingsSetDeviceName(n);
-  lv_label_set_text(s_saveHint, "Saved — restarting to apply…");
+  lv_label_set_text(s_saveHint, "Saved " JB_DASH " restarting to apply...");
   if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
 }
 
@@ -1704,6 +1773,106 @@ static void buildRadio() {
   lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
 }
 
+// --- Screensaver controls (see the screensaver block further down for what they drive) ---------
+// The two timers are PRESETS, not free numbers: "Never" has to be reachable without discovering
+// that zero is special, and nobody wants to hold a +/- button up to thirty minutes. The same lists
+// are in the web page, deliberately — one control that disagrees with the other about what the
+// options are is how a setting ends up unreachable from one of them.
+static const uint16_t kSaverDelays[] = {0, 30, 60, 120, 300, 600, 1800};
+static const char kSaverDelayOpts[] = "Never\n30 seconds\n1 minute\n2 minutes\n5 minutes\n"
+                                      "10 minutes\n30 minutes";
+static const uint16_t kSaverBlanks[] = {0, 5, 15, 30, 60, 120, 480};
+static const char kSaverBlankOpts[] = "Never\n5 minutes\n15 minutes\n30 minutes\n1 hour\n"
+                                      "2 hours\n8 hours";
+static lv_obj_t *s_ssDimVal = nullptr, *s_ssBrightVal = nullptr;
+
+// Awake backlight. It has been in NVS and on the web page all along, but until the screensaver
+// took ownership of the backlight nothing on this unit ever applied it — uiInit() set 100 % and
+// left it there. It belongs beside the idle brightness: the two are read as a pair.
+//
+// Preview live, persist ONCE on release. Writing NVS per LV_EVENT_VALUE_CHANGED means a flash
+// write for every pixel the finger moves — one drag across this slider is ~90 of them — and NVS
+// is the same flash the Amazon tokens and Wi-Fi credentials live in. The preview still has to go
+// through the screensaver rather than backlightSet(), or s_blPct goes stale and the next
+// backlightTo() no-ops against a value the pin is not actually at.
+static void ssBrightCb(lv_event_t *e) {
+  const int v = lv_slider_get_value((lv_obj_t *)lv_event_get_target(e));
+  lv_label_set_text_fmt(s_ssBrightVal, "%d", v);
+  saverPreviewBrightness(v);
+  if (lv_event_get_code(e) != LV_EVENT_RELEASED) return;
+  settingsSetBrightness((uint8_t)v);   // floors at 10, so this cannot blank the panel
+  saverConfigChanged();
+}
+
+// Nearest stored value wins, so a value set from the web page that is not in this list (the API
+// takes any number) still selects something sensible rather than silently showing the first entry.
+static uint16_t nearestIdx(const uint16_t *opts, size_t n, uint16_t cur) {
+  size_t best = 0;
+  uint32_t bestD = 0xFFFFFFFF;
+  for (size_t i = 0; i < n; i++) {
+    const uint32_t d = (uint32_t)(opts[i] > cur ? opts[i] - cur : cur - opts[i]);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return (uint16_t)best;
+}
+
+static void ssModeCb(lv_event_t *e) {
+  // Dropdown order is most-wanted-first, which is NOT the enum order — map explicitly rather than
+  // letting the two drift apart.
+  static const uint8_t kOrder[] = {SAVER_AUTO, SAVER_COVER, SAVER_CLOCK, SAVER_OFF};
+  const uint32_t i = lv_dropdown_get_selected((lv_obj_t *)lv_event_get_target(e));
+  settingsSetSaverMode(kOrder[i < 4 ? i : 0]);
+  saverConfigChanged();
+  uiSoundPlay(UiSound::Tick);
+}
+
+static void ssDelayCb(lv_event_t *e) {
+  const uint32_t i = lv_dropdown_get_selected((lv_obj_t *)lv_event_get_target(e));
+  settingsSetSaverDelaySec(kSaverDelays[i < 7 ? i : 3]);
+  saverConfigChanged();
+  uiSoundPlay(UiSound::Tick);
+}
+
+static void ssBlankCb(lv_event_t *e) {
+  const uint32_t i = lv_dropdown_get_selected((lv_obj_t *)lv_event_get_target(e));
+  settingsSetSaverBlankMin(kSaverBlanks[i < 7 ? i : 4]);
+  saverConfigChanged();
+  uiSoundPlay(UiSound::Tick);
+}
+
+static void ssDimCb(lv_event_t *e) {
+  const int v = lv_slider_get_value((lv_obj_t *)lv_event_get_target(e));
+  lv_label_set_text_fmt(s_ssDimVal, "%d", v);
+  if (lv_event_get_code(e) != LV_EVENT_RELEASED) return;   // write NVS on release, not per pixel
+  settingsSetSaverDimPct((uint8_t)v);
+  saverConfigChanged();
+}
+
+// Shared styling. LVGL's default theme draws dropdowns in its own light palette, which would be
+// the only thing on this device that is not the design system's dark one.
+static lv_obj_t *ssDropdown(lv_obj_t *parent, const char *opts, uint16_t sel,
+                            lv_event_cb_t cb, lv_coord_t x, lv_coord_t y, lv_coord_t w) {
+  lv_obj_t *d = lv_dropdown_create(parent);
+  lv_dropdown_set_options_static(d, opts);
+  lv_dropdown_set_selected(d, sel);
+  lv_obj_set_size(d, w, 52);
+  lv_obj_align(d, LV_ALIGN_TOP_LEFT, x, y);
+  lv_obj_set_style_radius(d, JB_R_MD, 0);
+  lv_obj_set_style_bg_color(d, lv_color_hex(JB_SCREEN_ELEV), 0);
+  lv_obj_set_style_border_color(d, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_text_color(d, lv_color_hex(JB_TEXT), 0);
+  lv_obj_set_style_text_font(d, &lv_font_montserrat_16, 0);
+  lv_obj_add_event_cb(d, cb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  lv_obj_t *list = lv_dropdown_get_list(d);
+  lv_obj_set_style_bg_color(list, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_border_color(list, lv_color_hex(JB_SCREEN_LINE), 0);
+  lv_obj_set_style_text_color(list, lv_color_hex(JB_TEXT), 0);
+  lv_obj_set_style_text_font(list, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_bg_color(list, lv_color_hex(JB_ACCENT), LV_PART_SELECTED | LV_STATE_CHECKED);
+  return d;
+}
+
 static void buildSettings() {
   lv_obj_t *pg = s_page[PAGE_SETTINGS];
   // SCROLLABLE. panel() clears the flag, and this page was already ~570 px of content on a 600 px
@@ -1865,6 +2034,75 @@ static void buildSettings() {
     lv_obj_align(s_favMeta, LV_ALIGN_TOP_LEFT, 0, Y + 62);
   }
 
+  // --- Screensaver ---
+  // Last on the page on purpose: it is set once and then forgotten, unlike the room or the sound
+  // level. The dropdowns are created before the keyboard below so the keyboard still draws over
+  // them; an open dropdown list would otherwise sit under it.
+  {
+    const lv_coord_t Y = PAD_TOP + 700;
+    lv_obj_t *sh = label(pg, "Screensaver", &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_align(sh, LV_ALIGN_TOP_LEFT, 0, Y);
+
+    lv_obj_t *brl = label(pg, "Screen brightness", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(brl, LV_ALIGN_TOP_LEFT, 0, Y + 44);
+
+    lv_obj_t *brs = lv_slider_create(pg);
+    lv_obj_set_size(brs, 380, 14);
+    lv_obj_align(brs, LV_ALIGN_TOP_LEFT, 300, Y + 54);
+    lv_slider_set_range(brs, 10, 100);   // settingsSetBrightness floors at 10; match it here
+    lv_slider_set_value(brs, settingsBrightness(), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(brs, lv_color_hex(JB_SCREEN_ELEV_2), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(brs, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(brs, lv_color_hex(JB_ACCENT), LV_PART_KNOB);
+    lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_RELEASED, nullptr);   // the one that writes NVS
+
+    s_ssBrightVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_align(s_ssBrightVal, LV_ALIGN_TOP_LEFT, 700, Y + 46);
+    lv_label_set_text_fmt(s_ssBrightVal, "%d", settingsBrightness());
+
+    lv_obj_t *ml = label(pg, "Show when idle", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(ml, LV_ALIGN_TOP_LEFT, 0, Y + 108);
+    // Same order as kOrder in ssModeCb — change both or neither.
+    static const uint8_t kOrder[] = {SAVER_AUTO, SAVER_COVER, SAVER_CLOCK, SAVER_OFF};
+    uint16_t modeSel = 0;
+    for (uint16_t i = 0; i < 4; i++) if (kOrder[i] == settingsSaverMode()) modeSel = i;
+    ssDropdown(pg, "Art when playing, else clock\nAlbum art\nClock\nNothing", modeSel,
+               ssModeCb, 300, Y + 100, 420);
+
+    lv_obj_t *dl = label(pg, "Appears after", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(dl, LV_ALIGN_TOP_LEFT, 0, Y + 172);
+    ssDropdown(pg, kSaverDelayOpts,
+               nearestIdx(kSaverDelays, 7, settingsSaverDelaySec()), ssDelayCb, 300, Y + 164, 200);
+
+    lv_obj_t *bl = label(pg, "Screen off after", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(bl, LV_ALIGN_TOP_LEFT, 0, Y + 236);
+    ssDropdown(pg, kSaverBlankOpts,
+               nearestIdx(kSaverBlanks, 7, settingsSaverBlankMin()), ssBlankCb, 300, Y + 228, 200);
+
+    lv_obj_t *il = label(pg, "Brightness while it is up", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(il, LV_ALIGN_TOP_LEFT, 0, Y + 300);
+
+    lv_obj_t *sl = lv_slider_create(pg);
+    lv_obj_set_size(sl, 380, 14);
+    lv_obj_align(sl, LV_ALIGN_TOP_LEFT, 300, Y + 310);
+    lv_slider_set_range(sl, 5, 100);      // 5, not 0 — 0 is what the screen-off timer is for
+    lv_slider_set_value(sl, settingsSaverDimPct(), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(sl, lv_color_hex(JB_SCREEN_ELEV_2), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sl, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl, lv_color_hex(JB_ACCENT), LV_PART_KNOB);
+    lv_obj_add_event_cb(sl, ssDimCb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(sl, ssDimCb, LV_EVENT_RELEASED, nullptr);
+
+    s_ssDimVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_align(s_ssDimVal, LV_ALIGN_TOP_LEFT, 700, Y + 302);
+    lv_label_set_text_fmt(s_ssDimVal, "%d", settingsSaverDimPct());
+
+    lv_obj_t *sn = label(pg, "A touch or a turn of the dial wakes it, even with the screen off.",
+                         &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(sn, LV_ALIGN_TOP_LEFT, 0, Y + 350);
+  }
+
   s_amzBtn = lv_button_create(pg);
   lv_obj_remove_style_all(s_amzBtn);
   lv_obj_set_size(s_amzBtn, 200, 52);
@@ -1915,6 +2153,355 @@ static void buildSettings() {
   lv_obj_add_event_cb(s_kb, kbDoneCb, LV_EVENT_CANCEL, nullptr);
 }
 
+// --- Screensaver (plans/10) -------------------------------------------------------------------
+// Three jobs, and only the first is about looks:
+//   1. Show something worth looking at on a wall panel nobody is touching.
+//   2. Stop any one high-contrast layout sitting under the backlight for hours. This is an IPS
+//      LCD, so what it suffers is reversible image RETENTION, not OLED emitter wear — which is why
+//      the two BACKLIGHT settings below matter more than the picture does.
+//   3. Own the backlight. Before this, settingsBrightness() was written by the web page and never
+//      applied on this unit; uiInit() just called backlightSet(100) and that was that.
+//
+// It lives entirely in the unit. Boards must not read settings (CLAUDE.md), and it must not go in
+// core/ — `sonos-button` sweeps every core file into a build with no LVGL at all.
+//
+// ONE FULL-SCREEN OVERLAY on lv_layer_top(), created once and shown/hidden. It is clickable, so
+// the tap that wakes the device is SWALLOWED rather than delivered to whatever button happened to
+// be under the finger of someone reaching for a dark panel. That is also why the blank state shows
+// it even with the screensaver set to Off.
+namespace {
+
+// The drifting group. Everything that could burn in lives inside this container and nothing else
+// moves, so a drift step invalidates one rectangle rather than the whole screen — which matters,
+// because repainting behind it means re-running the background image transform for that area.
+const lv_coord_t SAVER_W = 760, SAVER_H = 440;
+const lv_coord_t SAVER_DRIFT_X = 110, SAVER_DRIFT_Y = 70;
+const lv_coord_t SAVER_TILE = 200;           // sharp cover tile inside the group
+
+lv_obj_t *s_saver = nullptr, *s_saverBg = nullptr, *s_saverScrim = nullptr, *s_saverGrp = nullptr,
+         *s_saverCard = nullptr, *s_saverCover = nullptr, *s_saverClock = nullptr,
+         *s_saverAmPm = nullptr, *s_saverDate = nullptr, *s_saverTitle = nullptr,
+         *s_saverMeta = nullptr;
+
+enum class SaverState : uint8_t { Awake, Showing, Blank };
+SaverState s_saverState = SaverState::Awake;
+SaverState s_prevLogged = SaverState::Awake;   // separate from s_saverState so the first real
+                                               // transition still logs (both start Awake)
+
+// Cached config. Re-read only when the web page bumps webConfigGen() or the on-screen Settings
+// page calls saverConfigChanged() — NVS reads on every 5 ms tick would be absurd.
+uint8_t  s_cfgMode = SAVER_AUTO, s_cfgDim = 40, s_cfgBright = 100;
+uint32_t s_cfgDelayMs = 120000, s_cfgBlankMs = 3600000;
+uint32_t s_cfgGen = 0;
+bool     s_cfgLoaded = false;
+
+int      s_blPct     = -1;     // last value handed to backlightSet(); -1 = never set
+int      s_saverLayout = -1;   // layout the tree is currently painted as: -1 none, 0 clock, 1 cover
+int      s_shownMin   = -1;    // last minute rendered, so the clock repaints once a minute
+uint16_t s_driftStep  = 0;
+String   s_shownSaverTitle, s_shownSaverMeta;
+
+void backlightTo(int pct) {
+  if (pct == s_blPct) return;
+  s_blPct = pct;
+  backlightSet(pct);
+}
+
+void saverReadCfg() {
+  s_cfgLoaded  = true;
+  s_cfgGen     = webConfigGen();
+  s_cfgMode    = settingsSaverMode();
+  s_cfgDim     = settingsSaverDimPct();
+  s_cfgBright  = settingsBrightness();
+  s_cfgDelayMs = (uint32_t)settingsSaverDelaySec() * 1000u;
+  s_cfgBlankMs = (uint32_t)settingsSaverBlankMin() * 60000u;
+}
+
+// Move the group. Called only when the minute changes, so the reposition and the clock repaint are
+// ONE visible event rather than two — a screensaver that shuffles itself at some unrelated moment
+// reads as a glitch. x and y run at incommensurate rates so the path does not retrace for hours.
+void saverDrift() {
+  if (!s_saverGrp) return;
+  s_driftStep++;
+  const float t = (float)s_driftStep * 0.10471976f;            // 2*pi / 60
+  const lv_coord_t dx = (lv_coord_t)(sinf(t)          * (float)SAVER_DRIFT_X);
+  const lv_coord_t dy = (lv_coord_t)(sinf(t * 1.618f) * (float)SAVER_DRIFT_Y);
+  lv_obj_align(s_saverGrp, LV_ALIGN_CENTER, dx, dy);
+}
+
+// Cover layout vs clock layout. Only the vertical rhythm and three hidden flags differ, so this is
+// one function rather than two trees — two trees would double the LVGL pool cost of a screen that
+// exists to be idle.
+void saverApplyLayout(bool cover) {
+  if (s_saverLayout == (int)cover) return;
+  s_saverLayout = (int)cover;
+
+  auto show = [](lv_obj_t *o, bool on) {
+    if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  };
+  show(s_saverBg,    cover);
+  show(s_saverScrim, cover);
+  show(s_saverCard,  cover);
+  show(s_saverTitle, cover);
+  show(s_saverMeta,  cover);
+
+  // Clock-only centres the time/date pair in the group; the cover layout hangs everything off the
+  // tile at the top.
+  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, cover ? 232 : 150);
+  lv_obj_align(s_saverDate,  LV_ALIGN_TOP_MID, 0, cover ? 330 : 248);
+
+  // Force a clock repaint. AM/PM is hung off the TIME's right edge with lv_obj_align_to(), which
+  // resolves to an absolute position ONCE — so moving the clock between layouts leaves the
+  // meridiem behind at the old height. Repainting re-runs that align. (It also costs a drift step,
+  // which is harmless: a layout change is already a visible event.)
+  s_shownMin = -1;
+
+  // This unit is on a wall with a power-only port, so the log mirror is the only way to see why it
+  // chose what it chose. "Album art selected but a clock on the glass" has three different causes —
+  // the mode did not persist, there is no decoded cover to show, or the images are drawing at the
+  // wrong scale — and they are indistinguishable from across the room. One line per layout change,
+  // which is at most a few an hour.
+  LOG.printf("[saver ] layout=%s mode=%u art=%s %ldx%ld bgScale=%ld tileScale=%ld\n",
+             cover ? "cover" : "clock", (unsigned)s_cfgMode, s_artDsc ? "yes" : "none",
+             (long)(s_artDsc ? s_artDsc->header.w : 0), (long)(s_artDsc ? s_artDsc->header.h : 0),
+             (long)lv_image_get_scale_x(s_saverBg), (long)lv_image_get_scale_x(s_saverCover));
+}
+
+void saverPaintClock() {
+  time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+
+  // Before NTP lands the epoch is 1970 and a confidently-wrong "4:00" is worse than an obvious
+  // placeholder — which is the only reason '-' is in the 120 px font's range.
+  if (lt.tm_year + 1900 < 2021) {
+    lv_label_set_text(s_saverClock, "--:--");
+    lv_label_set_text(s_saverDate,  "waiting for the network");
+    lv_obj_add_flag(s_saverAmPm, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+
+  int h12 = lt.tm_hour % 12;
+  if (h12 == 0) h12 = 12;
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%d:%02d", h12, lt.tm_min);
+  lv_label_set_text(s_saverClock, buf);
+  lv_label_set_text(s_saverAmPm, lt.tm_hour < 12 ? "AM" : "PM");
+  lv_obj_remove_flag(s_saverAmPm, LV_OBJ_FLAG_HIDDEN);
+
+  // Spelled out rather than strftime'd: "%-d" is a GNU extension newlib does not carry, and
+  // zero-padding a day of the month ("August 03") reads as a filename, not a date.
+  static const char *kDay[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                               "Saturday"};
+  static const char *kMon[] = {"January", "February", "March", "April", "May", "June", "July",
+                               "August", "September", "October", "November", "December"};
+  snprintf(buf, sizeof(buf), "%d", lt.tm_mday);
+  lv_label_set_text_fmt(s_saverDate, "%s, %s %s", kDay[lt.tm_wday % 7], kMon[lt.tm_mon % 12], buf);
+
+  // The time label is centred, so its width changes between "9:05" and "12:05" and the meridiem
+  // has to be re-hung off its right edge every minute.
+  lv_obj_update_layout(s_saverGrp);
+  lv_obj_align_to(s_saverAmPm, s_saverClock, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -18);
+}
+
+// Point both the wallpaper and the tile at the current cover.
+//
+// The scaling is LVGL's, not ours: LV_IMAGE_ALIGN_COVER fills the widget keeping aspect (the
+// wallpaper) and LV_IMAGE_ALIGN_CONTAIN fits inside it (the tile), and BOTH recompute inside
+// lv_image_set_src(). Setting the factor by hand with lv_image_set_scale() is the same arithmetic
+// but has to be redone in the right order after every source change, which is one more thing to
+// get wrong for no gain.
+//
+// From a <=280 px source the wallpaper is a ~3.7x upscale. That softness is deliberate — it is
+// what makes it read as a wash rather than a stretched thumbnail, and it costs nothing, where a
+// real blur would cost a second full-screen buffer.
+void saverApplyArt() {
+  if (!s_saverBg || !s_artDsc || !s_artDsc->header.w || !s_artDsc->header.h) return;
+  lv_image_set_src(s_saverBg, s_artDsc);
+  lv_image_set_src(s_saverCover, s_artDsc);
+}
+
+void saverBuild() {
+  // On the top layer so it covers the rail and every page at once, and created AFTER the volume
+  // toast so it draws over it. Clickable with no handler: the click is consumed here, and the
+  // activity it registers with LVGL is what actually wakes the device.
+  s_saver = panel(lv_layer_top(), SCREEN_W, SCREEN_H, JB_SCREEN_BG, 0);
+  lv_obj_align(s_saver, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_saver, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(s_saver, LV_OBJ_FLAG_HIDDEN);
+
+  s_saverBg = lv_image_create(s_saver);
+  lv_obj_set_size(s_saverBg, SCREEN_W, SCREEN_H);
+  lv_obj_align(s_saverBg, LV_ALIGN_CENTER, 0, 0);
+  lv_image_set_inner_align(s_saverBg, LV_IMAGE_ALIGN_COVER);     // LVGL does the fill maths
+  lv_obj_add_flag(s_saverBg, LV_OBJ_FLAG_HIDDEN);
+
+  // Scrim. Does two jobs: it makes white text legible over any cover, and it drops the average
+  // luminance of a screen that is about to sit lit for hours.
+  //
+  // 50 %, down from the 70 % this shipped with. At 70 %, on top of a screensaver backlight that
+  // defaults to 40 %, the wallpaper was so dark it read as a plain clock on black — the feature
+  // looked like it was not working at all. 120 px white type stays perfectly legible at 50 %.
+  s_saverScrim = panel(s_saver, SCREEN_W, SCREEN_H, 0x000000, 0);
+  lv_obj_align(s_saverScrim, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_set_style_bg_opa(s_saverScrim, LV_OPA_50, 0);
+  lv_obj_add_flag(s_saverScrim, LV_OBJ_FLAG_HIDDEN);
+
+  s_saverGrp = lv_obj_create(s_saver);
+  lv_obj_remove_style_all(s_saverGrp);
+  lv_obj_set_size(s_saverGrp, SAVER_W, SAVER_H);
+  lv_obj_align(s_saverGrp, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_clear_flag(s_saverGrp, LV_OBJ_FLAG_SCROLLABLE);
+
+  s_saverCard = panel(s_saverGrp, SAVER_TILE, SAVER_TILE, JB_SCREEN_ELEV, JB_R_LG);
+  lv_obj_align(s_saverCard, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_border_width(s_saverCard, 1, 0);
+  lv_obj_set_style_border_color(s_saverCard, lv_color_hex(JB_SCREEN_LINE), 0);
+  s_saverCover = lv_image_create(s_saverCard);
+  lv_obj_set_size(s_saverCover, SAVER_TILE, SAVER_TILE);
+  lv_obj_center(s_saverCover);
+  lv_image_set_inner_align(s_saverCover, LV_IMAGE_ALIGN_CONTAIN);  // ...and the fit maths
+
+  s_saverClock = label(s_saverGrp, "--:--", &lv_font_clock_120, JB_TEXT);
+  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, 232);
+
+  s_saverAmPm = label(s_saverGrp, "", &lv_font_montserrat_28, JB_TEXT_MUTED);
+
+  s_saverDate = label(s_saverGrp, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  lv_obj_align(s_saverDate, LV_ALIGN_TOP_MID, 0, 330);
+
+  // Both ellipsise on one line, for the reason the Now Playing labels do: a height-less LONG_DOT
+  // label grows downwards instead of truncating, and here it would grow off the group.
+  s_saverTitle = label(s_saverGrp, "", &lv_font_montserrat_28, JB_TEXT);
+  lv_label_set_long_mode(s_saverTitle, LV_LABEL_LONG_DOT);
+  lv_obj_set_size(s_saverTitle, SAVER_W, 34);
+  lv_obj_set_style_text_align(s_saverTitle, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(s_saverTitle, LV_ALIGN_TOP_MID, 0, 372);
+
+  s_saverMeta = label(s_saverGrp, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_label_set_long_mode(s_saverMeta, LV_LABEL_LONG_DOT);
+  lv_obj_set_size(s_saverMeta, SAVER_W, 18);
+  lv_obj_set_style_text_align(s_saverMeta, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(s_saverMeta, LV_ALIGN_TOP_MID, 0, 410);
+}
+
+}  // namespace
+
+// Called from uiTick when albumArtTake() reports a change, and from the Settings page when the
+// mode changes: both invalidate what the (possibly hidden) screensaver is pointing at.
+static void saverArtChanged() {
+  s_saverLayout = -1;          // force saverApplyLayout to re-evaluate cover-vs-clock
+  if (s_artDsc) saverApplyArt();
+}
+
+// Tell the screensaver its settings moved. The on-screen Settings controls call this directly;
+// the web page's changes arrive through webConfigGen().
+static void saverConfigChanged() { s_cfgLoaded = false; }
+
+// Light the panel at boot, at the persisted brightness.
+//
+// displayInit() leaves the backlight at 0 deliberately ("nothing to show yet"), and the first
+// saverTick() does not run until appStartTasks() — on the far side of appBoot()'s Wi-Fi connect and
+// SSDP discovery, which is many seconds. So SOMETHING has to turn the panel on in uiInit(), or the
+// boot screen and uiProvisioning()'s "join <AP>" overlay are both invisible.
+//
+// It goes through the screensaver rather than calling backlightSet() directly so there is exactly
+// one owner of that pin and s_blPct never goes stale. settingsInit() runs at main.cpp:76, BEFORE
+// uiInit(), so the stored value really is readable here — this is not the 100 % placeholder it
+// replaces. s_cfgLoaded is deliberately left false: the first saverTick() still does the full
+// read, so this cannot pin a value that later config work would have changed.
+static void saverBootBacklight() { backlightTo(settingsBrightness()); }
+
+// Live preview while the awake-brightness slider is dragged, WITHOUT touching NVS — the write
+// happens once on release (ssBrightCb). Same reason it is not a bare backlightSet(): the
+// screensaver owns the pin, so a preview has to be routed through it too.
+static void saverPreviewBrightness(int pct) { backlightTo(pct); }
+
+// The state machine. Called once per uiTick with the frame's PlayerState snapshot.
+//
+// Idle is LVGL's own inactivity timer, which the touch indev already feeds. handleDial() calls
+// lv_display_trigger_activity() so the dial feeds the SAME timer — one source of truth, rather
+// than a second timestamp that could disagree with it.
+static void saverTick(const PlayerState &p) {
+  if (!s_saver) return;
+  if (!s_cfgLoaded || s_cfgGen != webConfigGen()) saverReadCfg();
+
+  const uint32_t idle = lv_display_get_inactive_time(nullptr);
+  const bool wantBlank = s_cfgBlankMs && idle >= s_cfgBlankMs;
+  const bool wantShow  = s_cfgMode != SAVER_OFF && s_cfgDelayMs && idle >= s_cfgDelayMs;
+
+  const SaverState next = wantBlank ? SaverState::Blank
+                        : wantShow  ? SaverState::Showing
+                                    : SaverState::Awake;
+
+  if (next != s_saverState) {
+    s_saverState = next;
+    if (next == SaverState::Awake) {
+      lv_obj_add_flag(s_saver, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      // Entering the overlay: repaint from scratch. s_shownMin is reset so the clock is right on
+      // the first frame rather than a minute later.
+      s_shownMin = -1;
+      s_saverLayout = -1;
+      lv_obj_remove_flag(s_saver, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Blank still shows the overlay — see the note at the top: with the backlight at zero it is
+    // invisible, but it is what stops a wake-up tap from pressing a button nobody can see. Strip it
+    // to a bare dark rectangle, though: leaving the wallpaper in the tree means LVGL re-runs a
+    // full-screen image transform to paint something with the backlight already at zero.
+    if (next == SaverState::Blank) {
+      lv_obj_add_flag(s_saverGrp,   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_saverBg,    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_saverScrim, LV_OBJ_FLAG_HIDDEN);
+      s_saverLayout = -1;
+    } else if (next == SaverState::Showing) {
+      lv_obj_remove_flag(s_saverGrp, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  backlightTo(next == SaverState::Blank   ? 0
+            : next == SaverState::Showing ? s_cfgDim
+                                          : s_cfgBright);
+  if (next != s_prevLogged) {
+    s_prevLogged = next;
+    LOG.printf("[saver ] state=%s idle=%lus backlight=%d%%\n",
+               next == SaverState::Blank ? "blank" : next == SaverState::Showing ? "showing"
+                                                                                 : "awake",
+               (unsigned long)(idle / 1000), s_blPct);
+  }
+
+  if (next != SaverState::Showing) return;
+
+  // AUTO falls back to the clock whenever there is nothing worth showing a cover for — paused
+  // counts, because a paused track's art sitting on the wall all night is exactly the static image
+  // this is meant to avoid.
+  const bool playing = (p.transport == TransportState::Playing);
+  const bool canCover = (s_artDsc != nullptr);
+  const bool cover = canCover && (s_cfgMode == SAVER_COVER ||
+                                  (s_cfgMode == SAVER_AUTO && playing));
+  if (cover && s_saverLayout != 1) saverApplyArt();
+  saverApplyLayout(cover);
+
+  // One repaint a minute, and the drift rides along with it (see saverDrift).
+  time_t t = time(nullptr);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  if (lt.tm_min != s_shownMin) {
+    s_shownMin = lt.tm_min;
+    saverPaintClock();
+    saverDrift();
+  }
+
+  if (cover) {
+    setTextIfChanged(s_saverTitle, s_shownSaverTitle,
+                     p.title.length() ? p.title : String("Nothing playing"));
+    String meta = p.artist;
+    if (p.album.length()) { if (meta.length()) meta += JB_SEP; meta += p.album; }
+    setTextIfChanged(s_saverMeta, s_shownSaverMeta, meta);
+  }
+}
+
 void uiInit() {
   // Serial log -> TCP :2323, so the health heartbeat below is readable on a
   // wall-mounted unit without a cable. Starts a task that waits for WiFi itself.
@@ -1950,6 +2537,7 @@ void uiInit() {
   buildRooms();
   buildSettings();
   buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
+  saverBuild();      // top layer too, and AFTER the toast so it covers it
   // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
   // Started here rather than in appStartTasks() so the S3 units never spawn it.
   // 12 slots x 72x72 RGB565 = ~124 KB of PSRAM. Bounded on purpose: fifty decoded rows would be
@@ -1959,7 +2547,7 @@ void uiInit() {
   radiocache::start();
 
   showPage(PAGE_NOW);
-  backlightSet(100);
+  saverBootBacklight();   // NOT backlightSet() — the screensaver owns that pin. See its comment.
 }
 
 static void fmtTime(char *out, size_t n, uint32_t sec, bool negative) {
@@ -1975,6 +2563,13 @@ static void handleDial(PlayerState &p) {
   const int32_t   d  = encoderDelta();
   const KnobEvent ev = knobEvent();
   if (d == 0 && ev == KnobEvent::None) return;
+
+  // The dial is not an LVGL input device — it is polled off I2C — so LVGL's inactivity timer would
+  // never see it, and the screensaver would drop over a panel someone was actively turning. Feed
+  // the same timer the touch indev feeds rather than keeping a second timestamp beside it.
+  // Deliberately does NOT swallow the turn: reaching for the volume of a sleeping wall panel and
+  // having the first turn do nothing but wake it is worse than having it do both.
+  lv_display_trigger_activity(nullptr);
 
   if (d != 0) {
     // Acceleration: a slow hunt trims 1% per click, a fast spin crosses the range without needing
@@ -2077,11 +2672,14 @@ void uiTick() {
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));
-  setTextIfChanged(s_title, s_shown.title,
-                   p.title.length() ? p.title : String("Nothing playing"));
+  const String wantTitle = p.title.length() ? p.title : String("Nothing playing");
+  if (s_shown.title != wantTitle) {
+    setTextIfChanged(s_title, s_shown.title, wantTitle);
+    placeTitle();
+  }
 
   String meta = p.artist;
-  if (p.album.length()) { if (meta.length()) meta += "  ·  "; meta += p.album; }
+  if (p.album.length()) { if (meta.length()) meta += JB_SEP; meta += p.album; }
   setTextIfChanged(s_meta, s_shown.meta, meta);
 
   const bool playing = (p.transport == TransportState::Playing);
@@ -2137,7 +2735,7 @@ void uiTick() {
                                      : ((p.durationSec > posSec) ? p.durationSec - posSec : 0);
   if (remain != s_shown.remain) {
     s_shown.remain = remain;
-    if (unknownDur) lv_label_set_text(s_remain, "—");
+    if (unknownDur) lv_label_set_text(s_remain, JB_DASH);
     else { fmtTime(buf, sizeof(buf), remain, true); lv_label_set_text(s_remain, buf); }
   }
 
@@ -2161,6 +2759,8 @@ void uiTick() {
   // never do either on the UI task.
   const lv_image_dsc_t *dsc = nullptr;
   if (albumArtTake(&dsc)) {
+    s_artDsc = dsc;      // remember it: the screensaver is a second consumer, and take() is once-only
+    saverArtChanged();
     if (dsc) {
       lv_image_set_src(s_artImg, dsc);
       lv_obj_center(s_artImg);
@@ -2372,6 +2972,11 @@ void uiTick() {
     }
   }
 
+  // Screensaver LAST, after every page has updated: it owns the backlight and the top-layer
+  // overlay, and running it before the pages would let a page repaint under a screen that is
+  // already meant to be dark.
+  saverTick(p);
+
   bringupConsoleTick();   // bring-up only; compiles to nothing without the flag
 
   lv_timer_handler();
@@ -2384,6 +2989,10 @@ void uiProvisioning(const char *apSsid) {
   lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(l);
 
-  backlightSet(100);
+  // Full brightness — you have to read an AP name off it — but through the screensaver, not
+  // backlightSet(). A bare call here leaves s_blPct saying "70 %" while the pin is at 100 %, and
+  // the first saverTick() would then no-op against its own stale bookkeeping and leave the panel
+  // stuck bright. Provisioning runs inside appBoot(), before saverTick() has ever run.
+  saverPreviewBrightness(100);
   lv_timer_handler();   // the UI task is not running yet — flush synchronously
 }

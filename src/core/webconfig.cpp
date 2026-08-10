@@ -75,9 +75,11 @@ static String sanitizeHostname(const String &raw) {
 }
 
 // Strict 0..100: digits only, non-empty, in range.
+// The (unsigned char) cast is required rather than cosmetic — isdigit() is undefined for a
+// negative argument and plain char is signed on this toolchain, so any byte >= 0x80 sign-extends.
 static bool parsePct(const String &value, long &out) {
   if (value.length() == 0) return false;
-  for (unsigned i = 0; i < value.length(); ++i) if (!isdigit((int)value[i])) return false;
+  for (unsigned i = 0; i < value.length(); ++i) if (!isdigit((unsigned char)value[i])) return false;
   out = value.toInt();
   return out >= 0 && out <= 100;
 }
@@ -98,6 +100,12 @@ String webConfigJson() {
   // detents only and is meaningless while the master is 0 — the page reflects that by disabling it.
   doc["uiSound"]     = settingsUiSound();
   doc["scrollSound"] = settingsScrollSound();
+  // Screensaver. Four fields rather than one because they are four separate decisions — see
+  // settings.h. Reported on every unit; boards without a screen simply never read them back.
+  doc["saver_mode"]      = settingsSaverMode();
+  doc["saver_delay_sec"] = settingsSaverDelaySec();
+  doc["saver_dim"]       = settingsSaverDimPct();
+  doc["saver_blank_min"] = settingsSaverBlankMin();
   doc["radio_refresh_hour"] = settingsRadioRefreshHour();
   doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
   doc["fav_refresh_hour"]   = settingsFavRefreshHour();
@@ -397,6 +405,47 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     long v;
     if (!parsePct(value, v)) { err = "brightness must be a number 0..100"; return false; }
     settingsSetBrightness((uint8_t)v);
+    s_gen++;
+    return true;
+  }
+
+  // --- Screensaver ------------------------------------------------------------------------------
+  // All four bump s_gen: the unit owns the idle state machine and the backlight, so it has to be
+  // told a setting moved rather than re-reading NVS every tick.
+  if (field == "saver_mode") {
+    // EXACTLY one digit, not "parses as a number in range". String::toInt() stops at the first
+    // non-numeric character and returns the prefix, so "2junk" would silently persist mode 2 —
+    // accepting input nobody meant to send, which is how a config API drifts from its own docs.
+    if (value.length() != 1 || value[0] < '0' || value[0] > ('0' + SAVER_AUTO)) {
+      err = "saver_mode must be 0 (off), 1 (clock), 2 (cover art) or 3 (auto)";
+      return false;
+    }
+    settingsSetSaverMode((uint8_t)(value[0] - '0'));
+    s_gen++;
+    return true;
+  }
+
+  if (field == "saver_delay_sec" || field == "saver_blank_min") {
+    // Digits only: toInt() returns 0 on garbage and 0 is the legitimate "never" value for both, so
+    // "banana" would silently mean "never show a screensaver" and look like the feature is broken.
+    // The (unsigned char) cast is required, not tidiness: isdigit() is undefined for a negative
+    // argument, and plain char is signed here, so any byte >= 0x80 sign-extends.
+    if (value.length() == 0) { err = field + " must be a number"; return false; }
+    for (unsigned i = 0; i < value.length(); ++i) {
+      if (!isdigit((unsigned char)value[i])) { err = field + " must be a number"; return false; }
+    }
+    const long v = value.toInt();
+    if (v > 65535) { err = field + " is too large"; return false; }
+    if (field == "saver_delay_sec") settingsSetSaverDelaySec((uint16_t)v);
+    else                            settingsSetSaverBlankMin((uint16_t)v);
+    s_gen++;
+    return true;
+  }
+
+  if (field == "saver_dim") {
+    long v;
+    if (!parsePct(value, v)) { err = "saver_dim must be a number 0..100"; return false; }
+    settingsSetSaverDimPct((uint8_t)v);   // floors at 5; see settings.h
     s_gen++;
     return true;
   }
