@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#include "core/album_art.h"
+#include "core/ui/album_art.h"
 #include "core/board.h"
 #include "core/library.h"
 #include "core/settings.h"
@@ -29,7 +29,7 @@
                               // on this board the radio is a co-processor and those are blocking
                               // RPCs, so a UI-task caller freezes rendering when the link dies.
 #include "core/amazon.h"
-#include "core/art_cache.h"
+#include "core/ui/art_cache.h"
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/room_status.h"   // per-room volume + play state for the Rooms page (netTask polls)

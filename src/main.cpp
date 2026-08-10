@@ -14,7 +14,7 @@
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
 #ifndef HEADLESS
-#include "core/album_art.h"
+#include "core/ui/album_art.h"
 #endif
 #include "core/settings.h"
 #include "core/net/ota.h"      // otaHandle()

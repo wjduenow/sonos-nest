@@ -1,21 +1,30 @@
-# Build the shipping firmware for every unit and publish a GitHub Release.
+# Build the shipping firmware for every unit — as a merge gate, and to publish a GitHub Release.
 #
-# See plans/06-scalable-ota.md § Phase 1. A `v*` tag builds all three app envs and publishes a
-# Release with one firmware-<unit>.bin each plus a manifest.json (the device/portal pull path in
-# Phase 2/3 consumes that manifest). `workflow_dispatch` builds the same matrix and uploads
-# artifacts only — no Release — so CI itself can be exercised off a branch.
+# TWO jobs, deliberately:
 #
-# Reproducibility: platformio.ini leaves `platform = espressif32` UNPINNED, so a fresh install
-# would drift to the latest platform and could reintroduce the framework-version-specific
-# WebServer bugs CLAUDE.md documents. This workflow pins the platform to the version the repo is
-# developed against (see PLATFORM below) by pre-installing it; PlatformIO then resolves the
-# unpinned requirement to the already-installed match instead of fetching latest. If you bump the
-# platform locally, bump PLATFORM here to match.
+#   build    Compiles EVERY app env, on every PR and every push to main (plus tags and manual
+#            runs). This is the gate. `core/` is swept wholesale into all four envs by +<core/>
+#            but is NOT uniformly device-agnostic — the headless `sleep-button` env has no LVGL
+#            at all — so a core file that touches graphics breaks exactly one env, and it is the
+#            one nobody builds by habit. That is issue #7: sleep-button was broken for weeks and
+#            was found by accident. Building all of them here is what closes the category.
+#            See src/core/ui/README.md for the convention this backstops.
+#
+#   release  Tags only (`v*`). Publishes firmware-<unit>.bin + manifest.json for the units that
+#            have a pull-OTA identity (see plans/06 Phase 1 and the matrix note below).
+#
+# Reproducibility: platformio.ini pins BOTH platforms in-tree — `espressif32@6.9.0` for the
+# ESP32-S3 units and a pinned pioarduino release URL for the ESP32-P4 jukebox — so CI needs no
+# pin of its own. (It used to pre-install one; that was left over from when [env] was unpinned,
+# and it had gone stale — it installed a version the pin would never have resolved to.) If you
+# change a platform, change it in platformio.ini; there is nothing to keep in sync here.
 name: firmware
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch: {}
 
 # A newer tag/run supersedes an in-flight one for the same ref.
@@ -26,45 +35,96 @@ concurrency:
 permissions:
   contents: write        # softprops/action-gh-release creates the Release + uploads assets
 
-env:
-  PLATFORM: espressif32@7.0.1   # keep in sync with the locally-installed platform
-
 jobs:
+  # Seconds, not minutes — and it fails with the actual rule rather than a `lvgl.h: No such file`
+  # ten minutes into a matrix build. Enforces src/core/ui/README.md: graphics coupling in core/
+  # lives in core/ui/, which is the subtree headless envs exclude.
+  guard:
+    name: core/ is display-agnostic outside core/ui/
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false on every checkout in this file. The default leaves GITHUB_TOKEN
+      # in .git/config for the whole job, and `pio run` executes repository-controlled Python
+      # (platformio.ini's extra_scripts: tools/git_version.py and the P4 pre-scripts) — so on a
+      # same-repo PR, branch code runs in a job holding a writable token. Nothing here needs git
+      # auth: checkout has already fetched, and the release job's token reaches
+      # action-gh-release through the environment, not git config.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: No LVGL / TJpg outside src/core/ui/
+        run: |
+          if hits=$(grep -rn --include='*.h' --include='*.cpp' \
+                      -E '#include[[:space:]]*[<"](lvgl\.h|TJpg_Decoder\.h)[>"]' \
+                      src/core --exclude-dir=ui); then
+            echo "::error::Graphics-coupled file(s) outside src/core/ui/ — these break the"
+            echo "::error::headless sleep-button env, which has no LVGL at all (issue #7)."
+            echo "::error::Move them into src/core/ui/; see src/core/ui/README.md."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — every lvgl.h / TJpg_Decoder.h include in src/core/ is under src/core/ui/."
+
+      # The other silent-failure shape in this repo: a unit that TELLS the portal one id and ASKS
+      # the manifest for another is invisible to pull-OTA while looking healthy on the dashboard.
+      # The jukebox shipped that way — "jukebox" to registrationJson(), "unknown" to unitId().
+      # Neither compiles wrong, so only comparing the two ladders catches it.
+      - name: unitId() and registrationJson() agree on the unit ids
+        run: |
+          asks=$(sed -n '/const char \*unitId()/,/^}/p' src/core/net/updater.cpp \
+                 | grep -oP 'return "\K[a-z]+' | grep -v '^unknown$' | sort -u)
+          tells=$(sed -n '/^String registrationJson()/,/^}/p' src/core/webconfig.cpp \
+                  | grep -oP 'doc\["unit"\] *= *"\K[a-z]+' | grep -v '^unknown$' | sort -u)
+          echo "updater.cpp   unitId() asks for : $(echo $asks)"
+          echo "webconfig.cpp registers as      : $(echo $tells)"
+          [ -n "$asks" ] && [ -n "$tells" ] || { echo "::error::parsed an empty set — a ladder was renamed or reformatted; fix this check"; exit 1; }
+          if ! diff <(echo "$asks") <(echo "$tells") >/dev/null; then
+            echo "::error::The two unit-id ladders disagree. A unit in only one of them either"
+            echo "::error::registers under an id it never requests (invisible to pull-OTA) or"
+            echo "::error::requests one it never registers. Keep both in sync — see plans/06."
+            diff <(echo "$asks") <(echo "$tells") || true
+            exit 1
+          fi
+          echo "OK — both ladders carry the same unit ids."
+
   build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false           # one unit failing shouldn't hide the others' results
       matrix:
         include:
-          - { env: nest,          unit: nest }
-          - { env: sleep-machine, unit: sleep }
-          - { env: sleep-button,  unit: button }
+          # `unit` is the manifest key — the id core/net/updater.cpp's unitId() asks for AND the
+          # one webconfig.cpp's registrationJson() reports. Those two must agree; if you add a
+          # unit here, add it to BOTH.
+          # `release`: false would mean "compile-gate this env, but don't ship a binary for it".
+          - { env: nest,          unit: nest,    release: true }
+          - { env: sleep-machine, unit: sleep,   release: true }
+          - { env: sleep-button,  unit: button,  release: true }
+          - { env: sonos-jukebox, unit: jukebox, release: true }
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0         # tools/git_version.py runs `git describe --tags` for FW_VERSION
           fetch-tags: true
+          persist-credentials: false   # see the guard job — this is the build that runs pio
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
 
-      # Cache the PlatformIO home: the pinned platform, the arduino framework, and the git-based
-      # libs (Arduino_GFX@1.3.1, the audio libs). Keyed on this file + platformio.ini so a
-      # dependency change busts it. First run is cold (~several min); later runs are fast.
+      # Cache the PlatformIO home: the pinned platforms, the arduino/IDF frameworks, and the
+      # git-based libs (Arduino_GFX@1.3.1, the audio libs). Keyed on platformio.ini so a
+      # dependency or platform change busts it. Per-env, because the P4 jukebox pulls a whole
+      # separate platform + toolchain and sharing one key with the S3 envs would thrash it.
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ env.PLATFORM }}-${{ hashFiles('platformio.ini', '.github/workflows/firmware.yml') }}
-          restore-keys: pio-${{ runner.os }}-${{ env.PLATFORM }}-
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
       - run: pip install platformio
-
-      # Pin the platform so the unpinned `platform = espressif32` resolves to it (see header note).
-      - name: Pin espressif32 platform
-        run: pio pkg install -g -p "${PLATFORM}"
 
       # NB: DELIBERATELY no include/secrets.h. Every include site is `#if __has_include`-guarded
       # and WIFI_SSID/WIFI_PASS are `#if defined`-guarded, so the build is clean without it — and
@@ -78,9 +138,12 @@ jobs:
       - name: Stage binary
         run: cp ".pio/build/${{ matrix.env }}/firmware.bin" "firmware-${{ matrix.unit }}.bin"
 
+      # Release units get the `firmware-` artifact prefix; that prefix is exactly what the
+      # release job globs for, so a `release: false` env is downloadable from the run but can
+      # never leak into a Release or the manifest.
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.unit }}
+          name: ${{ matrix.release && 'firmware' || 'build' }}-${{ matrix.unit }}
           path: firmware-${{ matrix.unit }}.bin
           if-no-files-found: error
 
@@ -90,11 +153,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4    # for tools/build_manifest.py
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
           path: bins
-          pattern: firmware-*
+          pattern: firmware-*        # release units only — see the upload step above
           merge-multiple: true       # -> bins/firmware-nest.bin, bins/firmware-sleep.bin, ...
 
       - name: Build manifest.json

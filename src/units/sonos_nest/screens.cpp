@@ -1,6 +1,6 @@
 #include "screens.h"
 #include "ui_scale.h"
-#include "core/album_art.h"
+#include "core/ui/album_art.h"
 #include "core/player_state.h"
 #include "core/sonos/ssdp.h"
 #include "core/library.h"

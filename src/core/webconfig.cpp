@@ -10,7 +10,7 @@
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
 #ifndef HEADLESS
-#include "album_art.h"           // albumArtDiag() — art fetch/fail/clear counters
+#include "ui/album_art.h"        // albumArtDiag() — art fetch/fail/clear counters
 #endif
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
