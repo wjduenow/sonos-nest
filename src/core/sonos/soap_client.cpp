@@ -213,7 +213,7 @@ bool getPositionInfo(const String &ip, PlayerState &out) {
   // TrackMetaData is escaped DIDL-Lite -> title/artist/album/art.
   parseNowPlaying(extractTag(r, "TrackMetaData"), out);
   // Album art URI is relative ("/getaa?...") and served by the speaker over plain HTTP.
-  if (out.artUri.startsWith("/")) out.artUri = "http://" + ip + ":1400" + out.artUri;
+  artUriAbsolute(out.artUri, ip);   // relative "/getaa?..." is unusable — see didl.h
   return true;
 }
 

@@ -132,7 +132,12 @@ void applyEvent(const String &body) {
   // Still-escaped DIDL — parseNowPlaying() does the second unescape itself, exactly as it does for
   // the GetPositionInfo path. Reusing it keeps the two sources of now-playing data identical.
   const String meta = tagVal(ev, "CurrentTrackMetaData");
-  if (meta.length() > 20) { parseNowPlaying(meta, np); gotTrack = true; heapwatch::note("gena.didl"); }
+  if (meta.length() > 20) {
+    parseNowPlaying(meta, np);
+    artUriAbsolute(np.artUri, s_coordIp);   // relative "/getaa?..." is unusable — see didl.h
+    gotTrack = true;
+    heapwatch::note("gena.didl");
+  }
 
   // Same fallback the poll uses, and free here: content playing outside the queue (a direct
   // Spotify track) has a stub CurrentTrackMetaData with no dc:title, but the event ALSO carries
@@ -145,6 +150,7 @@ void applyEvent(const String &body) {
       parseNowPlaying(alt, a);
       // NOT authoritative: this describes the transport URI, which for queue content is the
       // container (album/station), not the track. See playerApplyTrack().
+      artUriAbsolute(a.artUri, s_coordIp);
       if (a.title.length() || a.artist.length()) { np = a; gotTrack = true; trackAuthoritative = false; }
     }
   }

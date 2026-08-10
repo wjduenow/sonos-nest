@@ -28,4 +28,13 @@ size_t parseDidl(const String& didlXml, std::vector<DidlItem>& out);
 // (title/artist/album/artUri). artUri is left relative — caller prepends the speaker base.
 void parseNowPlaying(const String& trackMetaData, PlayerState& out);
 
+// *** CALL THIS ON ANY artUri YOU GET OUT OF parseNowPlaying(). ***
+// Sonos reports <upnp:albumArtURI> RELATIVE — "/getaa?s=1&u=..." — which is not a usable URL.
+// HTTPClient::begin() simply returns false on it, with no log and no error, so the art silently
+// never loads. getPositionInfo() has always fixed this up inline; when the GENA path started
+// calling parseNowPlaying() directly it did not, and the result was artwork that vanished and
+// reappeared as event-sourced (relative, unusable) and poll-sourced (absolute, working) URLs took
+// turns. Shared here so the next caller cannot miss it.
+void artUriAbsolute(String& artUri, const String& speakerIp);
+
 }  // namespace sonos

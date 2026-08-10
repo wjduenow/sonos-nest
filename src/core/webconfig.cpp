@@ -9,6 +9,9 @@
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
+#ifndef HEADLESS
+#include "album_art.h"           // albumArtDiag() — art fetch/fail/clear counters
+#endif
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
@@ -175,6 +178,20 @@ String webConfigJson() {
       n["volume"]    = g_player.volume;
       n["room"]      = g_player.zoneName;
       n["hasArt"]    = g_player.artUri.length() > 0;
+      // Art pipeline counters. clears climbing while a track is loaded is the signature of the
+      // "artwork flickers" report — the UI hides the cover ONLY when albumArtClear() has run.
+#ifndef HEADLESS
+      AlbumArtDiag ad; albumArtDiag(ad);
+      n["artFetch"]  = ad.fetches;
+      n["artFail"]   = ad.failures;
+      n["artClear"]  = ad.clears;
+#endif
+      // The TAIL of the URL, not a bool. "art disappears and comes back" can be artUri toggling
+      // between two different URLs for the same track, or going empty — a boolean cannot tell
+      // those apart, and that ambiguity has already sent one fix in the wrong direction.
+      n["artTail"]   = g_player.artUri.length() > 40
+                         ? g_player.artUri.substring(g_player.artUri.length() - 40)
+                         : g_player.artUri;
       stateUnlock();
     }
   }

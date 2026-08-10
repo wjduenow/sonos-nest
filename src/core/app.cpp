@@ -512,6 +512,7 @@ static void netTask(void *) {
         if (sonos::getMediaInfo(s_coordIp, uri, &meta) && meta.length() > 20) {
           PlayerState alt;
           sonos::parseNowPlaying(meta, alt);
+          sonos::artUriAbsolute(alt.artUri, s_coordIp);   // see didl.h
           if (alt.title.length() || alt.artist.length()) {
             np.title = alt.title; np.artist = alt.artist;
             np.album = alt.album; np.artUri = alt.artUri;

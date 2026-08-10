@@ -49,6 +49,11 @@ static const char *DIDL_HDR =
     "xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" "
     "xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">";
 
+void artUriAbsolute(String &artUri, const String &speakerIp) {
+  if (artUri.startsWith("/") && speakerIp.length())
+    artUri = "http://" + speakerIp + ":1400" + artUri;
+}
+
 void parseNowPlaying(const String &trackMetaData, PlayerState &out) {
   out.title.clear();
   out.artist.clear();
