@@ -34,8 +34,11 @@ String registrationJson();
 //                          the unit applies it (see webConfigGen below).
 //   brightness           — value is 0..100, screen backlight % (nest); floored at 10. Persisted;
 //                          the unit applies it via webConfigGen, same as ring.
-//   playlist             — value is a Sonos saved-playlist name (sonos-button).
-//   volume               — value is 0..100, the fixed volume the button plays at.
+//   playlist[2|3]        — value is a Sonos saved-playlist name (sonos-button). The bare name is
+//                          the single press; 2 and 3 are the double and triple press. "" un-maps
+//                          a double/triple press (refused for the single press — that one is the
+//                          whole product).
+//   volume[2|3]          — value is 0..100, the volume set before starting that press's playlist.
 //   deviceName           — value is the DHCP hostname shown by the router. Sanitized to
 //                          letters/digits/hyphen; reconnects so the new name registers.
 // Returns false and fills err (a short human-readable reason) if the field or value is bad.

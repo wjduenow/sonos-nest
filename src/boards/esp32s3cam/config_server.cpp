@@ -64,17 +64,49 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     <label for=room>Sonos room</label>
     <select id=room></select>
   </div>
-  <div class=row style="margin-top:12px">
-    <label for=playlist>Playlist</label>
+  <div class=hint>Every press below plays into this room.</div>
+</div>
+
+<div class=card>
+  <div class=row>
+    <label for=playlist>Single press</label>
     <select id=playlist></select>
   </div>
-  <div class=hint id=plhint></div>
   <div class=row style="margin-top:12px">
     <label for=vol>Volume</label>
     <span id=volval></span>
   </div>
   <input type=range id=vol min=0 max=100 step=1>
-  <div class=hint>The room is set to this volume each time the button starts the playlist.</div>
+  <div class=hint id=plhint></div>
+  <div class=hint>Press once to start this, looped. Press once again to stop — the single press is
+    the only one that stops.</div>
+</div>
+
+<div class=card>
+  <div class=row>
+    <label for=playlist2>Double press</label>
+    <select id=playlist2></select>
+  </div>
+  <div class=row style="margin-top:12px">
+    <label for=vol2>Volume</label>
+    <span id=vol2val></span>
+  </div>
+  <input type=range id=vol2 min=0 max=100 step=1>
+  <div class=hint>Leave this on <b>(nothing)</b> and a double press does nothing.</div>
+</div>
+
+<div class=card>
+  <div class=row>
+    <label for=playlist3>Triple press</label>
+    <select id=playlist3></select>
+  </div>
+  <div class=row style="margin-top:12px">
+    <label for=vol3>Volume</label>
+    <span id=vol3val></span>
+  </div>
+  <input type=range id=vol3 min=0 max=100 step=1>
+  <div class=hint>Double and triple presses always <i>start</i> their playlist, whatever is playing
+    — handy for swapping bedtime sounds for a wake-up mix without touching your phone.</div>
 </div>
 
 <div class=card>
@@ -94,7 +126,9 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     <label>Button</label>
     <span id=state style="opacity:.7">press it to start / stop</span>
   </div>
-  <div class=hint>Press once: play the playlist above, looped. Press again: stop.</div>
+  <div class=hint>Press once: play the single-press playlist, looped — or stop it if it is already
+    playing. Twice or three times: start that press's playlist instead. Presses count while you
+    keep tapping; pause about a third of a second to finish.</div>
 </div>
 
 <div class=card>
@@ -146,13 +180,27 @@ async function post(field,value){
   st=j; draw(); $('#msg').textContent='saved';
 }
 
-function fill(sel,items,cur,empty){
+// blank: prepend an "unmappable" empty choice (the double/triple slots, where "" is legal and
+// means "this press does nothing"). The single press has no such option — it must always play
+// something, and the device refuses "" for it anyway.
+function fill(sel,items,cur,empty,blank){
   sel.innerHTML='';
+  if(blank){
+    const o=document.createElement('option');
+    o.value=''; o.textContent='(nothing)'; o.selected=!cur; sel.append(o);
+  }
   items.forEach(v=>{
     const o=document.createElement('option');
     o.value=o.textContent=v; o.selected=(v===cur); sel.append(o);
   });
-  if(!items.length){const o=document.createElement('option');o.textContent=empty;sel.append(o)}
+  // The list arrives from an async browse, so the saved pick can easily not be in it yet. Show it
+  // anyway: a box reading "(nothing)" while the device is in fact configured is a lie, and one the
+  // user would "fix" by overwriting a perfectly good setting.
+  if(cur && !items.includes(cur)){
+    const o=document.createElement('option');
+    o.value=o.textContent=cur; o.selected=true; sel.append(o);
+  }
+  if(!items.length && !blank && !cur){const o=document.createElement('option');o.textContent=empty;sel.append(o)}
 }
 
 function draw(){
@@ -164,14 +212,16 @@ function draw(){
   fill($('#room'), (st.zones||[]).map(z=>z.name), st.room, '(no rooms found yet)');
 
   const pls = st.playlists||[];
-  fill($('#playlist'), pls, st.playlist, '(loading playlists…)');
+  fill($('#playlist'),  pls, st.playlist,  '(loading playlists…)');
+  fill($('#playlist2'), pls, st.playlist2, '', true);
+  fill($('#playlist3'), pls, st.playlist3, '', true);
   // The list arrives from an async browse. Until it does, say so rather than letting the box
   // look like an empty/broken choice.
   $('#plhint').textContent = pls.length ? ''
     : `Still reading playlists from Sonos. Currently set to "${st.playlist}".`;
 
-  $('#vol').value = st.volume;
-  $('#volval').textContent = st.volume + '%';
+  [['#vol','#volval',st.volume],['#vol2','#vol2val',st.volume2],['#vol3','#vol3val',st.volume3]]
+    .forEach(([r,l,v])=>{ $(r).value=v; $(l).textContent=v+'%' });
 
   // Don't clobber what someone is mid-way through typing.
   if(document.activeElement !== $('#dname')) $('#dname').value = st.deviceName||'';
@@ -222,6 +272,8 @@ $('#ringbtn').onclick=()=>{
 $('#ring').onchange=e=>post('ring',e.target.value);
 $('#room').onchange=e=>post('room',e.target.value);
 $('#playlist').onchange=e=>post('playlist',e.target.value);
+$('#playlist2').onchange=e=>post('playlist2',e.target.value);
+$('#playlist3').onchange=e=>post('playlist3',e.target.value);
 $('#dsave').onclick=()=>post('deviceName',$('#dname').value);
 $('#dname').onkeydown=e=>{ if(e.key==='Enter') post('deviceName',$('#dname').value) };
 $('#otaauto').onchange=e=>post('otaAuto',e.target.checked?'1':'0');
@@ -235,8 +287,12 @@ $('#updnow').onclick=async()=>{
   if(!confirm('Download and install '+((st.ota||{}).available||'the update')+'?\n\nThe device reboots to apply.')) return;
   await post('updateNow','1'); $('#msg').textContent='updating — the device will reboot…';
 };
-$('#vol').oninput=e=>$('#volval').textContent=e.target.value+'%';  // live while dragging
-$('#vol').onchange=e=>post('volume',e.target.value);               // save on release only
+// Live readout while dragging; save on release only (one POST per drag, not one per pixel).
+[['#vol','#volval','volume'],['#vol2','#vol2val','volume2'],['#vol3','#vol3val','volume3']]
+  .forEach(([r,l,f])=>{
+    $(r).oninput =e=>$(l).textContent=e.target.value+'%';
+    $(r).onchange=e=>post(f,e.target.value);
+  });
 
 // The playlist list lands a moment after boot; re-poll a few times so a page opened immediately
 // after power-up fills in without a manual refresh.

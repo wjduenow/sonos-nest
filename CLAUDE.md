@@ -14,9 +14,18 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
 - **sonos-button** (`sleep-button` env) — **headless**: one button, an LED ring, no screen, on an
   ESP32-S3-CAM board (`boards/esp32s3cam/`). Press → the configured room starts the configured
-  saved playlist, looped, at the configured volume; press again → stop. Configured from a web page
+  saved playlist, looped, at the configured volume; press again → stop. **Double and triple press
+  each start their own playlist + volume** (three "press slots", `settings.h`; 2 and 3 default to
+  unmapped). Configured from a web page
   on **:8080**, and readable over the **TCP log mirror on :2323** (it has no screen, so that is the
-  only way to watch it — see the log-mirror section below). `core/unit.h` is LVGL-free, so a
+  only way to watch it — see the log-mirror section below).
+  > ⚠️ **Counting presses costs the single press ~350 ms, and that is not a bug to optimise away.**
+  > A release is only a *single* press once the multi-press window closes without another one. So
+  > press feedback rides the press EDGE (`knobDown()`), never `KnobEvent::Short` — a ring pulse a
+  > third of a second after your finger reads as a missed press, which is what the pulse exists to
+  > prevent. Only the single press stops; double/triple always start. `library`'s resolved-item
+  > cache therefore holds **three** names and warm-ups **queue** — a one-slot cache would evict on
+  > every alternating press and pay the multi-second browse each time. `core/unit.h` is LVGL-free, so a
   screenless unit is a first-class citizen and `app.cpp` needs no `#ifdef` for it; `-DHEADLESS`
   drops album art and slows the poll to one call every 3 s. Plan: `plans/04-sonos-button-plan.md`.
   > ⚠️ **It is the env that silently breaks.** `+<core/>` sweeps every core file into it, but its

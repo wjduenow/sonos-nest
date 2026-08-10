@@ -30,17 +30,34 @@ static String   s_playParent;
 static uint32_t s_playChild = 0;
 
 // --- play-by-name (the button's fast path) ------------------------------------------------
-// A pending "play this saved playlist by name" request, and a one-slot resolved-item cache so
-// repeat presses skip the browse entirely. Guarded by stateLock() like everything else here.
-static String        s_reqName;          // "" = none
-static bool          s_reqNameWarm = false;  // resolve+cache only, don't play
-static String        s_cacheName;        // name the cached item resolves
-static sonos::DidlItem s_cacheItem;      // its playable res + metadata
-static bool          s_cacheValid = false;
+// A pending "play this saved playlist by name" request, and a small resolved-item cache so repeat
+// presses skip the browse entirely. Guarded by stateLock() like everything else here.
+//
+// The cache holds SEVERAL names, not one, because the button maps a playlist per press count
+// (single/double/triple): a one-slot cache would evict on every alternating press and pay the
+// multi-second browse each time — exactly the latency the cache exists to remove. Capacity matches
+// the press slots; entries are a few KB of DIDL each, on a unit with ~240 KB free.
+static const size_t  kCacheMax = 3;
+static String        s_reqName;          // "" = none — a real play request
+// Warm-ups are a QUEUE, not another single slot: the unit warms every configured slot at boot and
+// after a config change, and back-to-back requests into one slot would drop all but the last.
+static std::vector<String> s_warmQueue;
+struct NamedItem { String name; sonos::DidlItem item; };
+static std::vector<NamedItem> s_cache;   // most-recently-resolved last
 static bool          s_nameFailed = false;   // last requestPlayNamed couldn't resolve
 
 void requestPlayNamed(const String &name, bool warmOnly) {
-  if (stateLock()) { s_reqName = name; s_reqNameWarm = warmOnly; stateUnlock(); }
+  if (name.length() == 0) return;        // an unmapped press slot: nothing to resolve or play
+  if (stateLock()) {
+    if (!warmOnly) {
+      s_reqName = name;
+    } else {
+      bool queued = false;
+      for (const String &n : s_warmQueue) if (n == name) { queued = true; break; }
+      if (!queued) s_warmQueue.push_back(name);
+    }
+    stateUnlock();
+  }
 }
 
 bool playNamedFailed() {
@@ -162,35 +179,64 @@ static bool resolveNamed(const String &browseIp, const String &name, sonos::Didl
   return false;
 }
 
+// Cache lookup/insert. Caller holds no lock; both take stateLock() themselves.
+static bool cacheGet(const String &name, sonos::DidlItem &out) {
+  bool hit = false;
+  if (stateLock()) {
+    for (const NamedItem &e : s_cache) if (e.name == name) { out = e.item; hit = true; break; }
+    stateUnlock();
+  }
+  return hit;
+}
+
+static void cachePut(const String &name, const sonos::DidlItem &item) {
+  if (stateLock()) {
+    for (NamedItem &e : s_cache) if (e.name == name) { e.item = item; stateUnlock(); return; }
+    // Evict oldest-first. With capacity == press slots the steady state never evicts at all; this
+    // only matters if a name is reconfigured, and then the stale one is the right thing to drop.
+    if (s_cache.size() >= kCacheMax) s_cache.erase(s_cache.begin());
+    s_cache.push_back({name, item});
+    stateUnlock();
+  }
+}
+
 void service(const String &browseIp, const String &coordIp, const String &coordUuid) {
   // 0) Play-by-name (the button's fast path). Handled before the generic browse/play below so a
   // press never waits behind anything, and so it can short-circuit on a cache hit.
   {
     String name; bool warm = false, have = false;
     if (stateLock()) {
-      if (s_reqName.length()) { name = s_reqName; warm = s_reqNameWarm; s_reqName = ""; have = true; }
+      if (s_reqName.length()) {
+        name = s_reqName; s_reqName = ""; have = true;
+      } else if (!s_warmQueue.empty()) {
+        // One warm-up per service() call, and only when no press is waiting: warming is
+        // housekeeping and must never put a browse in front of somebody's button.
+        name = s_warmQueue.front(); s_warmQueue.erase(s_warmQueue.begin());
+        have = true; warm = true;
+      }
       stateUnlock();
     }
     if (have) {
-      bool hit = false;
       sonos::DidlItem item;
-      if (stateLock()) {
-        if (s_cacheValid && s_cacheName == name) { item = s_cacheItem; hit = true; }
-        stateUnlock();
-      }
+      const bool cached = cacheGet(name, item);
+      bool hit = cached;
       if (!hit) {
         // Cold: resolve (the expensive browse) and cache it for next time.
         if (resolveNamed(browseIp, name, item)) {
-          if (stateLock()) { s_cacheName = name; s_cacheItem = item; s_cacheValid = true; stateUnlock(); }
+          cachePut(name, item);
           hit = true;
-        } else {
+        } else if (!warm) {
+          // Only a real press reports failure. A warm-up for some OTHER slot must not raise the
+          // flag while a press is in flight — the unit reads it as "the playlist you just asked
+          // for doesn't exist" and gives up on a start that was fine.
           if (stateLock()) { s_nameFailed = true; stateUnlock(); }
+        } else {
+          LOG.printf("[lib    ] warm \"%s\" — not found\n", name.c_str());
         }
       }
       if (hit && !warm) {
         LOG.printf("[lib    ] play \"%s\" %s res=%.40s\n", name.c_str(),
-                      (s_cacheValid && s_cacheName == name) ? "(cached)" : "(cold)",
-                      item.resUri.c_str());
+                      cached ? "(cached)" : "(cold)", item.resUri.c_str());
         playItem(coordIp, coordUuid, item);  // fast on a warm cache
       }
     }

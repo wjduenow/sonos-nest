@@ -26,6 +26,11 @@ void clearResults();                                         // free cached item
 // which is where the multi-second press-to-audio latency lived. `warmOnly` resolves and caches
 // without playing, to pre-warm at boot so even the first press is fast. Always enqueues looped
 // per setLoopMode(). A name that doesn't resolve is reported via playNamedFailed().
+//
+// SEVERAL names stay cached (the button maps one per press count), and warm-ups queue rather than
+// overwrite, so warming every configured slot in a row actually warms all of them. An empty name
+// is ignored outright — that's an unmapped press slot, not a request. Warm-ups never set
+// playNamedFailed(); only a real play does.
 void requestPlayNamed(const String &name, bool warmOnly = false);
 
 // One-shot: true if the most recent requestPlayNamed() couldn't find the playlist (so the unit

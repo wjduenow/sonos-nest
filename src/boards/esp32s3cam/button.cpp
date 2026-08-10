@@ -1,4 +1,4 @@
-// Debounce + Short/Long classification for the FLM12-FJ-6 on PIN_BUTTON. See button.h.
+// Debounce + Short/Double/Triple/Long classification for the FLM12-FJ-6 on PIN_BUTTON. See button.h.
 //
 // Thresholds are the ones measured by the Phase-0 bring-up (bringup.cpp) on the real button:
 // ~2 raw edges per press, all absorbed by a 30 ms window, with no chatter at idle.
@@ -13,12 +13,21 @@ static const uint32_t DEBOUNCE_MS   = 30;
 // is still a guess. If Long ever feels wrong, measure it before tuning: bringup.cpp prints the
 // held time on every release.
 static const uint32_t LONG_PRESS_MS = 700;
+// How long a release waits for the NEXT press before it is finally called a single press.
+// This is the whole cost of double/triple press: it is added to every single press, because
+// "one press" is only knowable once the window has passed without a second one. 350 ms is the
+// usual comfortable ceiling for a deliberate double-tap while still feeling prompt; the press
+// itself is acknowledged instantly by the unit's ring pulse, which runs off knobDown().
+static const uint32_t MULTI_GAP_MS  = 350;
+static const uint8_t  MAX_CLICKS    = 3;   // Triple is the deepest press this HAL classifies
 
 static bool      s_raw        = false;   // last raw sample
 static bool      s_stable     = false;   // debounced level
 static uint32_t  s_lastChange = 0;
 static uint32_t  s_pressedAt  = 0;
 static bool      s_longFired  = false;   // Long already emitted for this hold
+static uint8_t   s_clicks     = 0;       // releases so far in the current multi-press window
+static uint32_t  s_lastRelease= 0;       // when the most recent one landed
 static KnobEvent s_queued     = KnobEvent::None;
 
 static inline bool rawDown() { return digitalRead(PIN_BUTTON) == LOW; }   // active-low
@@ -27,6 +36,7 @@ void buttonInit() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);     // idle HIGH; the button shorts to GND
   s_raw = s_stable = rawDown();
   s_lastChange = millis();
+  s_clicks = 0;
   s_queued = KnobEvent::None;
 }
 
@@ -44,16 +54,31 @@ static void poll() {
       s_pressedAt = now;
       s_longFired = false;
     } else if (!s_longFired) {
-      // Short fires on RELEASE; a hold that already fired Long must not also fire Short.
-      s_queued = KnobEvent::Short;
+      // A release ENDS a click but no longer decides what the gesture was — that needs the gap
+      // below. A hold that already fired Long must not count as a click at all.
+      s_lastRelease = now;
+      if (++s_clicks >= MAX_CLICKS) {
+        // Deepest gesture we classify: emit it on the release itself rather than making the user
+        // wait out a window for a count that cannot grow.
+        s_queued = KnobEvent::Triple;
+        s_clicks = 0;
+      }
     }
   }
 
   // Long fires as soon as the threshold passes, without waiting for release — the contract
-  // core/board.h documents.
+  // core/board.h documents. It also abandons any clicks banked before the hold: a press-press-HOLD
+  // is a hold, not a double press with a hold stapled on.
   if (s_stable && !s_longFired && (now - s_pressedAt) >= LONG_PRESS_MS) {
     s_longFired = true;
+    s_clicks    = 0;
     s_queued    = KnobEvent::Long;
+  }
+
+  // The multi-press window closed with the button up: whatever was banked is the gesture.
+  if (s_clicks && !s_stable && (now - s_lastRelease) >= MULTI_GAP_MS) {
+    s_queued = (s_clicks == 1) ? KnobEvent::Short : KnobEvent::Double;
+    s_clicks = 0;
   }
 }
 

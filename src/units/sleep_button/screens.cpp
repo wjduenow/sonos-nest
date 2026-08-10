@@ -5,6 +5,12 @@
 // application: press the button -> the configured Sonos room starts the configured saved
 // playlist, looped, at the configured volume. Press again -> stop.
 //
+// A double and a triple press start their OWN configured playlist and volume (settings.h press
+// slots; both default to unmapped, so a device nobody has configured behaves exactly as before).
+// Those two always START — they switch the room onto their playlist whatever it is doing. Only the
+// single press stops, deliberately: with three gestures that can start something, "which press
+// stops it?" has to have one answer, and the one press everybody already knows is it.
+//
 // Named screens.cpp to match the other units' layout, even though there are no screens — the
 // build_src_filter globs units/<unit>/ and consistency costs nothing.
 #include "core/unit.h"
@@ -40,6 +46,8 @@ static bool     s_listed    = false;   // the config page's playlist list has be
 static uint32_t s_cfgGen    = 0;
 static uint8_t  s_lastVol   = 0;       // last volume we pushed to Sonos; seeded in uiInit()
 static uint32_t s_pulseEnd  = 0;       // ring-pulse deadline (0 = not pulsing)
+static bool     s_wasDown   = false;   // previous knobDown(), for the press-edge pulse
+static uint8_t  s_slot      = 1;       // press slot whose playlist is starting/playing
 
 // All ring writes funnel through here so the pulse and the resting level can't fight over the
 // pin: while a pulse is active the tick restores the resting level when it expires.
@@ -67,7 +75,7 @@ void uiInit() {
   // Apply the persisted ring level. Until this runs the ring is dark (boardInit leaves it off),
   // so a reboot never flashes the ring at full brightness in a dark room.
   s_cfgGen  = webConfigGen();
-  s_lastVol = settingsVolume();   // seed, don't apply: a reboot must not shove the room's
+  s_lastVol = settingsVolume(1);  // seed, don't apply: a reboot must not shove the room's
                                   // volume around on its own
   ringRest();
 
@@ -75,22 +83,34 @@ void uiInit() {
   // has exactly one play mode and never wants a playlist to just stop at 3am.
   library::setLoopMode(true);
 
-  LOG.printf("[unit   ] ring %u%%, playlist \"%s\" @ vol %u\n",
-                settingsRing(), settingsPlaylist().c_str(), settingsVolume());
+  for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s) {
+    const String name  = settingsPlaylist(s);
+    const String label = name.length() ? "\"" + name + "\"" : String("(unmapped)");
+    LOG.printf("[unit   ] press x%u: %s @ vol %u\n", s, label.c_str(), settingsVolume(s));
+  }
+  LOG.printf("[unit   ] ring %u%%\n", settingsRing());
 }
 
 // Kick off "play the configured playlist". No browse on the hot path: requestPlayNamed() plays
 // straight from the resolved-item cache (warmed at boot / on config change), so the press turns
 // into just the enqueue+play SOAP calls. Volume goes first; netTask applies targetVolume to the
 // SPEAKER while transport goes to the group COORDINATOR — app.cpp handles that split.
-static void startPlaylist() {
-  const uint8_t vol = settingsVolume();
+static void startPlaylist(uint8_t slot) {
+  const String name = settingsPlaylist(slot);
+  if (name.length() == 0) {
+    // An unmapped double/triple press. Do nothing at all rather than falling back to slot 1: a
+    // press that quietly starts something you didn't map is worse than a press that does nothing.
+    LOG.printf("[unit   ] press x%u — unmapped, ignored\n", slot);
+    return;
+  }
+  const uint8_t vol = settingsVolume(slot);
   s_lastVol = vol;
   if (stateLock()) { g_pending.targetVolume = vol; stateUnlock(); }
-  library::requestPlayNamed(settingsPlaylist());
+  library::requestPlayNamed(name);
+  s_slot    = slot;
   s_st      = St::Starting;
   s_startMs = millis();
-  LOG.printf("[unit   ] start \"%s\" @ vol %u\n", settingsPlaylist().c_str(), vol);
+  LOG.printf("[unit   ] press x%u start \"%s\" @ vol %u\n", slot, name.c_str(), vol);
 }
 
 static void stopPlayback() {
@@ -148,16 +168,21 @@ void uiTick() {
 
     // Push volume changes to Sonos immediately, not just at the next press. Reading it only in
     // startPlaylist() made the page's slider look broken: dragging it while playing did nothing.
-    const uint8_t vol = settingsVolume();
+    // It's the ACTIVE slot's volume that's live — dragging the double-press slider while the
+    // single-press playlist plays must not move the room, or the two sliders fight.
+    const uint8_t vol = settingsVolume(s_slot);
     if (vol != s_lastVol) {
       s_lastVol = vol;
       if (stateLock()) { g_pending.targetVolume = vol; stateUnlock(); }
-      LOG.printf("[unit   ] volume -> %u\n", vol);
+      LOG.printf("[unit   ] volume -> %u (slot %u)\n", vol, s_slot);
     }
 
-    // The playlist pick may have changed. Re-warm the cache for the current name so the next
-    // press is fast (and a same-name delete/recreate re-resolves). warmOnly => resolve, no play.
-    library::requestPlayNamed(settingsPlaylist(), /*warmOnly=*/true);
+    // A playlist pick may have changed. Re-warm every mapped slot so the next press is fast
+    // whichever one it is (and a same-name delete/recreate re-resolves). warmOnly => resolve, no
+    // play; requestPlayNamed ignores an unmapped "" and queues the rest one browse per netTask
+    // pass, so this costs nothing on the press path.
+    for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s)
+      library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true);
   }
 
   // --- snapshot the shared state once -----------------------------------------------------
@@ -181,11 +206,21 @@ void uiTick() {
   }
 
   // --- the button -------------------------------------------------------------------------
-  // Short is the toggle this product exists for. Long is reserved: §1 wants hold-at-boot for
-  // the WiFi portal, which is a boot-time check, not a runtime event.
+  // Short is the toggle this product exists for; Double/Triple start their own press slot. Long is
+  // reserved: §1 wants hold-at-boot for the WiFi portal, which is a boot-time check, not a runtime
+  // event.
+  //
+  // The pulse now rides the press EDGE, not the Short event. Classifying multi-presses means Short
+  // can only fire once the multi-press window has closed (~350 ms after release), and feedback that
+  // arrives a third of a second after your finger reads as a missed press — the exact thing the
+  // pulse was added to prevent. knobDown() is still edge-immediate, and pulsing per press also
+  // makes a double or triple press countable in the dark.
+  const bool down = knobDown();
+  if (down && !s_wasDown) ringPulse();
+  s_wasDown = down;
+
   const KnobEvent ev = knobEvent();
   if (ev == KnobEvent::Short) {
-    ringPulse();   // acknowledge the press instantly, before any network work
     // Stop when the room is actively playing FROM ITS QUEUE — that's what this button starts, so a
     // press should stop it whether WE started it, the Sonos app did, or we rebooted mid-play (s_st
     // is then Idle but the queue keeps going — the reported bug where a press re-enqueued instead of
@@ -195,7 +230,11 @@ void uiTick() {
     // nothing — which is why this can't simply stop on tr==Playing (see df5141a).
     const bool playingOurQueue = (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
     if (s_st == St::Starting || playingOurQueue) stopPlayback();
-    else                                         startPlaylist();
+    else                                         startPlaylist(1);
+  } else if (ev == KnobEvent::Double) {
+    startPlaylist(2);   // always starts — see the file header on why only x1 stops
+  } else if (ev == KnobEvent::Triple) {
+    startPlaylist(3);
   } else if (ev == KnobEvent::Long) {
     LOG.println("[unit   ] button Long — reserved");
   }
@@ -210,8 +249,10 @@ void uiTick() {
         s_st     = St::Idle;
         LOG.printf("[unit   ] %u playlists published to the config page\n",
                       (unsigned)labels.size());
-        // Pre-warm the resolved-item cache so the very first press is already fast.
-        library::requestPlayNamed(settingsPlaylist(), /*warmOnly=*/true);
+        // Pre-warm the resolved-item cache so the very first press is already fast — every mapped
+        // slot, since any of the three can be the first press after a reboot.
+        for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s)
+          library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true);
       } else if (now - s_startMs > START_TIMEOUT_MS) {
         s_listed = true;                 // don't retry forever; the page just shows a text box
         s_st     = St::Idle;
@@ -223,8 +264,8 @@ void uiTick() {
       // requestPlayNamed() is doing the work on netTask. We just wait for the room to reach
       // Playing, surface a resolve failure, or time out.
       if (library::playNamedFailed()) {
-        LOG.printf("[unit   ] playlist \"%s\" not found — set one on the config page\n",
-                      settingsPlaylist().c_str());
+        LOG.printf("[unit   ] playlist \"%s\" (press x%u) not found — set one on the config page\n",
+                      settingsPlaylist(s_slot).c_str(), s_slot);
         s_st = St::Idle;
       } else if (tr == TransportState::Playing) {
         s_st = St::Playing;

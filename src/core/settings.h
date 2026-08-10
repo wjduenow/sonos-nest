@@ -89,8 +89,19 @@ String  settingsUpdateUrl();             // firmware manifest URL; "" (default) 
 void    settingsSetUpdateUrl(const String &url);   // espota-only. Portal (LAN http) or GitHub (https).
 
 // --- sonos-button ---
-String  settingsPlaylist();              // Sonos saved-playlist name to start, default "Sleep"
-void    settingsSetPlaylist(const String &name);
+// Three press slots: 1 = single press, 2 = double, 3 = triple. Each maps to one saved playlist (or
+// playlist-type favourite) and the volume to set before starting it — a wake-up favourite wants a
+// very different level from the bedtime one, which is why the volume is per slot and not global.
+//
+// Slot 1 keeps the ORIGINAL NVS keys ("playlist"/"btnvol"), so a device already in service keeps
+// its configured pick and volume across this upgrade. Slots 2 and 3 default to "" = unmapped: a
+// double/triple press on a device nobody has configured does nothing, rather than guessing.
+// Out-of-range slots are treated as slot 1 rather than asserting — a bad slot must not brick the
+// one press that matters.
+static const uint8_t SETTINGS_PRESS_SLOTS = 3;
 
-uint8_t settingsVolume();                // fixed volume the button plays at (0..100), default 30
-void    settingsSetVolume(uint8_t pct);
+String  settingsPlaylist(uint8_t slot = 1);   // "" = unmapped (slots 2/3); slot 1 defaults "Sleep"
+void    settingsSetPlaylist(uint8_t slot, const String &name);
+
+uint8_t settingsVolume(uint8_t slot = 1);     // volume to set before starting that slot, default 30
+void    settingsSetVolume(uint8_t slot, uint8_t pct);

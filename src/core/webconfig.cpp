@@ -82,6 +82,15 @@ static bool parsePct(const String &value, long &out) {
   return out >= 0 && out <= 100;
 }
 
+// "playlist"/"volume" -> press slot 1 (single press), "…2" -> double, "…3" -> triple. The
+// un-suffixed spelling is slot 1 rather than a fourth name so the field the config page has always
+// posted keeps meaning what it did.
+static uint8_t pressSlot(const String &field) {
+  if (field.endsWith("2")) return 2;
+  if (field.endsWith("3")) return 3;
+  return 1;
+}
+
 String webConfigJson() {
   JsonDocument doc;
   doc["sleepTrack"] = settingsSleepTrack();
@@ -89,8 +98,14 @@ String webConfigJson() {
   doc["room"]       = settingsRoom();
   doc["ring"]       = settingsRing();
   doc["brightness"] = settingsBrightness();   // screen units (nest); the unit applies changes
-  doc["playlist"]   = settingsPlaylist();
-  doc["volume"]     = settingsVolume();
+  // The button's three press slots. playlist/volume stay un-suffixed for slot 1 (single press) so
+  // the field names the config page has always posted keep working; 2 and 3 are double and triple.
+  doc["playlist"]   = settingsPlaylist(1);
+  doc["volume"]     = settingsVolume(1);
+  doc["playlist2"]  = settingsPlaylist(2);   // "" = unmapped: that press does nothing
+  doc["volume2"]    = settingsVolume(2);
+  doc["playlist3"]  = settingsPlaylist(3);
+  doc["volume3"]    = settingsVolume(3);
   // Radio catalogue refresh. Belongs in the CONFIG document, not the registration payload — that
   // one is identity only (who and where), and putting settings there means the config page cannot
   // read back what it just wrote.
@@ -380,13 +395,13 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     return false;
   }
 
-  if (field == "ring" || field == "volume") {
+  if (field == "ring" || field == "volume" || field == "volume2" || field == "volume3") {
     // toInt() yields 0 on garbage, and 0 is legitimate for both of these, so validate the text
     // rather than trusting the parse — otherwise "banana" silently means "off"/"silent".
     long v;
     if (!parsePct(value, v)) { err = field + " must be a number 0..100"; return false; }
     if (field == "ring") settingsSetRing((uint8_t)v);   // the unit applies it via webConfigGen
-    else                 settingsSetVolume((uint8_t)v); // read at press time; nothing to apply
+    else settingsSetVolume(pressSlot(field), (uint8_t)v);  // read at press time; nothing to apply
     s_gen++;
     return true;
   }
@@ -401,8 +416,16 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     return true;
   }
 
-  if (field == "playlist") {
-    if (value.length() == 0) { err = "pick a playlist"; return false; }
+  if (field == "playlist" || field == "playlist2" || field == "playlist3") {
+    const uint8_t slot = pressSlot(field);
+    // Slot 1 is the button's whole reason to exist and must always point at something; 2 and 3 are
+    // opt-in, so "" is a legitimate value there — it's how you un-map a double/triple press.
+    if (value.length() == 0) {
+      if (slot == 1) { err = "pick a playlist"; return false; }
+      settingsSetPlaylist(slot, "");
+      s_gen++;
+      return true;
+    }
     // Validate against the browsed list when we have one: a typo'd name fails at 2am with the
     // button doing nothing, which is the worst possible time to discover it. Before the first
     // browse lands the cache is empty — accept then, rather than refusing to configure at all.
@@ -411,7 +434,7 @@ bool webConfigApply(const String &field, const String &value, String &err) {
       for (const String &n : s_playlists) if (n == value) { known = true; break; }
       if (!known) { err = "no such playlist"; return false; }
     }
-    settingsSetPlaylist(value);
+    settingsSetPlaylist(slot, value);
     s_gen++;   // signal the unit to re-warm its play-by-name cache for the new pick
     return true;
   }
