@@ -131,12 +131,30 @@ inline bool playerVolumeHeld(const PlayerState &p) {
 //   and can only infer "back to zero" from the track having changed. Resetting it on every event
 //   that happened to carry a title is what sent the scrubber to 0:00 on pause.
 inline bool playerApplyTrack(PlayerState &dst, const PlayerState &src) {
-  const bool changed = (src.title != dst.title) || (src.artist != dst.artist);
-  dst.title  = src.title;
-  dst.artist = src.artist;
-  dst.album  = src.album;
-  if (src.artUri.length() || changed) dst.artUri = src.artUri;
-  return changed;
+  // IDENTITY IS THE TITLE ALONE. Comparing artist too looked more thorough and was wrong: the same
+  // track arrives with different amounts of detail depending on which source described it. A play
+  // event on a direct Spotify track falls back to AVTransportURIMetaData, which has the title but
+  // no artist and no art — so against a poll-populated state it compared "unequal", was taken for a
+  // new track, and replaced good art with nothing. That is the "art vanishes on play" bug.
+  const bool changed = src.title.length() && (src.title != dst.title);
+
+  if (changed) {
+    // A genuinely different track: take everything, blanks included. The new track may legitimately
+    // have no artist and no cover, and the old ones must not linger.
+    dst.title  = src.title;
+    dst.artist = src.artist;
+    dst.album  = src.album;
+    dst.artUri = src.artUri;
+    return true;
+  }
+
+  // Same track, possibly described more sparsely than we already have it. Partial updates ENRICH,
+  // they never erase — otherwise every stub-metadata event strips fields the poll had filled in.
+  if (src.title.length())  dst.title  = src.title;
+  if (src.artist.length()) dst.artist = src.artist;
+  if (src.album.length())  dst.album  = src.album;
+  if (src.artUri.length()) dst.artUri = src.artUri;
+  return false;
 }
 
 inline uint32_t playerPositionNow(const PlayerState &p) {
