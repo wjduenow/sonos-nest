@@ -61,6 +61,34 @@ static const lv_coord_t PAD_BOT   = 18;
 static const lv_coord_t ART       = 280;   // album art tile, radius --r-lg
 static const lv_coord_t GAP       = 34;    // art -> text column
 
+// LVGL's built-in Montserrat fonts carry ASCII 0x20-0x7F and exactly two extras: 0xB0 (degree) and
+// 0x2022 (bullet). Anything else — the U+00B7 MIDDLE DOT this file used as a separator, an em dash,
+// an ellipsis — has no glyph and draws as a MISSING-GLYPH BOX on the panel. It looks like mojibake
+// and there is no build warning. Use these, or extend the font's range; do not paste a nicer
+// character in and assume it renders.
+#define JB_SEP  "  \xE2\x80\xA2  "   // U+2022 BULLET, in range
+#define JB_DASH "--"                 // stands in for an em dash
+
+// --- Now Playing vertical rhythm --------------------------------------------------------------
+// The text column is laid out against the ART TILE, not the page centre: the playhead's timecodes
+// bottom-align with the bottom edge of the cover, so the two columns read as one block. Every
+// value below is an absolute page Y, so the relationships are visible without running it.
+//
+// The title reserves TWO lines permanently. LV_LABEL_LONG_DOT only ellipsises when the label has a
+// fixed height — without one the label grows downwards and a two-line title lands on top of the
+// metadata line, which is exactly what it was doing.
+static const lv_coord_t NP_ART_TOP  = (SCREEN_H - ART) / 2;            // 160
+static const lv_coord_t NP_ART_BOT  = NP_ART_TOP + ART;                // 440
+static const lv_coord_t NP_TITLE_LH = 52;   // lv_font_montserrat_48 .line_height
+static const lv_coord_t NP_TITLE_H  = NP_TITLE_LH * 2;
+static const lv_coord_t NP_META_H   = 24;   // lv_font_montserrat_22 .line_height
+static const lv_coord_t NP_SMALL_H  = 15;   // lv_font_montserrat_12 .line_height
+static const lv_coord_t NP_BADGE_Y  = NP_ART_TOP + 26;                 // 186
+static const lv_coord_t NP_TITLE_Y  = NP_BADGE_Y + NP_SMALL_H + 13;    // 214
+static const lv_coord_t NP_META_Y   = NP_TITLE_Y + NP_TITLE_H + 18;    // 336
+static const lv_coord_t NP_TIMES_Y  = NP_ART_BOT - NP_SMALL_H;         // 425 -> bottom == art bottom
+static const lv_coord_t NP_TRACK_Y  = NP_TIMES_Y - 8 - 6;              // 411
+
 static lv_obj_t *s_content = nullptr;
 static lv_obj_t *s_provisioning = nullptr;
 
@@ -129,6 +157,7 @@ static lv_obj_t *s_dot = nullptr, *s_room = nullptr, *s_group = nullptr, *s_cloc
 // Now playing
 static lv_obj_t *s_art = nullptr, *s_artImg = nullptr, *s_artPh = nullptr, *s_badgeSrc = nullptr, *s_title = nullptr, *s_meta = nullptr;
 static lv_obj_t *s_elapsed = nullptr, *s_remain = nullptr, *s_track = nullptr, *s_fill = nullptr;
+static lv_coord_t s_textW = 0;   // width of the Now Playing text column; placeTitle() measures against it
 // Transport + volume
 static lv_obj_t *s_play = nullptr, *s_playLbl = nullptr;
 static lv_obj_t *s_volIcon = nullptr, *s_volFill = nullptr, *s_volPct = nullptr;
@@ -159,6 +188,20 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
   if (cache == next) return;
   cache = next;
   lv_label_set_text(l, next.c_str());
+}
+
+// The title slot is two lines tall whether or not the title needs both (LV_LABEL_LONG_DOT can only
+// ellipsise against a FIXED height). A one-line title left at the top of that slot reads as a
+// mis-alignment against the badge above and the metadata below, so measure the wrapped text and
+// drop a short one by half a line to sit centred. Called on every title change, not per frame.
+static void placeTitle() {
+  if (!s_title || !s_textW) return;
+  lv_point_t sz;
+  lv_text_get_size(&sz, lv_label_get_text(s_title), &lv_font_montserrat_48,
+                   lv_obj_get_style_text_letter_space(s_title, LV_PART_MAIN),
+                   lv_obj_get_style_text_line_space(s_title, LV_PART_MAIN),
+                   s_textW, LV_TEXT_FLAG_NONE);
+  lv_obj_set_y(s_title, NP_TITLE_Y + (sz.y <= NP_TITLE_LH ? NP_TITLE_LH / 2 : 0));
 }
 
 // --- Commands ---------------------------------------------------------------------------------
@@ -310,7 +353,7 @@ static void buildStatusBar() {
   s_dot = panel(s_content, 9, 9, JB_ACCENT, LV_RADIUS_CIRCLE);
   lv_obj_align(s_dot, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 6);
 
-  s_room = label(s_content, "—", &lv_font_montserrat_16, JB_TEXT);
+  s_room = label(s_content, JB_DASH, &lv_font_montserrat_16, JB_TEXT);
   lv_obj_align(s_room, LV_ALIGN_TOP_LEFT, 18, PAD_TOP);
 
   s_group = label(s_content, "", &lv_font_montserrat_12, JB_TEXT_DIM);
@@ -324,7 +367,7 @@ static void buildNowPlaying() {
   // Album art. Solid --screen-elev until core/album_art delivers a real cover; the design uses a
   // rounded tile with a hairline, never a bare rectangle.
   s_art = panel(s_page[PAGE_NOW], ART, ART, JB_SCREEN_ELEV, JB_R_LG);
-  lv_obj_align(s_art, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align(s_art, LV_ALIGN_TOP_LEFT, 0, NP_ART_TOP);
   lv_obj_set_style_border_width(s_art, 1, 0);
   lv_obj_set_style_border_color(s_art, lv_color_hex(JB_SCREEN_LINE), 0);
   s_artPh = label(s_art, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, JB_SCREEN_LINE);
@@ -340,30 +383,40 @@ static void buildNowPlaying() {
 
   const lv_coord_t textX = ART + GAP;
   const lv_coord_t textW = SCREEN_W - RAIL_W - PAD_X * 2 - textX;
+  s_textW = textW;
 
   s_badgeSrc = label(s_page[PAGE_NOW], "", &lv_font_montserrat_12, JB_ACCENT);
-  lv_obj_align(s_badgeSrc, LV_ALIGN_LEFT_MID, textX, -118);
+  lv_obj_align(s_badgeSrc, LV_ALIGN_TOP_LEFT, textX, NP_BADGE_Y);
 
+  // Two reserved lines, ellipsised past that (see NP_TITLE_H). placeTitle() re-centres a one-line
+  // title inside the slot on every change so a short title isn't pinned to the top of a hole.
   s_title = label(s_page[PAGE_NOW], "Sonos Jukebox", &lv_font_montserrat_48, JB_TEXT);
   lv_label_set_long_mode(s_title, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(s_title, textW);
-  lv_obj_align(s_title, LV_ALIGN_LEFT_MID, textX, -64);
+  lv_obj_set_size(s_title, textW, NP_TITLE_H);
+  lv_obj_align(s_title, LV_ALIGN_TOP_LEFT, textX, NP_TITLE_Y);
 
+  // Artist · album, ONE line. It used to be height-less too, so a long album name wrapped onto a
+  // second line and landed on the scrubber.
   s_meta = label(s_page[PAGE_NOW], "starting up", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_label_set_long_mode(s_meta, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(s_meta, textW);
-  lv_obj_align(s_meta, LV_ALIGN_LEFT_MID, textX, -8);
+  lv_obj_set_size(s_meta, textW, NP_META_H);
+  lv_obj_align(s_meta, LV_ALIGN_TOP_LEFT, textX, NP_META_Y);
 
-  // Scrubber: 6px track, accent fill, mono-ish timecodes beneath.
+  // Scrubber: 6px track, accent fill, timecodes beneath. The timecodes' baseline is the bottom of
+  // the album art — anchor them to the track so the pair stays glued if the rhythm is retuned.
   s_track = panel(s_page[PAGE_NOW], textW, 6, JB_SCREEN_ELEV_2, 3);
-  lv_obj_align(s_track, LV_ALIGN_LEFT_MID, textX, 48);
+  lv_obj_align(s_track, LV_ALIGN_TOP_LEFT, textX, NP_TRACK_Y);
   s_fill = panel(s_track, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_fill, LV_ALIGN_LEFT_MID, 0, 0);
 
   s_elapsed = label(s_page[PAGE_NOW], "0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
-  lv_obj_align(s_elapsed, LV_ALIGN_LEFT_MID, textX, 68);
+  lv_obj_align_to(s_elapsed, s_track, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+  // Right-aligned against the end of the track. The old fixed -44 offset guessed the width of the
+  // string, so "-1:08" and "-12:08" did not end in the same place.
   s_remain = label(s_page[PAGE_NOW], "-0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
-  lv_obj_align(s_remain, LV_ALIGN_LEFT_MID, textX + textW - 44, 68);
+  lv_obj_align_to(s_remain, s_track, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 8);
+
+  placeTitle();
 }
 
 static void buildTransport() {
@@ -794,7 +847,7 @@ static void refreshRooms() {
 
     if (inGroup) {
       groupSize++;
-      if (members.length()) members += "  ·  ";
+      if (members.length()) members += JB_SEP;
       members += r.name;
       if (r.volOk) { groupVolSum += r.vol; groupVolN++; }
     }
@@ -823,11 +876,11 @@ static void refreshRooms() {
     if (active) lv_obj_remove_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
     else        lv_obj_add_flag(u.badge, LV_OBJ_FLAG_HIDDEN);
 
-    // Caption, per the design: "Playing · grouped" only when the group really has >1 member.
+    // Caption, per the design: "Playing / grouped" only when the group really has >1 member.
     const char *cap;
     if (!r.transportOk)   cap = "--";
     else if (!playing)    cap = "Idle";
-    else if (r.groupSize > 1) cap = "Playing  ·  grouped";
+    else if (r.groupSize > 1) cap = "Playing" JB_SEP "grouped";
     else                  cap = "Playing";
     lv_label_set_text(u.caption, cap);
 
@@ -936,7 +989,7 @@ static void buildRooms() {
   s_grpPlayLbl = label(s_grpPlay, LV_SYMBOL_PLAY, &lv_font_montserrat_20, JB_ACCENT_INK);
   lv_obj_center(s_grpPlayLbl);
 
-  lv_obj_t *sec = label(pg, "ALL ROOMS  ·  TAP THE BOX TO GROUP", &lv_font_montserrat_12,
+  lv_obj_t *sec = label(pg, "ALL ROOMS" JB_SEP "TAP THE BOX TO GROUP", &lv_font_montserrat_12,
                         JB_TEXT_DIM);
   lv_obj_align(sec, LV_ALIGN_TOP_LEFT, 2, RM_LIST_Y - 24);
 
@@ -1304,7 +1357,7 @@ static void saveNameCb(lv_event_t *) {
   }
   uiSoundPlay(UiSound::Confirm);
   settingsSetDeviceName(n);
-  lv_label_set_text(s_saveHint, "Saved — restarting to apply…");
+  lv_label_set_text(s_saveHint, "Saved " JB_DASH " restarting to apply...");
   if (stateLock()) { g_pending.reboot = true; stateUnlock(); }
 }
 
@@ -2077,11 +2130,14 @@ void uiTick() {
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));
-  setTextIfChanged(s_title, s_shown.title,
-                   p.title.length() ? p.title : String("Nothing playing"));
+  const String wantTitle = p.title.length() ? p.title : String("Nothing playing");
+  if (s_shown.title != wantTitle) {
+    setTextIfChanged(s_title, s_shown.title, wantTitle);
+    placeTitle();
+  }
 
   String meta = p.artist;
-  if (p.album.length()) { if (meta.length()) meta += "  ·  "; meta += p.album; }
+  if (p.album.length()) { if (meta.length()) meta += JB_SEP; meta += p.album; }
   setTextIfChanged(s_meta, s_shown.meta, meta);
 
   const bool playing = (p.transport == TransportState::Playing);
@@ -2137,7 +2193,7 @@ void uiTick() {
                                      : ((p.durationSec > posSec) ? p.durationSec - posSec : 0);
   if (remain != s_shown.remain) {
     s_shown.remain = remain;
-    if (unknownDur) lv_label_set_text(s_remain, "—");
+    if (unknownDur) lv_label_set_text(s_remain, JB_DASH);
     else { fmtTime(buf, sizeof(buf), remain, true); lv_label_set_text(s_remain, buf); }
   }
 
