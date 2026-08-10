@@ -129,6 +129,26 @@ static bool selectZone() {
 
 static uint32_t s_lastPoll = 0, s_lastVolCmd = 0, s_lastCoordRefresh = 0;
 
+// A grouping change is not visible in GetZoneGroupState the instant the command returns — Sonos
+// applies it asynchronously. The re-read that follows a group op therefore races it and often
+// captures the OLD topology, and nothing afterwards ever re-reads the zone list: the 60 s tick
+// resolves the coordinator IP and discards the topology it fetched. So an ungrouped room kept
+// showing as grouped until the device was rebooted. This schedules one more read a few seconds
+// later, which settles it.
+static uint32_t s_topoRecheckMs = 0;
+
+// Name + coordinator per zone. Compared across a re-read so g_zonesGen is bumped only on a real
+// change — rebuildRooms() tears down and recreates every row, which is visible if you are on the
+// page and pointless if nothing moved.
+static String topologySignature() {
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);
+  String sig;
+  sig.reserve(zs.size() * 48);
+  for (const auto &z : zs) { sig += z.name; sig += '='; sig += z.coordinatorUuid; sig += ';'; }
+  return sig;
+}
+
 // Dead-link detection state (see netTask). File scope rather than a function-local static because
 // the Wi-Fi supervisor at the top of the loop has to be able to clear it: an AP that actually goes
 // away must not leave a half-armed streak behind that turns the NEXT sighting into a reboot.
@@ -202,9 +222,15 @@ static void processPending() {
     else         sonos::becomeStandalone(op.ip);
   }
   if (p.ungroupAll || !p.groupOps.empty()) {
+    // Give Sonos a moment to actually apply it before asking what the topology is — without this
+    // the read usually returns the pre-change state.
+    vTaskDelay(pdMS_TO_TICKS(800));
     sonos::ssdpDiscover();
     selectZoneByIp(s_zoneIp);
     g_zonesGen++;
+    // And confirm a few seconds later, because 800 ms is a heuristic and this is the only thing
+    // that re-reads the zone list at all.
+    s_topoRecheckMs = millis() + 4000;
     // Deliberately NOT dropping the per-room status cache here: roomstatus carries volume and
     // still-valid transport across the topology change itself. Blanking it made every checkbox
     // tap wipe the page back to "--" for a second and a half.
@@ -405,6 +431,18 @@ static void netTask(void *) {
     // a full GetZoneGroupState fetch + parse of the whole topology XML (tens of KB in a big house),
     // String-heavy every time — and a stale IP is now caught within seconds by notePollResult()
     // anyway, so the frequent refresh bought little but heap churn.
+    if (s_topoRecheckMs && (int32_t)(millis() - s_topoRecheckMs) >= 0) {
+      s_topoRecheckMs = 0;
+      const String before = topologySignature();
+      if (sonos::ssdpDiscover()) {
+        selectZoneByIp(s_zoneIp);
+        if (topologySignature() != before) {
+          g_zonesGen++;                       // it really moved — let the Rooms page rebuild
+          LOG.println("[zone] topology settled after a grouping change");
+        }
+      }
+    }
+
     if (millis() - s_lastCoordRefresh > 60000) {
       s_lastCoordRefresh = millis();
       String c = sonos::coordinatorIpFor(s_zoneName);
