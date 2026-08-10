@@ -126,29 +126,21 @@ Datasheet mirrored here: [`modulino-knob-ABX00107-datasheet.pdf`](modulino-knob-
 > Note the design system's control-layout spec says "24-detent enc." — the real part is **30
 > detents**. Cosmetic, but it is what the firmware will see per revolution.
 
-### Button I/O expander — **Adafruit PCF8574 breakout**, product `5545`
-STEMMA QT / Qwiic. Outline and holes are **exact**, taken from Adafruit's own Eagle file
-(`Adafruit PCF8574 QT.brd`, [github.com/adafruit/Adafruit-PCF8574-PCB](https://github.com/adafruit/Adafruit-PCF8574-PCB)) rather than the product page.
+### Button I/O expander — **dropped, not pending**
+The four transport buttons and the **Adafruit PCF8574** expander that would have read them were
+removed once the dial became the only control. Nothing needs buying, and the consequences are
+worth stating because they simplified the whole build:
 
-| | value |
-|---|---|
-| Board | **25.40 × 17.78 mm** (exactly 1.0" × 0.7"), **4.6 mm** tall incl. connectors |
-| Mounting | **2× Ø2.5 plated**, at (2.54, 2.54) and (22.86, 2.54) → **20.32 mm centre-to-centre** |
-| GPIO | **8** (four are used) |
-| **I²C address** | **0x20**, jumpers A0/A1/A2 give **0x20–0x27** |
+- The I²C chain is **one board** — `J13` → Modulino Knob. No daisy-chain hop, no second cable.
+- The bus carries **GT911 0x5D · unidentified 0x2F · Knob 0x3A**, and nothing else.
+- **The only soldering left in the entire build is the two USB-C power wires.** No carrier PCB,
+  no switch wiring, no crimping.
 
-> ✅ 0x20–0x27 clears the GT911 (0x5D), the unidentified 0x2F and the Knob (0x76).
-> All four bus addresses are now known and distinct.
-
-> Wiring note: PCF8574 inputs idle high on a weak (~100 µA) internal source, so the buttons
-> simply switch to **GND** — no external pull-ups. The chip also has an **INT** output if
-> polling ever proves too costly; poll it from **netTask, never the UI task**, since the bus is
-> shared with the touch controller.
-
-It mounts **flat on the case floor beneath the button grid** — the switch bodies hang down from
-the face plate at z ≈ 19.5 while the expander lives at z 4.0–8.6, so they share the same XY area
-but never collide in Z. That was the only way to fit it: stacking it in the column alongside the
-dial, buttons and USB-C breakout needs ~112 mm of a 122 mm interior, which leaves no usable gaps.
+If buttons ever come back, the analysis is in git history: PCF8574 at 0x20–0x27, 8 GPIO, mounted
+flat on the floor beneath the grid (switch bodies hang from the face at z ≈ 19.5, expander at
+z 4.0–8.6 — same XY, different Z), and 12 × 12 mm PCB-mount tact switches on a carrier at
+`BTN_PITCH` 22.86 so they land on 2.54 mm perfboard. Panel-mount buttons do **not** fit: they are
+20–25 mm long behind the face and only 12.4 mm is available.
 
 ### Bus cable — **Adafruit `4528`**, Grove → STEMMA QT / Qwiic / JST-SH, 100 mm
 <https://www.adafruit.com/product/4528>
@@ -169,22 +161,73 @@ anything else without this adapter.
 > SDA and GND on SCL. The Adafruit cable maps by wire colour and gets this right; a hand-made one
 > only does if you deliberately reverse it. Worth a continuity check either way.
 
-One cable is enough for both boards: it reaches `J13` → **Knob**, and the second Qwiic socket on
-the Knob daisy-chains to the **PCF8574** with an ordinary Qwiic–Qwiic cable.
+**One cable is all it takes**, now that the expander is gone: `J13` → **Knob**, and the Knob's
+second Qwiic socket stays empty.
 
 ### Still pending selection
-- **4× momentary switches** — bodies TBD; the design calls for Ø13 caps on a 9 mm pitch.
-- **1× dial cap** — Ø36, 14 mm proud, knurled, **Ø6 D-bore**.
-- **1× Qwiic–Qwiic cable** for the Knob → PCF8574 hop (any length ≥ 50 mm).
-
-Both I2C boards **daisy-chain into `J13`**, the board's Crowtail I2C connector (front-x ≈ 136.9,
-y ≈ 96.57 — conveniently on the column side).
-
-> ⚠️ **Check the GPIO breakout's address before buying.** The bus carries the **GT911 at 0x5D**, an
-> **unidentified device at 0x2F** (see `plans/07-sonos-jukebox.md`) and now the **Knob at 0x76**.
-> A collision would be silent and painful to diagnose.
+- **1× dial cap** — Ø42, 14 mm proud, **Ø6 D-bore**, if you buy rather than print
+  (`wall/knob_cap.stl` is the printed one). Must be a **D-shaft** knob, not knurled/splined.
 
 ## Assembly notes
+
+### Wiring — what is crimped, what is soldered, what is neither
+
+There are exactly **two** electrical connections to make, and only one of them needs an iron.
+
+| link | connector pair | what it takes |
+|---|---|---|
+| USB-C breakout → `J10` (power) | JST **XH 2.54 mm** 4-pin | pre-made XH pigtail — **no crimping**. Solder **two wires to the breakout** |
+| Modulino Knob → `J13` (I²C) | Crowtail 2.0 mm ↔ Qwiic JST-SH 1.0 mm | Adafruit `4528` adapter cable — **no soldering, no crimping** |
+
+#### Power — two of the four wires, and only the breakout gets soldered
+
+`J10` is a JST XH 2.54 mm 4-pin: `1 = UART_IN_TXD3 · 2 = UART_IN_RXD3 · 3 = +5V_IN · 4 = GND`.
+Elecrow silkscreens `RX3 / TX3 / +5V / GND` beside it on the **back** of the board.
+
+- **Board end: nothing to do.** A pre-made XH pigtail plugs straight in. No crimp tool, no iron.
+- **Only pins 3 and 4 are used.** Leave the UART pair unconnected.
+- **Breakout end: soldered.** `VBUS` → J10 pin 3, `GND` → J10 pin 4, onto the breakout's
+  through-hole pads. ✅ Verified on the unit — it powers the device.
+
+> ⚠️ **The breakout must have 5.1 kΩ CC pull-downs** (two 0603s marked `512` on CC1/CC2). Without
+> them a USB-C **PD charger negotiates nothing and delivers no power at all**. The SparkFun-pattern
+> board specified above has them; a cheaper substitute may not.
+
+#### I²C — the two ends are different connector families
+
+Covered in the bus-cable section above, and the one thing to carry away: **the pin orders are
+reversed**, so a hand-spliced 4-wire cable puts 3.3 V on SCL. Buy the adapter.
+
+#### Data over USB-C — deliberately not wired
+
+The rear port carries **5 V and GND only**. Updates go over **OTA**, and the unit is readable over
+the **TCP log mirror on :2323** (`core/net/logmirror.h`), which is why no data path was needed.
+Three routes were investigated and rejected — recorded so they are not re-investigated:
+
+| route | verdict |
+|---|---|
+| Test pads **P2 / P3** (`USB1_D+` / `USB1_D−`, beside J1) | **Electrically correct** — J1 goes through 0 Ω links to the CH340K, giving console *and* flashing with auto-reset. Rejected only because the pads are 1.5 mm and awkward to hand-solder. **This is the route to take if data is ever wanted.** |
+| **`J2` / UART1** | Wrong UART. Console and the ROM bootloader are on **UART0** (GPIO37/38 → CH340K → J1). And USB `D+`/`D−` cannot join a UART at all without a bridge chip |
+| The **Modulino** | I²C only; its SWD/UART header belongs to its own STM32 |
+
+If it is ever wanted, the no-board-soldering version is a **USB-C male pigtail into `J1`**, joined
+on the *breakout* side. It must be a **right-angle** plug — a straight one is ~20 mm and the
+`CLR_LEFT` gap is 10 mm.
+
+#### Magnet polarity
+
+**6× Ø8 × 2 in the shell, 6× Ø6 × 2 in the face.** Glue **all** shell magnets one way up and
+**all** face magnets the other, so every pair attracts — mark one pole with a marker before any
+glue goes near them. Same rule as `hardware/round-nest-2.8/wall/`.
+
+#### Routing inside the case
+
+- `J10`'s connector opens toward the board's **left** edge, so its cable and housing live in the
+  10 mm `CLR_LEFT` gap. That gap exists for this and nothing else.
+- The power pair then crosses the width in a **recessed floor channel**, so it is not pinched
+  under the PCB.
+- **Local floor reliefs** at `J10` and `J13` give each plugged cable 2.0 mm of clearance. Without
+  them there is only 0.5 mm behind those connectors.
 
 ### ⚠️ Mask the indicator LEDs before closing the case
 
