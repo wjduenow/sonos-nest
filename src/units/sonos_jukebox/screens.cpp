@@ -173,6 +173,7 @@ static const lv_image_dsc_t *s_artDsc = nullptr;
 // the Settings page (built above it) has to tell it a setting moved.
 static void saverArtChanged();
 static void saverConfigChanged();
+static void saverPreviewBrightness(int pct);
 // Transport + volume
 static lv_obj_t *s_play = nullptr, *s_playLbl = nullptr;
 static lv_obj_t *s_volIcon = nullptr, *s_volFill = nullptr, *s_volPct = nullptr;
@@ -1788,9 +1789,17 @@ static lv_obj_t *s_ssDimVal = nullptr, *s_ssBrightVal = nullptr;
 // Awake backlight. It has been in NVS and on the web page all along, but until the screensaver
 // took ownership of the backlight nothing on this unit ever applied it — uiInit() set 100 % and
 // left it there. It belongs beside the idle brightness: the two are read as a pair.
+//
+// Preview live, persist ONCE on release. Writing NVS per LV_EVENT_VALUE_CHANGED means a flash
+// write for every pixel the finger moves — one drag across this slider is ~90 of them — and NVS
+// is the same flash the Amazon tokens and Wi-Fi credentials live in. The preview still has to go
+// through the screensaver rather than backlightSet(), or s_blPct goes stale and the next
+// backlightTo() no-ops against a value the pin is not actually at.
 static void ssBrightCb(lv_event_t *e) {
   const int v = lv_slider_get_value((lv_obj_t *)lv_event_get_target(e));
   lv_label_set_text_fmt(s_ssBrightVal, "%d", v);
+  saverPreviewBrightness(v);
+  if (lv_event_get_code(e) != LV_EVENT_RELEASED) return;
   settingsSetBrightness((uint8_t)v);   // floors at 10, so this cannot blank the panel
   saverConfigChanged();
 }
@@ -2046,6 +2055,7 @@ static void buildSettings() {
     lv_obj_set_style_bg_color(brs, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(brs, lv_color_hex(JB_ACCENT), LV_PART_KNOB);
     lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_RELEASED, nullptr);   // the one that writes NVS
 
     s_ssBrightVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
     lv_obj_align(s_ssBrightVal, LV_ALIGN_TOP_LEFT, 700, Y + 46);
@@ -2389,6 +2399,25 @@ static void saverArtChanged() {
 // the web page's changes arrive through webConfigGen().
 static void saverConfigChanged() { s_cfgLoaded = false; }
 
+// Light the panel at boot, at the persisted brightness.
+//
+// displayInit() leaves the backlight at 0 deliberately ("nothing to show yet"), and the first
+// saverTick() does not run until appStartTasks() — on the far side of appBoot()'s Wi-Fi connect and
+// SSDP discovery, which is many seconds. So SOMETHING has to turn the panel on in uiInit(), or the
+// boot screen and uiProvisioning()'s "join <AP>" overlay are both invisible.
+//
+// It goes through the screensaver rather than calling backlightSet() directly so there is exactly
+// one owner of that pin and s_blPct never goes stale. settingsInit() runs at main.cpp:76, BEFORE
+// uiInit(), so the stored value really is readable here — this is not the 100 % placeholder it
+// replaces. s_cfgLoaded is deliberately left false: the first saverTick() still does the full
+// read, so this cannot pin a value that later config work would have changed.
+static void saverBootBacklight() { backlightTo(settingsBrightness()); }
+
+// Live preview while the awake-brightness slider is dragged, WITHOUT touching NVS — the write
+// happens once on release (ssBrightCb). Same reason it is not a bare backlightSet(): the
+// screensaver owns the pin, so a preview has to be routed through it too.
+static void saverPreviewBrightness(int pct) { backlightTo(pct); }
+
 // The state machine. Called once per uiTick with the frame's PlayerState snapshot.
 //
 // Idle is LVGL's own inactivity timer, which the touch indev already feeds. handleDial() calls
@@ -2518,7 +2547,7 @@ void uiInit() {
   radiocache::start();
 
   showPage(PAGE_NOW);
-  backlightSet(100);
+  saverBootBacklight();   // NOT backlightSet() — the screensaver owns that pin. See its comment.
 }
 
 static void fmtTime(char *out, size_t n, uint32_t sec, bool negative) {
@@ -2960,6 +2989,10 @@ void uiProvisioning(const char *apSsid) {
   lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(l);
 
-  backlightSet(100);
+  // Full brightness — you have to read an AP name off it — but through the screensaver, not
+  // backlightSet(). A bare call here leaves s_blPct saying "70 %" while the pin is at 100 %, and
+  // the first saverTick() would then no-op against its own stale bookkeeping and leave the panel
+  // stuck bright. Provisioning runs inside appBoot(), before saverTick() has ever run.
+  saverPreviewBrightness(100);
   lv_timer_handler();   // the UI task is not running yet — flush synchronously
 }

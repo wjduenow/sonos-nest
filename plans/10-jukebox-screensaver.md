@@ -107,6 +107,14 @@ as pixel-shifting.
 
 ### B — Album-art wallpaper *(best beauty per byte)*
 
+> **This shipped, and it cost less than this estimate.** §7 is what was actually built; the
+> paragraph below is the pre-build estimate, kept because the reasoning about *why* it looked like
+> the best value still holds. Three of its assumptions turned out to be wrong in our favour: LVGL's
+> `LV_IMAGE_ALIGN_COVER` does the scaling with **no scratch buffer and no PPA bring-up**, no second
+> decode path was needed (raising `ART_MAX_PX` to 320 fixed the resolution for Now Playing at the
+> same time), and drifting only the foreground group made `num_fbs=2` unnecessary. Real cost: **~13
+> KB of LVGL pool, +96 KB PSRAM for the larger art buffers, no new SRAM.**
+
 Full-bleed, blurred, upscaled current cover as the background; sharp cover + title + clock over it.
 Content changes with every track, so it is self-shuffling. PPA does the scale and the blend in
 hardware. Art is already fetched and decoded — but `ART_MAX_PX` caps the decode at 280 px, so the
@@ -167,7 +175,7 @@ here.
 **The route that does work: let the portal Pi transcode.** `sonos-portal` already runs in Docker on
 192.168.68.99 and is already the device's OTA source, so the trust path exists. Add one endpoint:
 
-```
+```text
 GET /api/screensaver/stream?src=<youtube url | file | playlist>
     → multipart/x-mixed-replace MJPEG, 800x450, 15 fps, ~2 Mbps
 ```
@@ -251,8 +259,11 @@ Each is half a day, and each retires a real unknown rather than confirming a gue
 
 - **Keep it out of `core/`.** `sonos-button` sweeps every core file into its build with `+<core/>`
   and no LVGL, no TJpg in `lib_deps`. A screensaver file in `core/` breaks the one env nobody builds
-  by habit — that is exactly how `art_cache.cpp` broke it for weeks. Put this in
-  `units/sonos_jukebox/` and `boards/crowpanel_p4_7in/`, or add the exclusion.
+  by habit — that is how `art_cache.cpp` broke it for weeks. Put this in `units/sonos_jukebox/` and
+  `boards/crowpanel_p4_7in/`. If something genuinely has to be shared and genuinely has to touch
+  graphics, it goes in **`src/core/ui/`**, which headless envs drop as a subtree — *not* behind a
+  new per-file exclusion, which is the pattern that let this happen in the first place. CI enforces
+  it; see `src/core/ui/README.md`.
 - **Every new buffer goes in PSRAM** (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`). Internal
   `heapLargest` is 31.7 KB; on the nest it was *fragmentation*, not exhaustion, that starved LWIP and
   surfaced as Sonos "connection refused".
