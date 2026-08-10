@@ -203,12 +203,21 @@ One document, all units, served verbatim from the Release (GitHub path) or mirro
 {
   "version": "v0.6.0",
   "units": {
-    "nest":   { "bin": "firmware-nest.bin",   "url": "https://github.com/.../firmware-nest.bin",   "sha256": "…", "size": 1234567 },
-    "sleep":  { "bin": "firmware-sleep.bin",  "url": "https://github.com/.../firmware-sleep.bin",  "sha256": "…", "size": 2345678 },
-    "button": { "bin": "firmware-button.bin", "url": "https://github.com/.../firmware-button.bin", "sha256": "…", "size":  456789 }
+    "nest":    { "bin": "firmware-nest.bin",    "url": "https://github.com/.../firmware-nest.bin",    "sha256": "…", "size": 1234567 },
+    "sleep":   { "bin": "firmware-sleep.bin",   "url": "https://github.com/.../firmware-sleep.bin",   "sha256": "…", "size": 2345678 },
+    "button":  { "bin": "firmware-button.bin",  "url": "https://github.com/.../firmware-button.bin",  "sha256": "…", "size":  456789 },
+    "jukebox": { "bin": "firmware-jukebox.bin", "url": "https://github.com/.../firmware-jukebox.bin", "sha256": "…", "size": 2094392 }
   }
 }
 ```
+
+The unit keys are not a fixed list anywhere — `tools/build_manifest.py` derives them from the
+built filenames and the portal mirrors whatever it is given. The list that *does* have to be kept
+in sync is the pair of `#if defined(UNIT_…)` ladders in `core/net/updater.cpp` (`unitId()`, what
+the device asks the manifest for) and `core/webconfig.cpp` (`registrationJson()`, what it tells
+the dashboard it is). The jukebox shipped with a branch in the second and none in the first, so it
+registered as `jukebox`, requested `unknown`, and was silently unreachable by pull-OTA while
+looking healthy on the dashboard.
 
 Absolute `url` per unit so a device needs only the manifest URL to find its `.bin`. `sha256`/`size`
 are advisory in v1 (HTTPUpdate verifies the ESP image header itself); wire the hash check in later

@@ -38,11 +38,17 @@ void   updaterApprove()          { s_armed = true; s_force = true; }
 void   updaterForceCheck()       { s_force = true; }
 
 // This unit's manifest key — the same id registrationJson() reports, from the env's build macro.
+// KEEP THE BRANCHES AND THEIR ORDER IDENTICAL to webconfig.cpp's registrationJson(): a unit that
+// reports one id to the portal and asks the manifest for another is invisible to pull-OTA while
+// looking perfectly healthy on the dashboard. That is exactly what happened to the jukebox — it
+// registered as "jukebox" and requested "unknown" from the day it was added.
 static const char *unitId() {
 #if defined(UNIT_NEST)
   return "nest";
 #elif defined(UNIT_SLEEP)
   return "sleep";
+#elif defined(UNIT_JUKEBOX)
+  return "jukebox";
 #elif defined(HEADLESS)
   return "button";
 #else

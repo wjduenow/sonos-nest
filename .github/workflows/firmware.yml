@@ -57,21 +57,42 @@ jobs:
           fi
           echo "OK — every lvgl.h / TJpg_Decoder.h include in src/core/ is under src/core/ui/."
 
+      # The other silent-failure shape in this repo: a unit that TELLS the portal one id and ASKS
+      # the manifest for another is invisible to pull-OTA while looking healthy on the dashboard.
+      # The jukebox shipped that way — "jukebox" to registrationJson(), "unknown" to unitId().
+      # Neither compiles wrong, so only comparing the two ladders catches it.
+      - name: unitId() and registrationJson() agree on the unit ids
+        run: |
+          asks=$(sed -n '/const char \*unitId()/,/^}/p' src/core/net/updater.cpp \
+                 | grep -oP 'return "\K[a-z]+' | grep -v '^unknown$' | sort -u)
+          tells=$(sed -n '/^String registrationJson()/,/^}/p' src/core/webconfig.cpp \
+                  | grep -oP 'doc\["unit"\] *= *"\K[a-z]+' | grep -v '^unknown$' | sort -u)
+          echo "updater.cpp   unitId() asks for : $(echo $asks)"
+          echo "webconfig.cpp registers as      : $(echo $tells)"
+          [ -n "$asks" ] && [ -n "$tells" ] || { echo "::error::parsed an empty set — a ladder was renamed or reformatted; fix this check"; exit 1; }
+          if ! diff <(echo "$asks") <(echo "$tells") >/dev/null; then
+            echo "::error::The two unit-id ladders disagree. A unit in only one of them either"
+            echo "::error::registers under an id it never requests (invisible to pull-OTA) or"
+            echo "::error::requests one it never registers. Keep both in sync — see plans/06."
+            diff <(echo "$asks") <(echo "$tells") || true
+            exit 1
+          fi
+          echo "OK — both ladders carry the same unit ids."
+
   build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false           # one unit failing shouldn't hide the others' results
       matrix:
         include:
-          # `unit` is the manifest key — the id core/net/updater.cpp's unitId() asks for.
-          # `release`: false means "compile-gate this env, but don't ship a binary for it".
-          # sonos-jukebox is false because updater.cpp has NO jukebox branch (it reports
-          # "unknown" and so would never request the asset), even though registrationJson()
-          # already calls it "jukebox". Give it a unitId() branch and flip this to true.
+          # `unit` is the manifest key — the id core/net/updater.cpp's unitId() asks for AND the
+          # one webconfig.cpp's registrationJson() reports. Those two must agree; if you add a
+          # unit here, add it to BOTH.
+          # `release`: false would mean "compile-gate this env, but don't ship a binary for it".
           - { env: nest,          unit: nest,    release: true }
           - { env: sleep-machine, unit: sleep,   release: true }
           - { env: sleep-button,  unit: button,  release: true }
-          - { env: sonos-jukebox, unit: jukebox, release: false }
+          - { env: sonos-jukebox, unit: jukebox, release: true }
     steps:
       - uses: actions/checkout@v4
         with:
