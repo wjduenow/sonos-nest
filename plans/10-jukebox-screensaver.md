@@ -1,7 +1,8 @@
 # 10 — sonos-jukebox screensaver: options, costs, and what the hardware will actually do
 
-Status: **research / decision document.** Nothing here is built. Written to answer one question —
-what should the 7" wall panel show when nobody is touching it, and what does each answer cost?
+Status: **Tier 0, A and B are BUILT** (see §7). D and E are still research. Written to answer one
+question — what should the 7" wall panel show when nobody is touching it, and what does each
+answer cost?
 
 Two motivations, and they pull in different directions:
 
@@ -262,6 +263,36 @@ Each is half a day, and each retires a real unknown rather than confirming a gue
 - **Power-cycle after every upload**, and read `[health]` before diagnosing any "hang".
 
 ---
+
+## 7. What shipped (Tier 0 + A + B)
+
+All of it is in `units/sonos_jukebox/screens.cpp` (the screensaver block near the bottom) plus four
+settings in `core/settings.*` and `core/webconfig.*`. Cost: **+41 KB of flash**, of which 40 KB is
+the clock font. No PSRAM, no new task, no measurable internal SRAM.
+
+- **State machine**: Awake / Showing / Blank, off `lv_display_get_inactive_time()`.
+- **Wake**: any touch, or any turn/press of the dial — `handleDial()` calls
+  `lv_display_trigger_activity()`, because the dial is polled over I2C and is not an LVGL input
+  device, so LVGL would otherwise never see it.
+- **Clock (A)**: 120 px time + meridiem + written-out date. A REAL font
+  (`lv_font_clock_120.c`, digits/colon/hyphen only), not a scaled label — read that file's header
+  before "simplifying" it.
+- **Wallpaper (B)**: the current cover scaled to fill under a 70 % scrim, sharp tile + clock +
+  track over it. `AUTO` mode falls back to the clock when nothing is playing.
+- **Drift**: one container steps along a slow Lissajous, on the minute so the move and the clock
+  repaint are one event. Nothing else on screen moves, so a step invalidates one rectangle.
+- **Settings** (web page and on-screen Settings, same `core/webconfig` fields): `saver_mode`,
+  `saver_delay_sec`, `saver_dim`, `saver_blank_min`. Both timers are presets in both places.
+- **Bonus fix**: `settingsBrightness()` is now actually applied on this unit. It had been in NVS
+  and on the web page all along; `uiInit()` set 100 % and nothing ever read it again.
+
+Two things a future change should not undo:
+
+- The overlay stays up in the **Blank** state even with the screensaver set to Off. That is what
+  eats the wake-up tap so it does not press an invisible button.
+- `saverApplyLayout()` forces a clock repaint. The meridiem is hung off the time's right edge with
+  `lv_obj_align_to()`, which resolves once — without the repaint it is left behind when the layout
+  changes.
 
 ## Sources
 
