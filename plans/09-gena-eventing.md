@@ -1,6 +1,7 @@
 # Plan 09 — UPnP GENA eventing instead of polling (Now Playing first)
 
-Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **in progress**, jukebox only.
+Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **SHIPPED on the jukebox
+and merged to main.** Not enabled on any other unit — see §2 for why.
 
 Replace the continuous 1 Hz SOAP poll behind Now Playing with UPnP GENA eventing — subscribe once
 per coordinator, let Sonos push changes — keeping a slow poll as a backstop.
@@ -109,3 +110,54 @@ nobody builds by habit. Guarding it means the S3 units pay nothing and cannot br
 - Survives a soak: speaker reboot, group change, device DHCP lease change, Wi-Fi drop — recovers
   without a device reboot.
 - `heapFree` / `heapLargest` no worse than today.
+
+---
+
+## 6. What actually shipped, and what it cost
+
+Everything in §4 was built. Beyond it:
+
+- **Renewal works.** Confirmed at the 30-minute mark: `renewals=2, resubscribes=0, failures=0`.
+  The 412 fallback exists but has never had to fire.
+- **The backstop is the SAME poll, just slower** (1 Hz → 15 s). It was briefly a *reduced* poll —
+  position only — and that was a real bug: Now Playing went blank because the only thing that
+  could repopulate the title was an event. A backstop that cannot reconstruct the whole screen on
+  its own guarantees nothing. Measured result: 3.00 SOAP calls/sec → 0.09.
+- **Trust is revocable**: eventing must be subscribed AND have delivered at least one event.
+  Losing either returns to 1 Hz on its own, so a lapsed subscription costs latency, never
+  correctness.
+
+### The bugs, because they share one shape
+
+Eventing gave several fields a SECOND writer, and nearly every bug was that writer overwriting
+something better than it had:
+
+| symptom | cause |
+|---|---|
+| dial ran up, back, up | every `setVolume` provokes an event carrying a level the dial has passed. The poll had a guard since long before eventing; the event path was added without it |
+| art vanished on pause | `artUri` assigned unconditionally from metadata that had none |
+| art vanished on play | identity compared title AND artist, so a *sparser* description of the same track read as a track change |
+| art flickered constantly | `AVTransportURIMetaData` describes the CONTAINER, not the track — fine on a direct Spotify track where they coincide, wrong for every queue-based one |
+| art flickered *still* | GENA stored **relative** art URLs. `HTTPClient::begin()` fails silently on those, so 78% of fetches failed and only the poll's absolute URL worked |
+| scrubber reset on pause | position zeroed on any event carrying a title, not only a track change |
+
+**The rule: a partial or lower-quality update must never erase what a fuller one established.**
+`playerApplyTrack()` in `player_state.h` encodes it — sticky art, title-only identity, an
+`authoritative` flag for transport-URI metadata, and position left to the caller.
+
+**The process lesson is sharper.** Three of those were "verified fixed" against
+`health.nowPlaying.hasArt`, which reports whether `artUri` is SET — not whether the image ever
+loaded. All three verifications passed while the screen kept flickering. Adding
+`artFetch/artFail/artClear` counters found the real cause in one pass. Where measurement came
+first, the fix landed first time; where symptoms were reasoned about, it took three attempts.
+
+## 7. If you extend this
+
+- **Rooms is the obvious next target** and the payoff is bigger than Now Playing — its per-room
+  poll has a ~1.4 s floor that eventing removes entirely. But it needs `ZoneGroupTopology`, whose
+  initial dump measured **28.5 KB**, plus a `RenderingControl` subscription per room. That is a
+  real memory conversation on this board, not a freebie.
+- **The nest is still a maybe.** It needs `heapLargest` read off a live device first (it runs
+  firmware predating that field). `core/sonos/gena.*` is device-agnostic; only `-DGENA_EVENTS` and
+  a callback listener port are per-env.
+- **The sleep-machine is a no.** 14.5 KB minimum free heap — see §2.

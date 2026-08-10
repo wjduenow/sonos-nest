@@ -92,6 +92,18 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **Now Playing is EVENT-DRIVEN here (`core/sonos/gena.*`, `-DGENA_EVENTS`, plans/09).** Sonos
+  > pushes state; the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP calls/sec
+  > → 0.09). Two things to know before touching it. The backstop is the **same poll, just slower** —
+  > it was briefly reduced to position-only and Now Playing went blank, because nothing else could
+  > repopulate the title. And **trust is revocable**: subscribed AND at least one event received,
+  > else it returns to 1 Hz by itself.
+  > ⚠️ **Eventing gave several fields a SECOND writer, and that is where nearly every bug came
+  > from — the new writer overwriting something better than it had.** Volume mid-turn, album art on
+  > pause, track identity from container metadata, relative art URLs the poll had always fixed up.
+  > **The rule: a partial or lower-quality update must never erase what a fuller one established.**
+  > `playerApplyTrack()` / `playerVolumeHeld()` in `player_state.h` encode it — use them rather
+  > than assigning now-playing fields directly, from either the poll or an event.
   > ⚠️ **Don't guess which subsystem is eating the heap — `core/heap_watch.h` will tell you.**
   > `heapwatch::note("tag")` records the tag owning the internal-heap low-water; read it back as
   > **`health.heapLow`** in `/api/config`. Put notes *after* an allocation while it is still held.

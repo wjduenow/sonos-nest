@@ -3,14 +3,22 @@
 **Board:** ELECROW **CrowPanel Advance 7" ESP32-P4 HMI AI Display** (DHE04107D, PCB **V1.0**) —
 1024×600 IPS MIPI-DSI, GT911 touch, dual speakers, ESP32-C6 for Wi-Fi.
 
-**Status: it is a working Sonos controller.** Panel, touch, LVGL 9, Wi-Fi, zone discovery and
-switching, transport control, album art, OTA, portal registration, UI sound feedback and four
-screens (Now Playing · Rooms · Radio · Settings) all run on hardware. `src/core/` runs
-**byte-identical** to what the S3 units run, with one Arduino-3.x shim.
+**Status: MERGED TO MAIN and in daily use.** Panel, touch, LVGL 9, Wi-Fi, zone discovery and
+switching, transport, album art, OTA, portal registration, UI sound, the rotary dial, and five
+screens (Now Playing · Favourites · Radio · Rooms · Settings) all run on hardware. `src/core/` is
+shared with the S3 units, with one Arduino-3.x shim.
 
-**Not done:** the physical dial and transport buttons (not on this board — external hardware),
-the case (dimension conflict, see *Case notes*), and one **unresolved network fault** (the
-ESP-Hosted link dies under load; currently recovered by an automatic reboot, not cured).
+Since the first pass this unit also gained: **Rooms grouping** (checkbox per room, UNGROUP,
+per-room volume and play/pause, live per-room status), **UPnP GENA eventing** for Now Playing
+(plans/09 — Sonos pushes state, the poll drops to a 15 s backstop), a **TCP log mirror** on
+:2323, a **favourites refresh schedule** in both the web admin and on-device Settings, and a
+substantial round of **heap work** (low-water 1.4 KB → 50+ KB).
+
+**Not done:** the four transport buttons (a PCF8574 on the shared I2C bus — the dial works, the
+caps were dropped from the case design), the case itself, the **untested Wi-Fi provisioning path**
+(see *Open items*), and one **unresolved network fault** (the ESP-Hosted link dies under load;
+recovered by an automatic reboot, not cured — though the mbedTLS/PSRAM fix removed the load
+profile that was triggering it nightly).
 
 A wall-mounted Sonos controller: a large landscape touchscreen with a physical control column to
 its right — a push-to-select rotary dial over a 2×2 grid of momentary caps (play/pause · skip
@@ -20,9 +28,22 @@ forward · skip back · change rooms). Matte-white printed case, flush wall plat
 
 ## Resuming this work — read this first
 
-**Everything lives on the branch `feat/sonos-jukebox`** (18 commits, pushed). A second branch
-`fix/album-art-truncation` holds a shared-core fix that is **blocked on a measurement** — see
-*Open items*. The work was done in a git worktree; `main` is untouched.
+**Everything is on `main`.** The `feat/sonos-jukebox` and `feat/gena-eventing` branches are both
+merged; there is no side branch to hunt for.
+
+**START BY READING THE DEVICE, NOT THE CODE.** `GET /api/config` → `.health` now answers most
+questions in one curl, and every field there exists because something was once diagnosed blind:
+
+    heapFree/heapMin/heapLargest   fragmentation kills this board before exhaustion does
+    heapLow {tag,free,largest}     WHICH subsystem owned the low-water (core/heap_watch.h)
+    gena {subscribed,events,...}   is eventing carrying the screen, or is the poll?
+    nowPlaying {...,artFetch,artFail,artClear}
+                                   what the device BELIEVES is playing, and whether the art
+                                   pipeline is actually succeeding
+    lvMemUsed/lvMemMax             the LVGL pool that has frozen this UI before
+    soapCalls/soapReconnects       traffic and socket churn
+
+Plus `nc <ip> 2323` for the live log. A wall-mounted unit has no cable; this is the way in.
 
 Three things will waste your time if you don't know them, in order of how much they cost here:
 
@@ -547,6 +568,21 @@ card before trusting it with a cache.
 - **Eviction** on a counter, not per-write: cap the directory and delete oldest by mtime.
 
 ## Open items, in the order I would take them
+
+> **Resolved since this list was written**, so do not re-take them: the album-art truncation fix
+> is merged (JPEG_MAX 512 KB); the crawl no longer reboots the device nightly (mbedTLS buffers
+> moved to PSRAM — see CLAUDE.md); the dial works; Rooms does grouping; GENA eventing ships for
+> Now Playing (plans/09). The heap low-water went 1.4 KB → 50+ KB, which materially changes the
+> "link dies under load" picture below — the nightly crawl was a large part of that load.
+
+0. **Wi-Fi provisioning on this unit is UNTESTED.** The path is shared and uniform
+   (`appBoot()` → `uiProvisioning()` + `portalRun()`), the jukebox implements the "Join
+   `sonos-jukebox-setup`" overlay, `knobDown()` gives it the hold-to-reprovision trigger, and
+   `CONFIG_WIFI_RMT_SOFTAP_SUPPORT=y` says the C6 can do AP mode over ESP-Hosted. But nobody has
+   watched it happen. Testing it means clearing credentials or holding the dial through power-on,
+   and if SoftAP does NOT come up over the hosted bridge the device is off the network with no OTA
+   path back. **Do it at the device, with a USB cable to hand.** Not urgent — it only matters on a
+   move or a router change — but it is the one path that could strand the unit.
 
 1. **Soak it — and to a written protocol.** Both freezes found so far were found by *using* the
    device, not by reasoning about it, and the link fault only appears under real load. "Soak it" as
