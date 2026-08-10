@@ -79,6 +79,15 @@ Audited every file in `src/core/`. **Only two files touch graphics:**
 - `core/album_art.h:7` — `#include <lvgl.h>` (and leaks `lv_image_dsc_t` into its API)
 - `core/album_art.cpp:3` — `#include <TJpg_Decoder.h>`
 
+> **Update — this audit was a snapshot, and treating it as a standing property is what broke the
+> env.** `core/art_cache.{h,cpp}` (the jukebox tile cache) later landed loose in `core/` with the
+> same `<lvgl.h>` coupling and no matching exclusion, and `sleep-button` was unbuildable for weeks
+> ([issue #7](https://github.com/wjduenow/sonos-nest/issues/7)). The count is now structural rather
+> than audited: **every graphics-coupled core file lives in `src/core/ui/`**, headless envs drop
+> that subtree in one line, and CI builds all four app envs on every push/PR. See
+> `src/core/ui/README.md`. The `-<core/album_art.cpp>` line in the env sketch below is superseded
+> by `-<core/ui/>`.
+
 **Everything else is already `String`/`int`/FreeRTOS only**: `ssdp`, `soap_client`, `didl`,
 `library`, `net/wifi`, `net/ota`, `settings`, `webconfig`, `player_state`, `board.h`, `unit.h`.
 `board.h:1-3` states the intent outright: *"Declarations only: no LVGL, no board pins, no driver

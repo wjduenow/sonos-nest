@@ -13,10 +13,10 @@
 #include <sys/stat.h>
 
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
-#include "amazon.h"
-#include "board.h"
-#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
-#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
+#include "core/amazon.h"
+#include "core/board.h"
+#include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
 namespace artcache {
 

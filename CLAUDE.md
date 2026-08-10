@@ -22,8 +22,11 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > ⚠️ **It is the env that silently breaks.** `+<core/>` sweeps every core file into it, but its
   > `lib_deps` is overridden to just ArduinoJson — no LVGL, no TJpg. So any new core file touching
   > graphics breaks THIS env and only this env, and it is the one nobody builds by habit. That is
-  > exactly how `art_cache.cpp` broke it for weeks (issue #7). Build it before you push core
-  > changes; the exclusion list lives in its `build_src_filter`.
+  > exactly how `art_cache.cpp` broke it for weeks (issue #7). **Two things now stop that
+  > recurring, and both matter: every graphics-coupled core file lives in `core/ui/`, which this
+  > env drops in one line (`-<core/ui/>`) — so put a new LVGL-touching file THERE, don't grow a
+  > per-file exclusion list back; and CI builds all four app envs on every push/PR.** The
+  > convention is written up in `src/core/ui/README.md`.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -259,7 +262,11 @@ Key modules (all under `src/core/` — device-agnostic):
   and how to apply it (NVS + `g_pending`). **Boards must not reach into settings/`g_pending`
   themselves** — a board's HTTP server does sockets + routing and calls this. Also clears a
   sleep/wake pick when its file is deleted, so a pick can't dangle.
-- `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
+- `core/ui/` — **the only LVGL/TJpg-coupled part of core**, kept in its own subtree so headless
+  envs exclude it wholesale (`-<core/ui/>`) instead of maintaining a per-file list. Members:
+  `album_art.{h,cpp}` (art fetch + TJpg decode → LVGL image, form-factor-agnostic) and
+  `art_cache.{h,cpp}` (the jukebox tile cache). Callers in device-agnostic core (`app.cpp`,
+  `webconfig.cpp`) guard include *and* call sites with `#ifndef HEADLESS`. See its README.
 - `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env), `logmirror`
   (see below).
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.

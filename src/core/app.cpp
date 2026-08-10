@@ -7,11 +7,12 @@
 
 #include "player_state.h"
 #include "unit.h"                 // uiTick() — provided by whichever unit the build links
-// Album art is the core's ONLY graphics coupling (LVGL + TJpg). A headless unit has nothing to
-// show it on, so -DHEADLESS drops it — the include, the task, and its creation below. Nothing
-// depends on artTask running: it only reads g_player.artUri and calls albumArt*.
+// Album art is graphics-coupled (LVGL + TJpg), so it lives in core/ui/ — the subtree headless
+// envs exclude wholesale (see platformio.ini). A headless unit has nothing to show it on, so
+// -DHEADLESS drops it here too — the include, the task, and its creation below. Nothing depends
+// on artTask running: it only reads g_player.artUri and calls albumArt*.
 #ifndef HEADLESS
-#include "album_art.h"
+#include "ui/album_art.h"
 #endif
 #include "settings.h"
 #include "library.h"

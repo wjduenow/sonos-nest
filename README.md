@@ -71,11 +71,12 @@ src/
     player_state.{h,cpp}  mutex-guarded shared now-playing state + pending commands
     library.{h,cpp}     async ContentDirectory browse/play (playlists/favorites/queue)
     settings.{h,cpp}    NVS (default room, brightness, cached zone IPs)
-    album_art.{h,cpp}   art fetch + TJpg decode → LVGL image (off the UI thread)
     board.h             HAL contract every board implements
     unit.h              UX contract every unit implements (uiInit/uiTick)
     sonos/              soap_client · ssdp (discovery) · didl (DIDL-Lite parser)
     net/                wifi · ota · portal (SoftAP captive-portal WiFi setup) · registrar
+    ui/                 the ONLY LVGL/TJpg-coupled part of core — headless envs drop the
+                        whole subtree (`-<core/ui/>`). album_art · art_cache. See its README
   boards/               one dir per board — implements board.h
     crowpanel_rotary/   ST7701 display · CST816 touch · EC11 encoder · PCF8574 · pins.h
     es3c28p/            ILI9341 display · FT6336 touch · microSD · ES8311 audio · web server
