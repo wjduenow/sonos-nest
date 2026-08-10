@@ -10,6 +10,38 @@ void    settingsSetRoom(const String &name);
 uint8_t settingsBrightness();            // backlight % (10..100), default 100
 void    settingsSetBrightness(uint8_t pct);
 
+// --- Screensaver (screened units; sonos-jukebox implements it) -----------------------------------
+// Three settings, because they answer three different questions and one number cannot:
+// what to show, when to show it, and when to give up and turn the panel off entirely.
+//
+// The panel is an IPS LCD, so the risk here is reversible image RETENTION, not the permanent
+// emitter wear an OLED suffers — which is why the backlight settings matter more than the picture.
+// The unit owns the state machine (a board must not read settings), and applies all three through
+// backlightSet(); see the screensaver block in units/sonos_jukebox/screens.cpp.
+enum SaverMode : uint8_t {
+  SAVER_OFF   = 0,   // never; the UI stays up (the blank timer still applies)
+  SAVER_CLOCK = 1,   // clock + date on near-black
+  SAVER_COVER = 2,   // clock over the current album art, always
+  SAVER_AUTO  = 3,   // cover while something is playing with art, else clock  (default)
+};
+uint8_t settingsSaverMode();
+void    settingsSetSaverMode(uint8_t mode);
+
+// Idle seconds before the screensaver appears. 0 = never show it. Default 120.
+uint16_t settingsSaverDelaySec();
+void     settingsSetSaverDelaySec(uint16_t sec);
+
+// Backlight % while the screensaver is up. Floored at 5 — 0 belongs to the blank timer below, and
+// a screensaver you cannot see is just a confusing way to spell "off". Default 40.
+uint8_t settingsSaverDimPct();
+void    settingsSetSaverDimPct(uint8_t pct);
+
+// Idle MINUTES before the backlight goes fully off. 0 = never. Default 60. Touch still wakes the
+// panel with the backlight at zero (the touch controller is a separate I2C device), so this is
+// safe to set aggressively.
+uint16_t settingsSaverBlankMin();
+void     settingsSetSaverBlankMin(uint16_t min);
+
 // Button-ring level % (0..100), default 100. Deliberately NOT settingsBrightness(): that one
 // floors at 10 so nobody can blank an LCD and lose the UI needed to un-blank it. A ring has no
 // such trap and 0 (fully off) is a legitimate, wanted state on a bedside device.

@@ -98,13 +98,30 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > **`GET /api/config` → `.health`** (`core/webconfig.cpp`) carries heap/PSRAM/LVGL/SOAP counters.
   > ⚠️ **Know which resource you are actually spending — they are nowhere near equal.** Measured on
   > hardware: **PSRAM 32 MB, ~29.6 MB free** (frame buffer 1.17 MB + LVGL pool 512 KB + album art
-  > 526 KB + station tile cache 170 KB ≈ 2.4 MB); **app slot 6.25 MB, ~4.3 MB free** (and the
+  > 410 KB + a 512 KB JPEG staging buffer + station tile cache 170 KB ≈ 2.8 MB); **app slot
+  > 6.25 MB, ~4.3 MB free** (and the
   > 3.375 MB `spiffs` partition is *unused* — nothing mounts it — if you ever need more);
   > **internal SRAM is the only tight one.** ~115 KB free but the `heapLargest` block is only
   > ~32-49 KB, and `core/amazon.cpp` notes the crawl runs at **~40 KB free**. New buffers go in
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **`ART_MAX_PX` is a ceiling the decoder UNDERSHOOTS, not a target.** TJpgDec scales only by
+  > powers of two, so decoded size is source/(1,2,4,8) — the largest that fits under the cap. Sonos
+  > serves 640 px covers, so a cap of **280 yielded 160 px art**: a cap 100 px larger than the tile
+  > still produced art at well under half of it, and everything looked soft on a device with 30 MB
+  > of spare PSRAM. It is **320** here for exactly that reason (640/2). Pick a cap by asking what
+  > `source/2^n` lands on, not how big you want it.
+  > ⚠️ **The screensaver OWNS THE BACKLIGHT (plans/10; the block near the bottom of the unit's
+  > `screens.cpp`).** Awake / Showing / Blank off LVGL's inactivity timer — so `backlightSet()`
+  > belongs to `saverTick()` now, and calling it from anywhere else just gets overwritten on the
+  > next tick. Three non-obvious things. **The dial is not an LVGL input device** (it is polled over
+  > I2C), so `handleDial()` calls `lv_display_trigger_activity()` or a panel being actively turned
+  > falls asleep under your hand. **The overlay stays up while blanked even with the screensaver set
+  > to Off** — that is what eats the wake-up tap so it cannot press an invisible button. And the
+  > 120 px clock is **a real font** (`lv_font_clock_120.c`), not a scaled label: scaling allocates a
+  > ~240 KB ARGB draw layer per repaint from the 512 KB pool, and pool exhaustion here is a UI
+  > freeze, not a dropped frame. That file's header has the regeneration command.
   > ⚠️ **Now Playing is EVENT-DRIVEN here (`core/sonos/gena.*`, `-DGENA_EVENTS`, plans/09).** Sonos
   > pushes state; the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP calls/sec
   > → 0.09). Two things to know before touching it. The backstop is the **same poll, just slower** —
@@ -155,6 +172,11 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
+- Jukebox screensaver — what shipped, and the video/photo options that did not:
+  **`plans/10-jukebox-screensaver.md`**. Read §1 before proposing anything that moves pixels: it
+  has the measured budget, and the two facts that kill the obvious ideas — the P4's H.264 block is
+  **encode-only**, and the SD card is 1-bit at 10 MHz with D1-D3 unwired, so video is bound by the
+  card, not the decoder.
 - Music services + the Radio feature: **`plans/08-music-service-integration.md`** — Part 1 is the
   feature **as built** (Favorites + a real Radio page over Amazon Prime Stations, both backed by SD
   caches with artwork, A-Z jump, search and scroll detents); Part 2 is the research record. Read

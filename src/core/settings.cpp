@@ -62,6 +62,36 @@ void settingsSetBrightness(uint8_t pct) {
   s_prefs.putUChar("bright", pct);
 }
 
+// --- Screensaver. NVS keys are capped at 15 chars; the "ss*" prefix keeps them grouped. ---------
+// Defaults are deliberately gentle: something appears after two minutes, the panel is still lit
+// enough to read across a room, and it only goes dark after an hour. Someone who wants it off has
+// a switch; someone who never opens the settings gets burn-in protection anyway.
+uint8_t settingsSaverMode() {
+  uint8_t m = s_prefs.getUChar("ssmode", SAVER_AUTO);
+  return m > SAVER_AUTO ? SAVER_AUTO : m;
+}
+void settingsSetSaverMode(uint8_t mode) {
+  s_prefs.putUChar("ssmode", mode > SAVER_AUTO ? SAVER_AUTO : mode);
+}
+
+uint16_t settingsSaverDelaySec()            { return s_prefs.getUShort("ssdelay", 120); }
+void     settingsSetSaverDelaySec(uint16_t sec) { s_prefs.putUShort("ssdelay", sec); }
+
+uint8_t settingsSaverDimPct() {
+  uint8_t p = s_prefs.getUChar("ssdim", 40);
+  if (p < 5)   p = 5;
+  if (p > 100) p = 100;
+  return p;
+}
+void settingsSetSaverDimPct(uint8_t pct) {
+  if (pct < 5)   pct = 5;
+  if (pct > 100) pct = 100;
+  s_prefs.putUChar("ssdim", pct);
+}
+
+uint16_t settingsSaverBlankMin()            { return s_prefs.getUShort("ssblank", 60); }
+void     settingsSetSaverBlankMin(uint16_t m) { s_prefs.putUShort("ssblank", m); }
+
 // No 10% floor here, unlike settingsBrightness() above — see settings.h. 0 means "ring off",
 // which is a state a bedside device genuinely wants.
 uint8_t settingsRing() {

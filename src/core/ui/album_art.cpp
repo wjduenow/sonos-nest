@@ -8,10 +8,17 @@
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
-// sleep-machine's 320x240, but the jukebox's 7" 1024x600 design calls for a 280 px tile, where
-// 180 px art is visibly soft. Costs ART_MAX^2 * 2 * 2 bytes of PSRAM (double-buffered): 130 KB at
-// 180, 314 KB at 280 — irrelevant against ~7 MB free on the S3 boards and ~31 MB on the P4.
-// Override per env with -DART_MAX_PX=<n>.
+// sleep-machine's 320x240, while the jukebox's 7" 1024x600 uses 320. Costs ART_MAX^2 * 2 * 2 bytes
+// of PSRAM (double-buffered): 130 KB at 180, 410 KB at 320 — irrelevant against ~7 MB free on the
+// S3 boards and ~31 MB on the P4. Override per env with -DART_MAX_PX=<n>.
+//
+// *** THIS IS A CEILING THE DECODER UNDERSHOOTS, NOT A TARGET. *** TJpgDec scales only by powers
+// of two, so the decoded size is source/(1,2,4,8) — the largest that fits under the cap. Sonos
+// serves 640 px covers, so a cap of 280 rejects /2 (320 > 280) and yields **160 px**: a cap 100 px
+// higher than the tile still produced art at well under half of it. Choosing a cap therefore means
+// asking "what does source/2^n land on", not "how big do I want it". 320 is chosen for exactly
+// that reason on the jukebox. Symptom to recognise: art that is soft at every size, on a device
+// with megabytes of spare PSRAM.
 #ifndef ART_MAX_PX
 #define ART_MAX_PX 180
 #endif
