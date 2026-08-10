@@ -506,6 +506,7 @@ static void netTask(void *) {
       // CurrentURIMetaData instead (verified: empty TrackMetaData alongside dc:title "Apologize").
       // Costs an extra SOAP call ONLY when the primary source produced nothing, so normal content
       // pays nothing at all.
+      bool trackAuthoritative = np.title.length() > 0;   // came from TrackMetaData
       if (np.title.length() == 0 && st != TransportState::Stopped) {
         String uri, meta;
         if (sonos::getMediaInfo(s_coordIp, uri, &meta) && meta.length() > 20) {
@@ -514,6 +515,7 @@ static void netTask(void *) {
           if (alt.title.length() || alt.artist.length()) {
             np.title = alt.title; np.artist = alt.artist;
             np.album = alt.album; np.artUri = alt.artUri;
+            trackAuthoritative = false;   // container metadata, not the track — see playerApplyTrack()
           }
         }
         processPending();
@@ -535,7 +537,7 @@ static void netTask(void *) {
         // content whose title only comes from the CurrentURIMetaData fallback there is no
         // albumArtURI in it — assigning unconditionally would drop the cover on every poll.
         // Position is set above from the poll's own authoritative RelTime, so the return is unused.
-        (void)playerApplyTrack(g_player, np);
+        (void)playerApplyTrack(g_player, np, trackAuthoritative);
         if (gotVol) g_player.volume = vol;
         g_player.dirty = true;
         stateUnlock();

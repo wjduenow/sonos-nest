@@ -10,9 +10,9 @@
 #include "../player_state.h"
 #include "../net/wifi.h"
 #include "../net/logmirror.h"     // LOG — reaches the TCP mirror on the jukebox, plain Serial
-#include "../heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
                                   // elsewhere. A wall-mounted unit has no cable, and these
                                   // diagnostics are exactly what you need to read from it.
+#include "../heap_watch.h"        // heapwatch::note — attribute the internal-heap low-water
 
 namespace sonos {
 namespace {
@@ -137,12 +137,15 @@ void applyEvent(const String &body) {
   // Same fallback the poll uses, and free here: content playing outside the queue (a direct
   // Spotify track) has a stub CurrentTrackMetaData with no dc:title, but the event ALSO carries
   // AVTransportURIMetaData, which does have it. No extra round trip — it is already in this body.
+  bool trackAuthoritative = gotTrack;   // i.e. it came from CurrentTrackMetaData
   if (np.title.length() == 0 && np.artist.length() == 0) {
     const String alt = tagVal(ev, "AVTransportURIMetaData");
     if (alt.length() > 20) {
       PlayerState a;
       parseNowPlaying(alt, a);
-      if (a.title.length() || a.artist.length()) { np = a; gotTrack = true; }
+      // NOT authoritative: this describes the transport URI, which for queue content is the
+      // container (album/station), not the track. See playerApplyTrack().
+      if (a.title.length() || a.artist.length()) { np = a; gotTrack = true; trackAuthoritative = false; }
     }
   }
 
@@ -171,7 +174,7 @@ void applyEvent(const String &body) {
     if (np.title.length() || np.artist.length()) {
       // Sticky art, and position only on a real track change — see playerApplyTrack(). Doing this
       // by hand here is what made pause blank the cover and zero the scrubber.
-      if (playerApplyTrack(g_player, np)) {
+      if (playerApplyTrack(g_player, np, trackAuthoritative)) {
         // Position is NOT evented (measured: 83 s of playback, no event). A NEW track restarts it;
         // the UI's interpolation carries it from here and the backstop poll reconciles drift.
         g_player.positionSec  = 0;

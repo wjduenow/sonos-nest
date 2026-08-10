@@ -130,7 +130,33 @@ inline bool playerVolumeHeld(const PlayerState &p) {
 //   different things: the poll carries an authoritative RelTime, while an event carries none at all
 //   and can only infer "back to zero" from the track having changed. Resetting it on every event
 //   that happened to carry a title is what sent the scrubber to 0:00 on pause.
-inline bool playerApplyTrack(PlayerState &dst, const PlayerState &src) {
+// `authoritative` says whether src actually describes the CURRENT TRACK. Pass false for anything
+// derived from the transport-URI metadata (AVTransportURIMetaData / CurrentURIMetaData): that
+// describes the URI being played, which for queue-based content — an album, a station, a saved
+// queue, every YouTube Music container — is the CONTAINER, not the track inside it.
+//
+// This mattered and was not obvious: the fallback was validated on a direct Spotify track, where
+// the transport URI IS the track and the two coincide. On queue content they do not, so any event
+// that arrived without CurrentTrackMetaData (a plain transport-state change) renamed the track to
+// the album, which read as a track change, which swapped the artwork, which made artTask re-fetch
+// — the artwork visibly flickering on play, and enough repeated fetching to drag the heap down.
+//
+// A non-authoritative source may only FILL BLANKS. It never redefines identity and never returns
+// "changed".
+inline bool playerApplyTrackAuthoritative(PlayerState &dst, const PlayerState &src);
+
+inline bool playerApplyTrack(PlayerState &dst, const PlayerState &src, bool authoritative = true) {
+  if (!authoritative) {
+    if (dst.title.isEmpty()  && src.title.length())  dst.title  = src.title;
+    if (dst.artist.isEmpty() && src.artist.length()) dst.artist = src.artist;
+    if (dst.album.isEmpty()  && src.album.length())  dst.album  = src.album;
+    if (dst.artUri.isEmpty() && src.artUri.length()) dst.artUri = src.artUri;
+    return false;
+  }
+  return playerApplyTrackAuthoritative(dst, src);
+}
+
+inline bool playerApplyTrackAuthoritative(PlayerState &dst, const PlayerState &src) {
   // IDENTITY IS THE TITLE ALONE. Comparing artist too looked more thorough and was wrong: the same
   // track arrives with different amounts of detail depending on which source described it. A play
   // event on a direct Spotify track falls back to AVTransportURIMetaData, which has the title but
