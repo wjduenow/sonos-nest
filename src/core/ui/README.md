@@ -48,4 +48,9 @@ includes these as `core/ui/album_art.h`.
 ## Backstop
 
 CI (`.github/workflows/firmware.yml`) builds **every app env, including `sleep-button`, on every
-push and pull request**. If this convention is broken anyway, that is what catches it.
+pull request and every push to `main`** (plus `v*` tags and manual runs). If this convention is
+broken anyway, that is what catches it — though note a push to a side branch with no PR open is
+not covered, so building `sleep-button` locally before you push core changes is still worth doing.
+
+A cheaper `guard` job greps for the two offending includes and fails in seconds, so you usually
+learn about a misplaced file before the matrix has finished compiling anything.

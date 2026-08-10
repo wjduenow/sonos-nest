@@ -84,7 +84,8 @@ Audited every file in `src/core/`. **Only two files touch graphics:**
 > same `<lvgl.h>` coupling and no matching exclusion, and `sleep-button` was unbuildable for weeks
 > ([issue #7](https://github.com/wjduenow/sonos-nest/issues/7)). The count is now structural rather
 > than audited: **every graphics-coupled core file lives in `src/core/ui/`**, headless envs drop
-> that subtree in one line, and CI builds all four app envs on every push/PR. See
+> that subtree in one line, and CI builds all four app envs on every pull request and every push
+> to `main` (plus tags and manual runs — a push to a side branch with no PR open is not covered). See
 > `src/core/ui/README.md`. The `-<core/album_art.cpp>` line in the env sketch below is superseded
 > by `-<core/ui/>`.
 

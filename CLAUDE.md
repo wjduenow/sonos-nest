@@ -25,7 +25,8 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > exactly how `art_cache.cpp` broke it for weeks (issue #7). **Two things now stop that
   > recurring, and both matter: every graphics-coupled core file lives in `core/ui/`, which this
   > env drops in one line (`-<core/ui/>`) — so put a new LVGL-touching file THERE, don't grow a
-  > per-file exclusion list back; and CI builds all four app envs on every push/PR.** The
+  > per-file exclusion list back; and CI builds all four app envs on every PR and every push to
+  > `main`.** (A push to a side branch with no PR open is not covered — build it yourself.) The
   > convention is written up in `src/core/ui/README.md`.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
@@ -189,6 +190,19 @@ hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
 **`sleep-machine-sdreader`** (SD-as-USB), **`sleep-machine-wake`** (microWakeWord wake-word trial —
 mic → TFLM; see Phase-1 note below). Each env selects one board + one unit + the
 core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
+
+> ⚠️ **Which env you pass to `-e` rewrites shared global state — PlatformIO packages live in
+> `~/.platformio`, NOT in the project, and are shared across every checkout and worktree.** The
+> jukebox envs are ESP32-P4 and pull the pioarduino framework, which installs over the *same*
+> `packages/framework-arduinoespressif32` directory the S3 envs use. So `pio run -e sonos-jukebox`
+> leaves Arduino 3.3.11 there, and the next `pio run -e nest` fails with **`Implicit dependency
+> 'FreeRTOS.h' not found`** or **`esp_timer.h: No such file`** — errors that name the framework,
+> never the env you actually built. It swaps back the same way. **The fix is
+> `pio pkg install -e <env>` for the env you want**, then rebuild.
+> Two consequences: **two Claude sessions must not build different silicon at the same time** (the
+> loser sees a build break with no cause anywhere in its own diff), and a green `nest` build proves
+> nothing about a jukebox build you ran an hour ago. CI is immune — every matrix job is a fresh
+> runner, and the PlatformIO cache is keyed per env precisely so the two platforms never share one.
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.

@@ -43,7 +43,15 @@ jobs:
     name: core/ is display-agnostic outside core/ui/
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false on every checkout in this file. The default leaves GITHUB_TOKEN
+      # in .git/config for the whole job, and `pio run` executes repository-controlled Python
+      # (platformio.ini's extra_scripts: tools/git_version.py and the P4 pre-scripts) — so on a
+      # same-repo PR, branch code runs in a job holding a writable token. Nothing here needs git
+      # auth: checkout has already fetched, and the release job's token reaches
+      # action-gh-release through the environment, not git config.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: No LVGL / TJpg outside src/core/ui/
         run: |
           if hits=$(grep -rn --include='*.h' --include='*.cpp' \
@@ -98,6 +106,7 @@ jobs:
         with:
           fetch-depth: 0         # tools/git_version.py runs `git describe --tags` for FW_VERSION
           fetch-tags: true
+          persist-credentials: false   # see the guard job — this is the build that runs pio
 
       - uses: actions/setup-python@v5
         with:
@@ -144,6 +153,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4    # for tools/build_manifest.py
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:

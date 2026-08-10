@@ -119,16 +119,23 @@ of a laptop build dir.
 
 ### Shipping envs to build (matrix)
 
-Only the three **app** envs — not the bring-up/test envs:
+Only the **app** envs — not the bring-up/test envs:
 
 | env | unit id | board | flash | partitions |
 |---|---|---|---|---|
 | `nest` | `nest` | crowpanel_rotary | 16 MB | `default_16MB.csv` |
 | `sleep-machine` | `sleep` | es3c28p | 16 MB | `default_16MB.csv` |
 | `sleep-button` | `button` | esp32s3cam | 8 MB | `default_8MB.csv` |
+| `sonos-jukebox` | `jukebox` | crowpanel_p4_7in | 16 MB | `src/boards/crowpanel_p4_7in/partitions_16mb.csv` |
 
-The `unit` id column is exactly what `registrationJson()` reports (`webconfig.cpp:134-142`) — the
-manifest is keyed on it so a device looks up its own entry with a string it already knows.
+The `unit` id column is exactly what `registrationJson()` reports (`webconfig.cpp`) — the
+manifest is keyed on it so a device looks up its own entry with a string it already knows. **It
+must also be what `unitId()` in `net/updater.cpp` asks for**; see the note under the manifest
+schema below for what happens when those two disagree, because it already happened once.
+
+> The jukebox joined this table late (issue #7 follow-up). It is ESP32-P4 on a different platform
+> and toolchain, so its CI job pulls a whole separate platform + IDF — which is why the workflow
+> caches PlatformIO per env rather than sharing one key across the matrix.
 
 ### Workflow sketch — `.github/workflows/firmware.yml`
 
@@ -136,7 +143,9 @@ manifest is keyed on it so a device looks up its own entry with a string it alre
 name: firmware
 on:
   push:
+    branches: [main]        # the merge gate — see the note below the sketch
     tags: ['v*']            # a tag is the trigger; git describe == the tag → clean FW_VERSION
+  pull_request:             # ditto
   workflow_dispatch: {}     # manual builds (no Release, artifacts only) for testing CI
 jobs:
   build:
@@ -147,9 +156,12 @@ jobs:
           - { env: nest,          unit: nest }
           - { env: sleep-machine, unit: sleep }
           - { env: sleep-button,  unit: button }
+          - { env: sonos-jukebox, unit: jukebox }
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0, fetch-tags: true }   # git describe needs tags + history
+        # git describe needs tags + history. persist-credentials: false because `pio run` executes
+        # repository-controlled extra_scripts and the default leaves GITHUB_TOKEN in .git/config.
+        with: { fetch-depth: 0, fetch-tags: true, persist-credentials: false }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install platformio
@@ -190,7 +202,9 @@ jobs:
 - **Provenance.** With `fetch-depth: 0` and a tag trigger, `git describe --tags` on a clean tree
   emits the bare tag (e.g. `v0.6.0`), so a Release binary reports a clean `FW_VERSION` and a
   laptop dev build stays `v0.6.0-3-gabc-dirty`. That difference is the whole update trigger (below).
-- **`tools/build_manifest.py`** (new, ~30 lines): read the three bins, sha256 each, emit the schema
+- **`tools/build_manifest.py`** (new, ~30 lines): read every `firmware-<unit>.bin` the matrix
+  produced — it globs and parses the unit id out of the filename, so adding a unit to CI needs no
+  change here (that is how `jukebox` joined) — sha256 each, emit the schema
   in the next section. Kept in-repo so the standalone-GitHub path (no portal) has a manifest too.
 - **Transient GCC ICE** (the known local flake) is a *local* hardware fault; CI runners won't hit
   it. No `-j` clamp needed there.
@@ -340,7 +354,7 @@ console" upgrade.
 ### Portal changes (`sonos-portal/`)
 
 - **Release poller** (background thread, like `_probe_loop`): every ~15 min hit the GitHub Releases
-  API for the repo's latest, and if its tag != the cached one, download the three `firmware-*.bin`
+  API for the repo's latest, and if its tag != the cached one, download every `firmware-*.bin`
   + `manifest.json` into `DATA_DIR/firmware/`. One WAN dependency, on the *portal* (a server, by
   definition), never on a device. Configurable repo + optional token via env/add-on options.
 - **New endpoints:**
