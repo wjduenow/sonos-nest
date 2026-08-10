@@ -3,8 +3,8 @@
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
-#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
-#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
+#include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the

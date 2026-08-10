@@ -22,8 +22,12 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > ⚠️ **It is the env that silently breaks.** `+<core/>` sweeps every core file into it, but its
   > `lib_deps` is overridden to just ArduinoJson — no LVGL, no TJpg. So any new core file touching
   > graphics breaks THIS env and only this env, and it is the one nobody builds by habit. That is
-  > exactly how `art_cache.cpp` broke it for weeks (issue #7). Build it before you push core
-  > changes; the exclusion list lives in its `build_src_filter`.
+  > exactly how `art_cache.cpp` broke it for weeks (issue #7). **Two things now stop that
+  > recurring, and both matter: every graphics-coupled core file lives in `core/ui/`, which this
+  > env drops in one line (`-<core/ui/>`) — so put a new LVGL-touching file THERE, don't grow a
+  > per-file exclusion list back; and CI builds all four app envs on every PR and every push to
+  > `main`.** (A push to a side branch with no PR open is not covered — build it yourself.) The
+  > convention is written up in `src/core/ui/README.md`.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -209,6 +213,19 @@ hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
 mic → TFLM; see Phase-1 note below). Each env selects one board + one unit + the
 core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
 
+> ⚠️ **Which env you pass to `-e` rewrites shared global state — PlatformIO packages live in
+> `~/.platformio`, NOT in the project, and are shared across every checkout and worktree.** The
+> jukebox envs are ESP32-P4 and pull the pioarduino framework, which installs over the *same*
+> `packages/framework-arduinoespressif32` directory the S3 envs use. So `pio run -e sonos-jukebox`
+> leaves Arduino 3.3.11 there, and the next `pio run -e nest` fails with **`Implicit dependency
+> 'FreeRTOS.h' not found`** or **`esp_timer.h: No such file`** — errors that name the framework,
+> never the env you actually built. It swaps back the same way. **The fix is
+> `pio pkg install -e <env>` for the env you want**, then rebuild.
+> Two consequences: **two Claude sessions must not build different silicon at the same time** (the
+> loser sees a build break with no cause anywhere in its own diff), and a green `nest` build proves
+> nothing about a jukebox build you ran an hour ago. CI is immune — every matrix job is a fresh
+> runner, and the PlatformIO cache is keyed per env precisely so the two platforms never share one.
+
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.
   It **drops on every device reset/re-enumeration**, and the port number bumps
@@ -281,7 +298,11 @@ Key modules (all under `src/core/` — device-agnostic):
   and how to apply it (NVS + `g_pending`). **Boards must not reach into settings/`g_pending`
   themselves** — a board's HTTP server does sockets + routing and calls this. Also clears a
   sleep/wake pick when its file is deleted, so a pick can't dangle.
-- `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
+- `core/ui/` — **the only LVGL/TJpg-coupled part of core**, kept in its own subtree so headless
+  envs exclude it wholesale (`-<core/ui/>`) instead of maintaining a per-file list. Members:
+  `album_art.{h,cpp}` (art fetch + TJpg decode → LVGL image, form-factor-agnostic) and
+  `art_cache.{h,cpp}` (the jukebox tile cache). Callers in device-agnostic core (`app.cpp`,
+  `webconfig.cpp`) guard include *and* call sites with `#ifndef HEADLESS`. See its README.
 - `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env), `logmirror`
   (see below).
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.
