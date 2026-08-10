@@ -164,8 +164,6 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
 // --- Commands ---------------------------------------------------------------------------------
 static void prevCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
-  // Back restarts the CURRENT track rather than skipping to the previous one — the behaviour
-  // asked for on this unit. The nest keeps `prev` (previous track); hence the separate command.
   if (stateLock()) { g_pending.restartTrack = true; stateUnlock(); }
 }
 static void nextCb(lv_event_t *) {
@@ -1263,10 +1261,33 @@ static void amzBtnCb(lv_event_t *) {
 }
 
 static void refreshNowCb(lv_event_t *) {
-  // One button, both caches: they share the schedule, and a user asking for "refresh" means the
-  // lists they can see, not one of two internal caches they have no reason to distinguish.
+  // Radio only. Favourites used to ride along here because the two shared one schedule; they now
+  // have their own, and their own button below.
   uiSoundPlay(UiSound::Confirm);
   radiocache::requestRefresh();
+}
+
+// --- Favourites schedule (mirrors the radio controls above, and the web admin) ---
+static lv_obj_t *s_favHourLbl = nullptr, *s_favMeta = nullptr;
+
+static void favHourStep(int delta) {
+  int h = (int)settingsFavRefreshHour() + delta;
+  if (h < 0) h = 23; else if (h > 23) h = 0;
+  settingsSetFavRefreshHour((uint8_t)h);
+  if (s_favHourLbl) lv_label_set_text_fmt(s_favHourLbl, "%02d:00", h);
+  uiSoundPlay(UiSound::Tick);
+}
+static void favHourDownCb(lv_event_t *) { favHourStep(-1); }
+static void favHourUpCb(lv_event_t *)   { favHourStep(+1); }
+
+static void favAutoCb(lv_event_t *e) {
+  const bool on = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+  settingsSetFavAutoRefresh(on);
+  uiSoundPlay(UiSound::Tick);
+}
+
+static void favRefreshNowCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Confirm);
   favcache::requestRefresh();
 }
 
@@ -1685,6 +1706,13 @@ static void buildRadio() {
 
 static void buildSettings() {
   lv_obj_t *pg = s_page[PAGE_SETTINGS];
+  // SCROLLABLE. panel() clears the flag, and this page was already ~570 px of content on a 600 px
+  // panel — adding the Favourites block below Amazon would simply have been unreachable. Vertical
+  // only, so a horizontal drag still can't move it off-axis.
+  lv_obj_add_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(pg, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(pg, LV_SCROLLBAR_MODE_AUTO);
+
   lv_obj_t *h = label(pg, "Settings", &lv_font_montserrat_28, JB_TEXT);
   lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
 
@@ -1793,6 +1821,49 @@ static void buildSettings() {
   lv_obj_align(al, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 500);
   s_amzStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
   lv_obj_align(s_amzStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 528);
+
+  // --- Favourites refresh (its own schedule; see settings.h for why it is not the radio one) ---
+  {
+    const lv_coord_t Y = PAD_TOP + 596;
+    lv_obj_t *fl = label(pg, "Refresh favourites daily at", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(fl, LV_ALIGN_TOP_LEFT, 0, Y + 10);
+
+    lv_obj_t *fsw = lv_switch_create(pg);
+    lv_obj_set_size(fsw, 72, 38);
+    lv_obj_align(fsw, LV_ALIGN_TOP_LEFT, 300, Y + 4);
+    lv_obj_set_style_bg_color(fsw, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    if (settingsFavAutoRefresh()) lv_obj_add_state(fsw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(fsw, favAutoCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    lv_obj_t *fdn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, favHourDownCb);
+    lv_obj_align(fdn, LV_ALIGN_TOP_LEFT, 400, Y);
+    s_favHourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+    lv_obj_align(s_favHourLbl, LV_ALIGN_TOP_LEFT, 462, Y + 8);
+    lv_label_set_text_fmt(s_favHourLbl, "%02d:00", settingsFavRefreshHour());
+    lv_obj_t *fup = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, favHourUpCb);
+    lv_obj_align(fup, LV_ALIGN_TOP_LEFT, 556, Y);
+
+    lv_obj_t *fn = lv_button_create(pg);
+    lv_obj_remove_style_all(fn);
+    lv_obj_set_size(fn, 180, 52);
+    lv_obj_align(fn, LV_ALIGN_TOP_LEFT, 624, Y - 2);
+    lv_obj_set_style_radius(fn, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(fn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(fn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_bg_color(fn, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(fn, favRefreshNowCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *fnl = label(fn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
+    lv_obj_center(fnl);
+
+    // Pick a different hour from the stations — running both at once is more internal SRAM than
+    // this board has spare (see kMinHeap in fav_cache.cpp).
+    lv_obj_t *fh = label(pg, "Keep this on a different hour from the stations.",
+                         &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(fh, LV_ALIGN_TOP_LEFT, 0, Y + 38);
+
+    s_favMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(s_favMeta, LV_ALIGN_TOP_LEFT, 0, Y + 62);
+  }
 
   s_amzBtn = lv_button_create(pg);
   lv_obj_remove_style_all(s_amzBtn);

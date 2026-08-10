@@ -178,7 +178,6 @@ static void processPending() {
   // Explicit play/pause decided by the UI (no round-trip, correct action).
   if (p.setPlay == 0)      sonos::pause(s_coordIp);
   else if (p.setPlay == 1) sonos::play(s_coordIp);
-  if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
   if (p.restartTrack) {
     // Deliberately does NOT fall back to previous() when the seek fails. It fails on live radio,
     // which has no position to seek to — and silently skipping to another station because a
@@ -302,7 +301,7 @@ static void processPending() {
 
   // After a transport change the track/state (and art) update — poll again soon, once the
   // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.
-  if (p.prev || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;
+  if (p.restartTrack || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;
 
   // Browse / play requests (ContentDirectory off the UI thread).
   library::service(s_coordIp, s_coordIp, s_coordUuid);
