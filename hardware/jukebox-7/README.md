@@ -164,6 +164,30 @@ anything else without this adapter.
 **One cable is all it takes**, now that the expander is gone: `J13` → **Knob**, and the Knob's
 second Qwiic socket stays empty.
 
+### Magnets — **two sizes, and they are not interchangeable**
+
+| | |
+|---|---|
+| Shell | **6 × Ø8.0 × 2.0 mm** discs |
+| Face plate | **6 × Ø6.0 × 2.0 mm** discs |
+| Total | **12** — neodymium, 2 mm thick throughout |
+
+**Why the shell gets the bigger one.** Its bore has to be **Ø8.6 regardless**, because that bore
+doubles as the socket receiving the face plate's registration spigot. Putting a Ø6 disc at the
+bottom of it left a *stepped* hole — you had to drop the magnet 4 mm down a wide bore and hope it
+found a small pocket, which is miserable to glue. An **Ø8 disc fills that same bore**, so the shell
+side is one straight hole: drop it in, it lands flat, glue it.
+
+The face plate keeps **Ø6** because its spigot is only Ø7.8 and cannot wall anything larger —
+there is 0.75 mm of plastic around the disc as it stands.
+
+> ⚠️ **Polarity.** Glue **all** shell magnets one way up and **all** face magnets the other, so
+> every pair attracts. Mark one pole with a marker *before* any glue is opened — this is not
+> recoverable afterwards. Same rule as `hardware/round-nest-2.8/wall/`.
+
+The two faces meet across a deliberate **0.5 mm air gap** (`MAG_AIRGAP`): the plate seats on the
+shell rim and the six blocks, and the magnets pull it down rather than defining where it sits.
+
 ### Still pending selection
 - **1× dial cap** — Ø42, 14 mm proud, **Ø6 D-bore**, if you buy rather than print
   (`wall/knob_cap.stl` is the printed one). Must be a **D-shaft** knob, not knurled/splined.
