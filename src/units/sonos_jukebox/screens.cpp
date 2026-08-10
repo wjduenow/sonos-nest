@@ -2175,6 +2175,8 @@ lv_obj_t *s_saver = nullptr, *s_saverBg = nullptr, *s_saverScrim = nullptr, *s_s
 
 enum class SaverState : uint8_t { Awake, Showing, Blank };
 SaverState s_saverState = SaverState::Awake;
+SaverState s_prevLogged = SaverState::Awake;   // separate from s_saverState so the first real
+                                               // transition still logs (both start Awake)
 
 // Cached config. Re-read only when the web page bumps webConfigGen() or the on-screen Settings
 // page calls saverConfigChanged() — NVS reads on every 5 ms tick would be absurd.
@@ -2244,6 +2246,16 @@ void saverApplyLayout(bool cover) {
   // meridiem behind at the old height. Repainting re-runs that align. (It also costs a drift step,
   // which is harmless: a layout change is already a visible event.)
   s_shownMin = -1;
+
+  // This unit is on a wall with a power-only port, so the log mirror is the only way to see why it
+  // chose what it chose. "Album art selected but a clock on the glass" has three different causes —
+  // the mode did not persist, there is no decoded cover to show, or the images are drawing at the
+  // wrong scale — and they are indistinguishable from across the room. One line per layout change,
+  // which is at most a few an hour.
+  LOG.printf("[saver ] layout=%s mode=%u art=%s %ldx%ld bgScale=%ld tileScale=%ld\n",
+             cover ? "cover" : "clock", (unsigned)s_cfgMode, s_artDsc ? "yes" : "none",
+             (long)(s_artDsc ? s_artDsc->header.w : 0), (long)(s_artDsc ? s_artDsc->header.h : 0),
+             (long)lv_image_get_scale_x(s_saverBg), (long)lv_image_get_scale_x(s_saverCover));
 }
 
 void saverPaintClock() {
@@ -2283,21 +2295,21 @@ void saverPaintClock() {
   lv_obj_align_to(s_saverAmPm, s_saverClock, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -18);
 }
 
-// Point both the wallpaper and the tile at the current cover, scaled. LVGL's scale is a 1/256
-// fixed-point factor; the background is scaled to COVER 1024x600, which from a <=280 px source is
-// a ~3.7x upscale. That softness is deliberate — it is what makes it read as a wash rather than a
-// stretched thumbnail, and it costs nothing, where a real blur would cost a second buffer.
+// Point both the wallpaper and the tile at the current cover.
+//
+// The scaling is LVGL's, not ours: LV_IMAGE_ALIGN_COVER fills the widget keeping aspect (the
+// wallpaper) and LV_IMAGE_ALIGN_CONTAIN fits inside it (the tile), and BOTH recompute inside
+// lv_image_set_src(). Setting the factor by hand with lv_image_set_scale() is the same arithmetic
+// but has to be redone in the right order after every source change, which is one more thing to
+// get wrong for no gain.
+//
+// From a <=280 px source the wallpaper is a ~3.7x upscale. That softness is deliberate — it is
+// what makes it read as a wash rather than a stretched thumbnail, and it costs nothing, where a
+// real blur would cost a second full-screen buffer.
 void saverApplyArt() {
   if (!s_saverBg || !s_artDsc || !s_artDsc->header.w || !s_artDsc->header.h) return;
-  const uint32_t w = s_artDsc->header.w, h = s_artDsc->header.h;
-
-  const uint32_t sx = (uint32_t)SCREEN_W * 256u / w;
-  const uint32_t sy = (uint32_t)SCREEN_H * 256u / h;
   lv_image_set_src(s_saverBg, s_artDsc);
-  lv_image_set_scale(s_saverBg, (uint32_t)(sx > sy ? sx : sy));
-
   lv_image_set_src(s_saverCover, s_artDsc);
-  lv_image_set_scale(s_saverCover, (uint32_t)SAVER_TILE * 256u / (w > h ? w : h));
 }
 
 void saverBuild() {
@@ -2312,14 +2324,18 @@ void saverBuild() {
   s_saverBg = lv_image_create(s_saver);
   lv_obj_set_size(s_saverBg, SCREEN_W, SCREEN_H);
   lv_obj_align(s_saverBg, LV_ALIGN_CENTER, 0, 0);
-  lv_image_set_inner_align(s_saverBg, LV_IMAGE_ALIGN_CENTER);
+  lv_image_set_inner_align(s_saverBg, LV_IMAGE_ALIGN_COVER);     // LVGL does the fill maths
   lv_obj_add_flag(s_saverBg, LV_OBJ_FLAG_HIDDEN);
 
   // Scrim. Does two jobs: it makes white text legible over any cover, and it drops the average
   // luminance of a screen that is about to sit lit for hours.
+  //
+  // 50 %, down from the 70 % this shipped with. At 70 %, on top of a screensaver backlight that
+  // defaults to 40 %, the wallpaper was so dark it read as a plain clock on black — the feature
+  // looked like it was not working at all. 120 px white type stays perfectly legible at 50 %.
   s_saverScrim = panel(s_saver, SCREEN_W, SCREEN_H, 0x000000, 0);
   lv_obj_align(s_saverScrim, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_bg_opa(s_saverScrim, LV_OPA_70, 0);
+  lv_obj_set_style_bg_opa(s_saverScrim, LV_OPA_50, 0);
   lv_obj_add_flag(s_saverScrim, LV_OBJ_FLAG_HIDDEN);
 
   s_saverGrp = lv_obj_create(s_saver);
@@ -2335,7 +2351,7 @@ void saverBuild() {
   s_saverCover = lv_image_create(s_saverCard);
   lv_obj_set_size(s_saverCover, SAVER_TILE, SAVER_TILE);
   lv_obj_center(s_saverCover);
-  lv_image_set_inner_align(s_saverCover, LV_IMAGE_ALIGN_CENTER);
+  lv_image_set_inner_align(s_saverCover, LV_IMAGE_ALIGN_CONTAIN);  // ...and the fit maths
 
   s_saverClock = label(s_saverGrp, "--:--", &lv_font_clock_120, JB_TEXT);
   lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, 232);
@@ -2418,6 +2434,13 @@ static void saverTick(const PlayerState &p) {
   backlightTo(next == SaverState::Blank   ? 0
             : next == SaverState::Showing ? s_cfgDim
                                           : s_cfgBright);
+  if (next != s_prevLogged) {
+    s_prevLogged = next;
+    LOG.printf("[saver ] state=%s idle=%lus backlight=%d%%\n",
+               next == SaverState::Blank ? "blank" : next == SaverState::Showing ? "showing"
+                                                                                 : "awake",
+               (unsigned long)(idle / 1000), s_blPct);
+  }
 
   if (next != SaverState::Showing) return;
 

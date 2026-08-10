@@ -85,13 +85,20 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > **`GET /api/config` → `.health`** (`core/webconfig.cpp`) carries heap/PSRAM/LVGL/SOAP counters.
   > ⚠️ **Know which resource you are actually spending — they are nowhere near equal.** Measured on
   > hardware: **PSRAM 32 MB, ~29.6 MB free** (frame buffer 1.17 MB + LVGL pool 512 KB + album art
-  > 526 KB + station tile cache 170 KB ≈ 2.4 MB); **app slot 6.25 MB, ~4.3 MB free** (and the
+  > 410 KB + a 512 KB JPEG staging buffer + station tile cache 170 KB ≈ 2.8 MB); **app slot
+  > 6.25 MB, ~4.3 MB free** (and the
   > 3.375 MB `spiffs` partition is *unused* — nothing mounts it — if you ever need more);
   > **internal SRAM is the only tight one.** ~115 KB free but the `heapLargest` block is only
   > ~32-49 KB, and `core/amazon.cpp` notes the crawl runs at **~40 KB free**. New buffers go in
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **`ART_MAX_PX` is a ceiling the decoder UNDERSHOOTS, not a target.** TJpgDec scales only by
+  > powers of two, so decoded size is source/(1,2,4,8) — the largest that fits under the cap. Sonos
+  > serves 640 px covers, so a cap of **280 yielded 160 px art**: a cap 100 px larger than the tile
+  > still produced art at well under half of it, and everything looked soft on a device with 30 MB
+  > of spare PSRAM. It is **320** here for exactly that reason (640/2). Pick a cap by asking what
+  > `source/2^n` lands on, not how big you want it.
   > ⚠️ **The screensaver OWNS THE BACKLIGHT (plans/10; the block near the bottom of the unit's
   > `screens.cpp`).** Awake / Showing / Blank off LVGL's inactivity timer — so `backlightSet()`
   > belongs to `saverTick()` now, and calling it from anywhere else just gets overwritten on the
