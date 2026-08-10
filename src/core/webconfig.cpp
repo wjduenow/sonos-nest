@@ -7,6 +7,11 @@
 #include "board.h"          // localTrack* — the HAL's view of local storage (empty on most boards)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
+#include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
+#include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
+#ifndef HEADLESS
+#include "album_art.h"           // albumArtDiag() — art fetch/fail/clear counters
+#endif
 #include "net/wifi.h"      // wifiHostname() — the effective name the router shows
 #include "net/ota.h"       // otaHostname()  — the mDNS name, which is NOT the same thing
 #include "net/updater.h"   // updaterAvailable*/Approve/ForceCheck — the OTA pull path (plans/06)
@@ -95,6 +100,8 @@ String webConfigJson() {
   doc["scrollSound"] = settingsScrollSound();
   doc["radio_refresh_hour"] = settingsRadioRefreshHour();
   doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
+  doc["fav_refresh_hour"]   = settingsFavRefreshHour();
+  doc["fav_auto_refresh"]   = settingsFavAutoRefresh();
   // The EFFECTIVE name (falls back to the firmware default when nothing is stored), not the raw
   // NVS value — a page showing "" when the router says "sonos-button" would just be wrong.
   doc["deviceName"] = wifiHostname();
@@ -139,6 +146,75 @@ String webConfigJson() {
   h["lvMemUsed"]    = s_lvUsed;
   h["lvMemMax"]     = s_lvMaxUsed;
   h["lvMemFragPct"] = s_lvFragPct;
+
+  // WHERE the internal-heap low-water actually happened (core/heap_watch.h). heapMin says how
+  // close the device came to the ~15 KB cliff where LWIP starves; this says what was holding the
+  // memory at that moment, which is the part you cannot get any other way — the dips are
+  // transient, rare, and invisible by the time anyone looks.
+  {
+    heapwatch::Low lw;
+    heapwatch::worst(lw);
+    if (lw.tag && lw.tag[0]) {
+      JsonObject w = h["heapLow"].to<JsonObject>();
+      w["tag"]     = lw.tag;                  // e.g. gena.unescape, favs.page, art.fetch, poll
+      w["free"]    = lw.freeBytes;
+      w["largest"] = lw.largestFree;
+      w["atSec"]   = lw.atMs / 1000;
+    }
+  }
+
+  // What the device BELIEVES is playing. Added after a bug where Now Playing sat on "Nothing
+  // playing" while the speaker was fine: with no way to read g_player remotely, telling "the
+  // device has the wrong state" apart from "the screen is not drawing it" needed a person in front
+  // of the panel. This is the cheap way to answer that from a terminal.
+  {
+    JsonObject n = h["nowPlaying"].to<JsonObject>();
+    if (stateLock()) {
+      n["transport"] = (int)g_player.transport;   // 0=Stopped 1=Playing 2=Paused 3=Transitioning 4=Unknown
+      n["title"]     = g_player.title;
+      n["artist"]    = g_player.artist;
+      n["posSec"]    = g_player.positionSec;
+      n["durSec"]    = g_player.durationSec;
+      n["volume"]    = g_player.volume;
+      n["room"]      = g_player.zoneName;
+      n["hasArt"]    = g_player.artUri.length() > 0;
+      // Art pipeline counters. clears climbing while a track is loaded is the signature of the
+      // "artwork flickers" report — the UI hides the cover ONLY when albumArtClear() has run.
+#ifndef HEADLESS
+      AlbumArtDiag ad; albumArtDiag(ad);
+      n["artFetch"]  = ad.fetches;
+      n["artFail"]   = ad.failures;
+      n["artClear"]  = ad.clears;
+#endif
+      // The TAIL of the URL, not a bool. "art disappears and comes back" can be artUri toggling
+      // between two different URLs for the same track, or going empty — a boolean cannot tell
+      // those apart, and that ambiguity has already sent one fix in the wrong direction.
+      n["artTail"]   = g_player.artUri.length() > 40
+                         ? g_player.artUri.substring(g_player.artUri.length() - 40)
+                         : g_player.artUri;
+      stateUnlock();
+    }
+  }
+
+  // GENA eventing (plans/09, issue #6). Emitted only on units that have it compiled in — port is
+  // 0 when the no-op stubs are linked, so its ABSENCE means "not built with -DGENA_EVENTS" rather
+  // than "built and broken". That distinction is the whole point of the block: eventing failing
+  // silently looks exactly like eventing working, because the backstop poll keeps the screen
+  // correct either way. Read it as: subscribed=false or a climbing resubscribes/failures means the
+  // poll is quietly carrying the device; a lastEventAgeMs that only ever grows means subscriptions
+  // are live but nothing is arriving (callback unreachable — check the speaker can reach US).
+  sonos::GenaDiag gd;
+  sonos::genaDiag(gd);
+  if (gd.port) {
+    JsonObject g = h["gena"].to<JsonObject>();
+    g["port"]         = gd.port;
+    g["subscribed"]   = gd.subscribed;
+    g["events"]       = gd.events;
+    g["renewals"]     = gd.renewals;
+    g["resubscribes"] = gd.resubscribes;
+    g["failures"]     = gd.failures;
+    if (gd.lastEventAgeMs != UINT32_MAX) g["lastEventAgeMs"] = gd.lastEventAgeMs;
+  }
 
   // OTA pull state (net/updater.cpp): the toggle, the source, what's running, and what's available
   // (null when up-to-date/disabled). Drives the config page's "Updates" section and its Approve
@@ -268,6 +344,24 @@ bool webConfigApply(const String &field, const String &value, String &err) {
 
     return true;
 
+  }
+
+  // Favourites keep a schedule of their own — see settings.h for why they no longer share the
+  // radio one.
+  if (field == "fav_refresh_hour") {
+    const int h = value.toInt();
+    if (h < 0 || h > 23) { err = "hour must be 0-23"; return false; }
+    // Warn rather than refuse: two heavy refreshes in the same hour is real memory pressure on the
+    // P4, but it is the owner's call and a same-hour setting is not invalid.
+    if (h == (int)settingsRadioRefreshHour())
+      err = "note: same hour as the station refresh — they will compete for memory";
+    settingsSetFavRefreshHour((uint8_t)h);
+    return true;
+  }
+
+  if (field == "fav_auto_refresh") {
+    settingsSetFavAutoRefresh(value == "1" || value == "true" || value == "on");
+    return true;
   }
 
   if (field == "room") {

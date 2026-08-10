@@ -26,6 +26,8 @@
 #include "settings.h"
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 namespace favcache {
 
@@ -104,54 +106,29 @@ bool refresh() {
   if (zs.empty()) return false;
   s_busy = true;
 
-  // Page FV:2 in SMALL pages. 20, not 50: a favourite's record carries its whole <r:resMD> DIDL
-  // (~700 bytes), so a 50-item page is a ~50 KB response held as a String and then COPIED again by
-  // the unescape — and min internal heap was measured dropping to 41 KB with 50. Internal SRAM is
-  // the scarce resource on this board; halving the page halves the spike for one extra round trip.
-  std::vector<Fav> favs;
-  int start = 0, total = 1, skipped = 0;
-  while (start < total && favs.size() < 300) {
-    String r;
-    if (!sonos::soapAction(zs[0].ip, "/MediaServer/ContentDirectory/Control",
-                           "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
-                           String("<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
-                                  "<Filter>*</Filter><StartingIndex>") + start +
-                           "</StartingIndex><RequestedCount>20</RequestedCount>"
-                           "<SortCriteria></SortCriteria>", r)) {
-      Serial.println("[favs  ] browse failed");
-      s_busy = false; return false;
-    }
-    const String tm = tag(r, "TotalMatches");
-    if (tm.length()) total = tm.toInt();
-    const String didl = unesc(tag(r, "Result"));
-
-    // Split on the record boundary, NOT on </item> — see the header comment.
-    int got = 0, p = didl.indexOf("<item id=\"FV:2/");
-    while (p >= 0) {
-      const int nxt = didl.indexOf("<item id=\"FV:2/", p + 1);
-      const String rec = (nxt < 0) ? didl.substring(p) : didl.substring(p, nxt);
-      Fav f;
-      f.title  = unesc(tag(rec, "dc:title"));
-      f.uri    = unesc(tag(rec, "res"));
-      f.artUrl = unesc(tag(rec, "upnp:albumArtURI"));
-      f.meta   = tag(rec, "r:resMD");          // already single-unescaped; Sonos wants it as-is
-      // A favourite with no <res> cannot be played — on this household "Discover Sonos Radio" and
-      // "Sonos Presents" are both like this. Skip them, but say so: silently showing 40 of 42 with
-      // no explanation is the kind of gap that gets reported as a bug.
-      if (f.title.length() && f.uri.length()) favs.push_back(f);
-      else if (f.title.length())              ++skipped;
-      ++got;
-      p = nxt;
-    }
-    if (!got) break;
-    start += got;
-  }
-  if (favs.empty()) { Serial.println("[favs  ] no favourites returned"); s_busy = false; return false; }
-
+  // Page FV:2 in SMALL pages. 10 — and this is not conservatism, it is measured. A favourite's
+  // record carries its whole <r:resMD> DIDL (~700 bytes), and the page is held as a String and
+  // then COPIED again by the unescape. 50 took min internal heap to 41 KB. 20 was still enough,
+  // in combination with everything else running, to take FREE heap to 25 KB and MIN to 1.4 KB on
+  // a live device — past the point where LWIP cannot get socket buffers, at which point the board
+  // answers ping and nothing else, and recovers only by rebooting. Each halving costs one extra
+  // round trip and nothing else. Do not raise it.
+  // STREAM STRAIGHT TO DISK. This used to accumulate every record in a std::vector<Fav> and write
+  // the file afterwards — ~38 KB of Strings held for the whole crawl, stacked underneath each
+  // page's own transients. Measured with heapwatch: the refresh took free heap from ~110 KB to a
+  // minimum of 42 KB, and with the old 20-item pages it reached 1.4 KB and killed the device.
+  // Nothing needs the whole list in memory: the file is the output, so write each record as it is
+  // parsed and never hold more than one page.
   mkdir(root().c_str(), 0777);
   const String tmp = path() + ".tmp";
   FILE *f = fopen(tmp.c_str(), "wb");
   if (!f) { s_busy = false; return false; }
+
+  // Still "v1". A version bump WAS tried, to force stale caches (which held escaped r:resMD) to
+  // re-fetch — and rejecting the old version is what forced a refresh during the boot storm and
+  // put the device in a boot loop. The live cache has since been rebuilt correctly, so there is
+  // nothing to migrate; if a future format change ever does need one, force it from a settled
+  // device, never from ready()==false at boot.
   String buf = String("v1\t") + String((uint32_t)time(nullptr)) + "\n";
   bool ok = true;
   auto flush = [&](bool force) {
@@ -164,20 +141,79 @@ bool refresh() {
     }
     buf = "";
   };
-  for (const auto &v : favs) {
-    buf += clean(v.title) + "\t" + clean(v.uri) + "\t" + clean(v.artUrl) + "\t" + clean(v.meta) + "\n";
-    flush(false);
+  auto bail = [&]() { fclose(f); unlink(tmp.c_str()); s_busy = false; return false; };
+
+  int start = 0, total = 1, skipped = 0, kept = 0;
+  while (start < total && kept < 300 && ok) {
+    String didl;
+    {
+      // r is scoped so the raw response is released before the record loop runs — it is the same
+      // size again as didl, and holding both through the parse doubled the page's cost.
+      String r;
+      if (!sonos::soapAction(zs[0].ip, "/MediaServer/ContentDirectory/Control",
+                             "urn:schemas-upnp-org:service:ContentDirectory:1", "Browse",
+                             String("<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
+                                    "<Filter>*</Filter><StartingIndex>") + start +
+                             "</StartingIndex><RequestedCount>10</RequestedCount>"
+                             "<SortCriteria></SortCriteria>", r)) {
+        LOG.println("[favs  ] browse failed");
+        return bail();
+      }
+      const String tm = tag(r, "TotalMatches");
+      if (tm.length()) total = tm.toInt();
+      didl = unesc(tag(r, "Result"));
+    }
+    heapwatch::note("favs.page");     // page held, raw response already released
+
+    // Split on the record boundary, NOT on </item> — see the header comment.
+    int got = 0, p = didl.indexOf("<item id=\"FV:2/");
+    while (p >= 0) {
+      const int nxt = didl.indexOf("<item id=\"FV:2/", p + 1);
+      const String rec = (nxt < 0) ? didl.substring(p) : didl.substring(p, nxt);
+      const String title  = unesc(tag(rec, "dc:title"));
+      const String uri    = unesc(tag(rec, "res"));
+      const String artUrl = unesc(tag(rec, "upnp:albumArtURI"));
+      // *** unesc() HERE IS LOAD-BEARING. *** `didl` has had ONE unescape (of Browse's Result);
+      // the r:resMD inside it is escaped a second time, exactly like the three fields above, which
+      // is why they all call unesc() too. Storing it still-escaped meant soapAction escaped it
+      // AGAIN on the way out, so the speaker received `&lt;DIDL-Lite` as literal text.
+      //
+      // Proven on hardware, same favourite back to back: without this, AddURIToQueue answers HTTP
+      // 500 / UPnP errorCode 800; with it, 364 tracks are added. It only broke SOME favourites,
+      // which is what disguised it as a service problem: a station URI (x-sonosapi-radio:) plays
+      // from the URI alone and ignores bad metadata, but a CONTAINER (x-rincon-cpcontainer:, which
+      // is what all 28 YouTube Music favourites here are) can only be resolved THROUGH it.
+      // didl.cpp's parseDidl() always did this correctly; fav_cache parses separately and did not.
+      const String meta = unesc(tag(rec, "r:resMD"));
+      // A favourite with no <res> cannot be played — on this household "Discover Sonos Radio" and
+      // "Sonos Presents" are both like this. Skip them, but say so: silently showing 40 of 42 with
+      // no explanation is the kind of gap that gets reported as a bug.
+      if (title.length() && uri.length()) {
+        buf += clean(title) + "\t" + clean(uri) + "\t" + clean(artUrl) + "\t" + clean(meta) + "\n";
+        ++kept;
+        flush(false);
+      } else if (title.length()) {
+        ++skipped;
+      }
+      ++got;
+      p = nxt;
+    }
+    if (!got) break;
+    start += got;
   }
   flush(true);
+  if (!ok || !kept) {
+    if (!kept) LOG.println("[favs  ] no favourites returned");
+    return bail();
+  }
   fclose(f);
-  if (!ok) { unlink(tmp.c_str()); s_busy = false; return false; }
 
   // Swap last, so an interrupted write never replaces a good cache with a partial one.
   unlink(path().c_str());
   rename(tmp.c_str(), path().c_str());
   s_count = -1;
   s_lastRefreshMs = millis();
-  Serial.printf("[favs  ] cached %u favourite(s)%s\n", (unsigned)favs.size(),
+  LOG.printf("[favs  ] cached %d favourite(s)%s\n", kept,
                 skipped ? String(String(", skipped ") + skipped + " with no playable URI").c_str() : "");
   s_busy = false;
   return true;
@@ -214,21 +250,55 @@ int search(const String &query, std::vector<Fav> &out, int max) {
   return n;
 }
 
+// A refresh is by far the heaviest thing this module does, and on this board it runs close to the
+// edge: measured on a live device it took free internal heap to 25 KB and MIN to 1.4 KB. Below
+// ~15 KB LWIP cannot get socket buffers, the device answers ping and nothing else, and the only
+// recovery is a reboot. Two guards, both from watching that happen:
+//
+//   kSettleMs  Never refresh during the boot storm. LVGL, the art cache, the radio cache, GENA and
+//              the web server all come up in the first minute; a burst of SOAP and SD on top of
+//              that is what tips it over. This is also what makes the failure SELF-SUSTAINING —
+//              the reboot interrupts the refresh before it can write a valid cache, so !ready() is
+//              still true next boot and it tries again, forever. Deferring breaks that cycle.
+//
+//   kMinHeap   Refuse outright when heap is already low, wherever that came from. A stale
+//              favourites list is a cosmetic problem; taking the whole device down is not.
+//
+// kMinHeap MUST sit BELOW this board's idle free heap, or the refresh can never run at all. The
+// first attempt used 90 KB, taken from a reading seconds after boot — but the device settles at
+// ~87 KB free, so every refresh was silently deferred forever and the cache could never be
+// rebuilt. Idle ~87 KB, a 10-item page wants ~30 KB of headroom, the cliff is ~15 KB: 55 KB clears
+// the cliff with margin and still lets the guard actually fire. If you raise it, check it against
+// a device that has been up for a while, not one that just booted.
+static const uint32_t kSettleMs = 90000;
+static const uint32_t kMinHeap  = 55000;
+
 static void favTask(void *) {
   for (;;) {
     if (localStorageRoot() && wifiIsConnected() && sonos::zoneCount()) {
       bool due = s_want || !ready();
       s_want = false;
-      // Share the radio catalogue's daily slot: one overnight window for both keeps scheduled
-      // traffic off the ESP-Hosted link at the times anyone is listening.
+      if (due && millis() < kSettleMs) {
+        due = false;                       // not now — retried on a later pass
+      } else if (due && ESP.getFreeHeap() < kMinHeap) {
+        LOG.printf("[favs  ] refresh deferred, only %lu B heap free\n",
+                   (unsigned long)ESP.getFreeHeap());
+        due = false;
+      }
+      // Favourites have their OWN daily slot now, rather than sharing the radio catalogue's.
+      // They are cheap and change often (anything edited in the Sonos app); the station crawl is
+      // expensive and changes rarely, so one schedule could not suit both. Keeping them on
+      // SEPARATE hours also matters on this board: two heavy refreshes in the same hour is more
+      // internal SRAM pressure than it can take (see kMinHeap above). Defaults are 04:00 radio,
+      // 05:00 favourites.
       const time_t now = time(nullptr);
-      if (!due && settingsRadioAutoRefresh() && now > 1600000000) {
+      if (!due && settingsFavAutoRefresh() && now > 1600000000) {
         struct tm lt {}, ft {};
         localtime_r(&now, &lt);
         const time_t fa = (time_t)fetchedAt();
         localtime_r(&fa, &ft);
         const bool ranToday = fetchedAt() && lt.tm_year == ft.tm_year && lt.tm_yday == ft.tm_yday;
-        due = (lt.tm_hour == (int)settingsRadioRefreshHour()) && !ranToday;
+        due = (lt.tm_hour == (int)settingsFavRefreshHour()) && !ranToday;
       }
       if (due) refresh();
     }

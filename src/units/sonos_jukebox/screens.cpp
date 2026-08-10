@@ -39,6 +39,7 @@
 #include "../../boards/crowpanel_p4_7in/bringup_console.h"   // no-op unless the
                                                             // bring-up flag is set
 #include "ui_scale.h"
+#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Two-glyph Lucide subset — see lv_font_lucide_28.c for why and how to regenerate.
 LV_FONT_DECLARE(lv_font_lucide_28);
@@ -140,11 +141,17 @@ static bool s_wasPlaying = false;
 // live, so a needless redraw is visible as flicker/tearing. Only touch a widget when its value
 // has actually changed.
 struct Shown {
-  String   room, title, meta, badge;
+  // Seeded to a sentinel no real value can equal, for the SAME reason pct/elapsed/playing below
+  // use out-of-range seeds: the first tick must always paint. An empty String here was a bug —
+  // the meta label is built showing "starting up", so a track with no artist AND no album (a
+  // direct Spotify track reports neither) rendered "" , compared equal to the empty cache, and the
+  // boot placeholder stayed on screen forever under a correct title.
+  String   room = "\x01", title = "\x01", meta = "\x01", badge = "\x01";
   int      pct = -1, volPct = -1;
   uint32_t elapsed = UINT32_MAX, remain = UINT32_MAX;
   int      playing = -1;      // tri-state so the first tick always paints
   uint8_t  volIcon = 0xFF;
+  uint8_t  fillOpa = 0;       // scrubber fill opacity; dimmed when the duration is unknown
 };
 static Shown s_shown;
 
@@ -157,7 +164,7 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
 // --- Commands ---------------------------------------------------------------------------------
 static void prevCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
-  if (stateLock()) { g_pending.prev = true; stateUnlock(); }
+  if (stateLock()) { g_pending.restartTrack = true; stateUnlock(); }
 }
 static void nextCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
@@ -1254,10 +1261,33 @@ static void amzBtnCb(lv_event_t *) {
 }
 
 static void refreshNowCb(lv_event_t *) {
-  // One button, both caches: they share the schedule, and a user asking for "refresh" means the
-  // lists they can see, not one of two internal caches they have no reason to distinguish.
+  // Radio only. Favourites used to ride along here because the two shared one schedule; they now
+  // have their own, and their own button below.
   uiSoundPlay(UiSound::Confirm);
   radiocache::requestRefresh();
+}
+
+// --- Favourites schedule (mirrors the radio controls above, and the web admin) ---
+static lv_obj_t *s_favHourLbl = nullptr, *s_favMeta = nullptr;
+
+static void favHourStep(int delta) {
+  int h = (int)settingsFavRefreshHour() + delta;
+  if (h < 0) h = 23; else if (h > 23) h = 0;
+  settingsSetFavRefreshHour((uint8_t)h);
+  if (s_favHourLbl) lv_label_set_text_fmt(s_favHourLbl, "%02d:00", h);
+  uiSoundPlay(UiSound::Tick);
+}
+static void favHourDownCb(lv_event_t *) { favHourStep(-1); }
+static void favHourUpCb(lv_event_t *)   { favHourStep(+1); }
+
+static void favAutoCb(lv_event_t *e) {
+  const bool on = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+  settingsSetFavAutoRefresh(on);
+  uiSoundPlay(UiSound::Tick);
+}
+
+static void favRefreshNowCb(lv_event_t *) {
+  uiSoundPlay(UiSound::Confirm);
   favcache::requestRefresh();
 }
 
@@ -1676,6 +1706,13 @@ static void buildRadio() {
 
 static void buildSettings() {
   lv_obj_t *pg = s_page[PAGE_SETTINGS];
+  // SCROLLABLE. panel() clears the flag, and this page was already ~570 px of content on a 600 px
+  // panel — adding the Favourites block below Amazon would simply have been unreachable. Vertical
+  // only, so a horizontal drag still can't move it off-axis.
+  lv_obj_add_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(pg, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(pg, LV_SCROLLBAR_MODE_AUTO);
+
   lv_obj_t *h = label(pg, "Settings", &lv_font_montserrat_28, JB_TEXT);
   lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
 
@@ -1784,6 +1821,49 @@ static void buildSettings() {
   lv_obj_align(al, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 500);
   s_amzStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
   lv_obj_align(s_amzStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 528);
+
+  // --- Favourites refresh (its own schedule; see settings.h for why it is not the radio one) ---
+  {
+    const lv_coord_t Y = PAD_TOP + 596;
+    lv_obj_t *fl = label(pg, "Refresh favourites daily at", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(fl, LV_ALIGN_TOP_LEFT, 0, Y + 10);
+
+    lv_obj_t *fsw = lv_switch_create(pg);
+    lv_obj_set_size(fsw, 72, 38);
+    lv_obj_align(fsw, LV_ALIGN_TOP_LEFT, 300, Y + 4);
+    lv_obj_set_style_bg_color(fsw, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    if (settingsFavAutoRefresh()) lv_obj_add_state(fsw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(fsw, favAutoCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    lv_obj_t *fdn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, favHourDownCb);
+    lv_obj_align(fdn, LV_ALIGN_TOP_LEFT, 400, Y);
+    s_favHourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+    lv_obj_align(s_favHourLbl, LV_ALIGN_TOP_LEFT, 462, Y + 8);
+    lv_label_set_text_fmt(s_favHourLbl, "%02d:00", settingsFavRefreshHour());
+    lv_obj_t *fup = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, favHourUpCb);
+    lv_obj_align(fup, LV_ALIGN_TOP_LEFT, 556, Y);
+
+    lv_obj_t *fn = lv_button_create(pg);
+    lv_obj_remove_style_all(fn);
+    lv_obj_set_size(fn, 180, 52);
+    lv_obj_align(fn, LV_ALIGN_TOP_LEFT, 624, Y - 2);
+    lv_obj_set_style_radius(fn, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(fn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(fn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_bg_color(fn, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(fn, favRefreshNowCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *fnl = label(fn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
+    lv_obj_center(fnl);
+
+    // Pick a different hour from the stations — running both at once is more internal SRAM than
+    // this board has spare (see kMinHeap in fav_cache.cpp).
+    lv_obj_t *fh = label(pg, "Keep this on a different hour from the stations.",
+                         &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(fh, LV_ALIGN_TOP_LEFT, 0, Y + 38);
+
+    s_favMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(s_favMeta, LV_ALIGN_TOP_LEFT, 0, Y + 62);
+  }
 
   s_amzBtn = lv_button_create(pg);
   lv_obj_remove_style_all(s_amzBtn);
@@ -1897,21 +1977,39 @@ static void handleDial(PlayerState &p) {
   if (d == 0 && ev == KnobEvent::None) return;
 
   if (d != 0) {
-    // Acceleration, matching the nest's curve: a slow hunt trims 1% per click, a fast spin crosses
-    // the range without needing a dozen revolutions.
+    // Acceleration: a slow hunt trims 1% per click, a fast spin crosses the range without needing
+    // a dozen revolutions. A full 0-100 sweep is ~100 detents slow, ~25 at speed.
+    //
+    // *** DELIBERATELY GENTLER THAN THE NEST'S CURVE, AND IT MUST NOT BE "UNIFIED" WITH IT. ***
+    // The nest reads an EC11 through hardware PCNT on the UI task's ~5 ms tick, so it essentially
+    // always sees d == 1 and the multiplier IS the acceleration. This board reads a Modulino over
+    // I2C at 50 Hz (kPollMs = 20) and encoderDelta() drains an ACCUMULATOR, so any spin faster than
+    // 50 detents/s hands us d = 2, 3, 4... in one call — which the multiplier then compounds. The
+    // nest's 6/3/2/1 curve therefore behaved completely differently here: at d=3 and dt<35 a single
+    // tick moved 18%, which is what made the dial feel twitchy. Same numbers, different hardware,
+    // different result.
     static uint32_t s_lastTurn = 0;
     const uint32_t now = lv_tick_get();
     const uint32_t dt  = now - s_lastTurn;
     s_lastTurn = now;
-    const int mult = (dt < 35) ? 6 : (dt < 70) ? 3 : (dt < 130) ? 2 : 1;
+    const int mult = (dt < 35) ? 4 : (dt < 100) ? 2 : 1;
 
-    int v = (int)p.volume + (int)d * mult;
+    // Cap the per-tick move. This is the half of the fix that addresses BATCHING rather than
+    // speed: it bounds what one accumulated read can do without touching the feel of a slow,
+    // precise turn, which never comes close to the limit.
+    static const int kMaxStep = 8;
+    int step = (int)d * mult;
+    if (step >  kMaxStep) step =  kMaxStep;
+    if (step < -kMaxStep) step = -kMaxStep;
+
+    int v = (int)p.volume + step;
     v = v < 0 ? 0 : (v > 100 ? 100 : v);
 
     if (stateLock()) {
       // Optimistic. netTask confirms the real level on its ~1 Hz poll; waiting for that would make
       // the dial feel like it was dropping most of the turns.
       g_player.volume        = (uint8_t)v;
+      g_player.volumeSetAtMs = millis();   // hold off the poll AND incoming GENA volume events
       g_pending.targetVolume = v;
       stateUnlock();
     }
@@ -1996,25 +2094,51 @@ void uiTick() {
   }
 
   // Scrubber — only the fill width and the two timecodes, and only when they move.
+  //
+  // playerPositionNow(), NOT p.positionSec: position is the one now-playing field Sonos never
+  // events, so with GENA carrying the state netTask only samples it every 15 s. Reading the raw
+  // sample would step the bar and the timecode in 15 s jumps. This advances it locally between
+  // samples and the poll reconciles it. Identical behaviour when eventing is off — the sample is
+  // then a second old at most.
+  // DURATION IS OFTEN 0, and not only for radio. Sonos reports TrackDuration 0:00:00 for anything
+  // it treats as an open-ended stream — live radio, but ALSO a direct Spotify track, which has a
+  // perfectly finite length Sonos simply does not tell us (no <res>, no duration attribute
+  // anywhere in its metadata; checked). The old code computed pct=0 in that case, so the bar sat
+  // empty at 0% while the elapsed timecode counted up beside it — visibly broken — and the
+  // remaining timecode read a nonsense "-0:00".
+  //
+  // With no duration there is no honest percentage to draw, so don't draw one: the bar goes to a
+  // dim full width (a track with no end, rather than a track that never starts) and the remaining
+  // side shows an em dash instead of a fabricated number. The design system asks for "LIVE · on
+  // air" here, which is right for radio but would be a lie on a Spotify track — and the two are
+  // indistinguishable from this field alone.
+  const uint32_t posSec = playerPositionNow(p);
+  const bool unknownDur = (p.durationSec == 0);
   const lv_coord_t trackW = lv_obj_get_width(s_track);
-  int pct = (p.durationSec > 0) ? (int)((uint64_t)p.positionSec * 100 / p.durationSec) : 0;
+  int pct = unknownDur ? 100 : (int)((uint64_t)posSec * 100 / p.durationSec);
   if (pct > 100) pct = 100;
   if (pct != s_shown.pct) {
     s_shown.pct = pct;
     lv_obj_set_width(s_fill, trackW * pct / 100);
   }
+  const uint8_t fillOpa = unknownDur ? LV_OPA_40 : LV_OPA_COVER;
+  if (fillOpa != s_shown.fillOpa) {
+    s_shown.fillOpa = fillOpa;
+    lv_obj_set_style_bg_opa(s_fill, fillOpa, 0);
+  }
 
   char buf[16];
-  if (p.positionSec != s_shown.elapsed) {
-    s_shown.elapsed = p.positionSec;
-    fmtTime(buf, sizeof(buf), p.positionSec, false);
+  if (posSec != s_shown.elapsed) {
+    s_shown.elapsed = posSec;
+    fmtTime(buf, sizeof(buf), posSec, false);
     lv_label_set_text(s_elapsed, buf);
   }
-  const uint32_t remain = (p.durationSec > p.positionSec) ? p.durationSec - p.positionSec : 0;
+  const uint32_t remain = unknownDur ? UINT32_MAX
+                                     : ((p.durationSec > posSec) ? p.durationSec - posSec : 0);
   if (remain != s_shown.remain) {
     s_shown.remain = remain;
-    fmtTime(buf, sizeof(buf), remain, true);
-    lv_label_set_text(s_remain, buf);
+    if (unknownDur) lv_label_set_text(s_remain, "—");
+    else { fmtTime(buf, sizeof(buf), remain, true); lv_label_set_text(s_remain, buf); }
   }
 
   // Volume.

@@ -12,6 +12,18 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   server + remote SD management, a touch UX (home carousel, rooms, WiFi, track picker,
   settings, sleep timer), and **voice control** — three custom wake words drive the app hands-free
   (`boards/es3c28p/wake_word.cpp`; see the wake-word notes below). **Not yet wired**: the RGB-LED.
+- **sonos-button** (`sleep-button` env) — **headless**: one button, an LED ring, no screen, on an
+  ESP32-S3-CAM board (`boards/esp32s3cam/`). Press → the configured room starts the configured
+  saved playlist, looped, at the configured volume; press again → stop. Configured from a web page
+  on **:8080**, and readable over the **TCP log mirror on :2323** (it has no screen, so that is the
+  only way to watch it — see the log-mirror section below). `core/unit.h` is LVGL-free, so a
+  screenless unit is a first-class citizen and `app.cpp` needs no `#ifdef` for it; `-DHEADLESS`
+  drops album art and slows the poll to one call every 3 s. Plan: `plans/04-sonos-button-plan.md`.
+  > ⚠️ **It is the env that silently breaks.** `+<core/>` sweeps every core file into it, but its
+  > `lib_deps` is overridden to just ArduinoJson — no LVGL, no TJpg. So any new core file touching
+  > graphics breaks THIS env and only this env, and it is the one nobody builds by habit. That is
+  > exactly how `art_cache.cpp` broke it for weeks (issue #7). Build it before you push core
+  > changes; the exclusion list lives in its `build_src_filter`.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -80,6 +92,22 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **Don't guess which subsystem is eating the heap — `core/heap_watch.h` will tell you.**
+  > `heapwatch::note("tag")` records the tag owning the internal-heap low-water; read it back as
+  > **`health.heapLow`** in `/api/config`. Put notes *after* an allocation while it is still held.
+  > It has already overturned one confident guess: GENA's NOTIFY buffering, the obvious suspect,
+  > bottoms out at ~113 KB free (~4 KB) and was never the problem. If `heapMin` is lower than any
+  > recorded tag, the cause is in code you have not tagged — that gap is the clue, not noise.
+  > ⚠️ **mbedTLS allocates from PSRAM here, and that is load-bearing — don't revert it.** The stock
+  > config is `MBEDTLS_INTERNAL_MEM_ALLOC` with `SSL_MAX_CONTENT_LEN=16384`, i.e. a 16 KB in + 16 KB
+  > out buffer per TLS connection taken from the one resource this board lacks. Measured: the
+  > Amazon crawl went 102 KB → 45 KB free *before reading a byte*, then to **min 9,828 B / largest
+  > 14,324** — through the LWIP floor — and the device rebooted half way through the genres, every
+  > night. `jukebox_base`'s `custom_sdkconfig` now sets `MBEDTLS_EXTERNAL_MEM_ALLOC=y` plus
+  > `ASYMMETRIC_CONTENT_LEN` (out 4 KB): same crawl now **completes all 26 genres / 1055 stations
+  > in one pass at min 50,536**. Verify a config change actually applied by grepping the generated
+  > `sdkconfig.sonos-jukebox`, not the ini — a `custom_sdkconfig` line that is ignored fails
+  > silently and you will be measuring nothing.
   > ⚠️ **microSD (slot 0; the C6 is slot 1, so they don't share a bus).** Pins CLK 43 / CMD 44 /
   > D0 39, 1-bit @ 10 MHz, no LDO power handle. **Never use Arduino's `SD_MMC`** — it takes its pins
   > and a power-enable pin from the board variant, whose stock `BOARD_SDMMC_POWER_PIN 45` is this
@@ -220,8 +248,36 @@ Key modules (all under `src/core/` — device-agnostic):
   themselves** — a board's HTTP server does sockets + routing and calls this. Also clears a
   sleep/wake pick when its file is deleted, so a pick can't dangle.
 - `core/album_art.{h,cpp}` — art fetch + TJpg decode → LVGL image (form-factor-agnostic).
-- `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env).
+- `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env), `logmirror`
+  (see below).
 - `core/board.h` / `core/unit.h` — the HAL + UX contracts.
+
+### Reading a running device: the TCP log mirror (`core/net/logmirror.{h,cpp}`)
+
+`LOG` is a drop-in for `Serial` that also writes to anyone connected on **TCP :2323**
+(`nc <ip> 2323`). Non-blocking by construction — writes go to an 8 KB ring drained by its own
+task, and overflow drops the *oldest* bytes and counts them, because a diagnostic that can stall
+its caller is how you freeze the UI task with the very thing meant to explain the freeze.
+
+**Which units have it, and why — the numbers are measured free / minimum-ever internal heap:**
+
+| unit | heap | mirror | why |
+|---|---|---|---|
+| **sonos-jukebox** | 98 / 74 KB | **yes** | wall-mounted; rear port is power-only, so this and OTA are the only ways in |
+| **sleep-button** | 243 / 226 KB | **yes** | **headless** — no screen at all, so without a cable it is unobservable; also the most headroom of any unit |
+| sonos-nest | 78 / 60 KB | no | has a screen showing its own state; `heapLargest` still unknown on it (pre-`ccfe157` firmware). Viable later — read that first |
+| sleep-machine | 30 / **14.5 KB** | **no** | 14.5 KB min is already the range where LWIP cannot get socket buffers and the symptom is Sonos **`connection refused`**. Also has a screen and sits within cable reach |
+
+> ⚠️ **Enabling it is TWO things, and the flag is only one of them.** Add `-DLOG_MIRROR` to the env
+> *and* call `logMirrorBegin()` from that unit's `uiInit()`. The flag alone compiles the module in
+> and nothing ever starts the listener.
+> ⚠️ **It tees `LOG`, never `Serial`.** Any file still calling `Serial.print*` is invisible to a
+> remote reader — which on a headless unit means invisible full stop. `core/` and the units that
+> enable this use `LOG` throughout; bring-up/test sources deliberately keep `Serial`, because those
+> run with a cable attached anyway.
+> ⚠️ **Put the include ABOVE any `#if __has_include("secrets.h")` block.** Inside one, `LOG` is only
+> defined on machines that happen to have the gitignored `include/secrets.h` — so it builds for you
+> and fails for everyone else. Cost real time once already; a fresh worktree has no `secrets.h`.
 
 Boards: `src/boards/crowpanel_rotary/` (display · touch · encoder · pcf8574 · pins.h ·
 bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card · local_audio
@@ -286,6 +342,19 @@ Consequences worth knowing:
   `GetZoneGroupState` (deduped, satellites excluded) and stores each room's coordinator IP.
 - **DIDL is double-escaped:** unescape the SOAP layer, then unescape each field value again,
   or the album-art URL's `&` arrives as `&amp;` and the speaker returns nothing.
+- **…and `CurrentURIMetaData` is escaped a THIRD time.** Escape depth is not uniform across
+  fields: `TrackMetaData` arrives as `&lt;DIDL-Lite`, but `GetMediaInfo`'s `CurrentURIMetaData`
+  arrives as `&amp;lt;DIDL-Lite`. Feed the latter to `parseNowPlaying()` unchanged and it finds no
+  `<dc:title>` and returns **nothing, with no error** — a permanently blank Now Playing. Verified
+  on hardware. `getMediaInfo()` normalises it with one extra `xmlUnescape()` so callers can treat
+  both the same; don't "simplify" that away. **Count the layers on any new field before trusting it.**
+- **Now Playing needs a fallback source — `TrackMetaData` is a STUB for content playing outside
+  the queue.** A direct Spotify track reports `item id="-1"` with no `dc:title`, no `dc:creator`
+  and no art, while the speaker plays it perfectly happily; the real title is in
+  `GetMediaInfo`'s `CurrentURIMetaData` (poll path) and `AVTransportURIMetaData` (GENA event).
+  Symptom to recognise: **audio is fine, position advances, the screen says "Nothing playing".**
+  Both paths fall back automatically now, and the poll only pays the extra call when the primary
+  source came up empty.
 - **Sonos caches by URL — `localFileUrl()`'s `?v=N` is load-bearing, don't "clean it up".** The
   media route is a *fixed* path (`/ocean.mp3`), so every file would otherwise get the same URL,
   and Sonos keys both content **and** metadata off it. Without the counter, swapping the sleep

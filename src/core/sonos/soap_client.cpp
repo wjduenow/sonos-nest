@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
+#include "../net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 // Set -DSONOS_SOAP_TRACE=1 to log every SOAP request/response over serial (plan §7 dev
 // affordance). Off by default.
@@ -86,8 +87,8 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
       "</u:" + action + "></s:Body></s:Envelope>";
 
   if (SONOS_SOAP_TRACE) {
-    Serial.printf("[soap] POST %s  action=%s\n", url.c_str(), action.c_str());
-    Serial.println(body);
+    LOG.printf("[soap] POST %s  action=%s\n", url.c_str(), action.c_str());
+    LOG.println(body);
   }
 
   // Try the kept-alive socket; if it's stale the POST returns a negative code. Sonos closes idle
@@ -116,8 +117,8 @@ bool soapAction(const String &ip, const String &controlPath, const String &servi
 
     if (code > 0) {
       if (SONOS_SOAP_TRACE) {
-        Serial.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
-        if (code != 200) Serial.println(responseOut);
+        LOG.printf("[soap] <- %d (%d bytes)\n", code, responseOut.length());
+        if (code != 200) LOG.println(responseOut);
       }
       return code == 200;
     }
@@ -153,6 +154,11 @@ bool seekTrack(const String &ip, uint32_t trackNr) {
                 String(trackNr) + "</Target>";
   return soapAction(ip, PATH_AVT, SVC_AVT, "Seek", args, r);
 }
+bool seekToStart(const String &ip) {
+  String r;
+  return soapAction(ip, PATH_AVT, SVC_AVT, "Seek",
+                    "<InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>00:00:00</Target>", r);
+}
 bool setAvTransportUri(const String &ip, const String &uri, const String &didlMeta) {
   String r;
   String args = "<InstanceID>0</InstanceID><CurrentURI>" + xmlEscape(uri) +
@@ -177,12 +183,25 @@ bool getTransportInfo(const String &ip, TransportState &out) {
   else if (s == "TRANSITIONING")   out = TransportState::Transitioning;
   return true;
 }
-bool getMediaInfo(const String &ip, String &currentUriOut) {
+bool getMediaInfo(const String &ip, String &currentUriOut, String *currentUriMetaOut) {
   String r;
   currentUriOut = "";
+  if (currentUriMetaOut) *currentUriMetaOut = "";
   if (!soapAction(ip, PATH_AVT, SVC_AVT, "GetMediaInfo",
                   "<InstanceID>0</InstanceID>", r)) return false;
   currentUriOut = extractTag(r, "CurrentURI");
+  // CurrentURIMetaData is where the title lives for content playing OUTSIDE the queue — a direct
+  // Spotify track, for instance, whose GetPositionInfo TrackMetaData is a stub with item id="-1",
+  // no dc:title, no dc:creator and no art. Verified on hardware: TrackMetaData empty while this
+  // carried dc:title "Apologize".
+  //
+  // *** IT CARRIES ONE MORE ESCAPE LAYER THAN TrackMetaData. *** On the wire this field is
+  // `&amp;lt;DIDL-Lite` where TrackMetaData is `&lt;DIDL-Lite` — escaped twice, not once. Handing
+  // it straight to parseNowPlaying() (which unescapes once, then unescapes each field again) finds
+  // no <dc:title> at all and silently returns nothing: no error, just a permanently blank screen.
+  // Unescaping once here normalises it to TrackMetaData's depth, so every caller can treat the two
+  // identically. Do not "simplify" this away.
+  if (currentUriMetaOut) *currentUriMetaOut = xmlUnescape(extractTag(r, "CurrentURIMetaData"));
   return true;
 }
 bool becomeStandalone(const String &ip) {
@@ -199,7 +218,7 @@ bool getPositionInfo(const String &ip, PlayerState &out) {
   // TrackMetaData is escaped DIDL-Lite -> title/artist/album/art.
   parseNowPlaying(extractTag(r, "TrackMetaData"), out);
   // Album art URI is relative ("/getaa?...") and served by the speaker over plain HTTP.
-  if (out.artUri.startsWith("/")) out.artUri = "http://" + ip + ":1400" + out.artUri;
+  artUriAbsolute(out.artUri, ip);   // relative "/getaa?..." is unusable — see didl.h
   return true;
 }
 

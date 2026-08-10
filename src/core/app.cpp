@@ -23,9 +23,17 @@
 #include "net/portal.h"          // portalRun() — SoftAP captive portal (all units, not just headless)
 #include "sonos/ssdp.h"
 #include "sonos/soap_client.h"
+#include "sonos/didl.h"          // parseNowPlaying() — the CurrentURIMetaData title fallback
+#include "sonos/gena.h"          // UPnP eventing — no-op unless -DGENA_EVENTS (see plans/09)
 #include "room_status.h"         // per-room volume/transport for the Rooms screen (netTask-driven)
 
 // Optional via include/secrets.h: SONOS_DEFAULT_ROOM "Name", CLOCK_TZ "<POSIX TZ>".
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+// NB above the secrets conditional on purpose: inside it, LOG would only be defined on
+// machines that happen to have include/secrets.h, which is gitignored.
+
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
+
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -70,13 +78,13 @@ static bool selectZoneByIp(const String &ip) {
       stateUnlock();
     }
     settingsSetRoom(z.name);   // persist so the pick survives reboot
-    Serial.printf("[zone] switched to %s @ %s (coord %s)\n",
+    LOG.printf("[zone] switched to %s @ %s (coord %s)\n",
                   s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
     return true;
   }
   // Silent failure here is a trap: the UI has already given the user feedback (a tone, a screen
   // change) and nothing happens. Say which IP was asked for and what was actually known.
-  Serial.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
+  LOG.printf("[zone] requested %s not found among %u known zone(s)\n", ip.c_str(),
                 (unsigned)sonos::zones().size());
   return false;
 }
@@ -98,7 +106,7 @@ static bool selectZone() {
     for (size_t i = 0; i < zs.size(); ++i)
       if (zs[i].name == want) { idx = i; found = true; break; }
     if (!found) {
-      Serial.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
+      LOG.printf("[boot] '%s' not in %u discovered zones yet — retrying discovery\n",
                     want.c_str(), (unsigned)zs.size());
       return false;
     }
@@ -114,12 +122,32 @@ static bool selectZone() {
     g_player.coordinatorUuid = s_coordUuid;
     stateUnlock();
   }
-  Serial.printf("[boot] zone %s @ %s, coordinator @ %s\n",
+  LOG.printf("[boot] zone %s @ %s, coordinator @ %s\n",
                 s_zoneName.c_str(), s_zoneIp.c_str(), s_coordIp.c_str());
   return true;
 }
 
 static uint32_t s_lastPoll = 0, s_lastVolCmd = 0, s_lastCoordRefresh = 0;
+
+// A grouping change is not visible in GetZoneGroupState the instant the command returns — Sonos
+// applies it asynchronously. The re-read that follows a group op therefore races it and often
+// captures the OLD topology, and nothing afterwards ever re-reads the zone list: the 60 s tick
+// resolves the coordinator IP and discards the topology it fetched. So an ungrouped room kept
+// showing as grouped until the device was rebooted. This schedules one more read a few seconds
+// later, which settles it.
+static uint32_t s_topoRecheckMs = 0;
+
+// Name + coordinator per zone. Compared across a re-read so g_zonesGen is bumped only on a real
+// change — rebuildRooms() tears down and recreates every row, which is visible if you are on the
+// page and pointless if nothing moved.
+static String topologySignature() {
+  std::vector<sonos::Zone> zs;
+  sonos::zonesSnapshot(zs);
+  String sig;
+  sig.reserve(zs.size() * 48);
+  for (const auto &z : zs) { sig += z.name; sig += '='; sig += z.coordinatorUuid; sig += ';'; }
+  return sig;
+}
 
 // Dead-link detection state (see netTask). File scope rather than a function-local static because
 // the Wi-Fi supervisor at the top of the loop has to be able to clear it: an AP that actually goes
@@ -142,11 +170,30 @@ static void processPending() {
   if (p.targetVolume >= 0) {
     sonos::setVolume(s_zoneIp, (uint8_t)p.targetVolume);   // volume -> the speaker
     s_lastVolCmd = millis();
+    // Restart the hold at the moment the command actually goes out, not just when the UI queued
+    // it: the RenderingControl event this provokes comes back AFTER this point, and it is that
+    // echo which used to overwrite the level the user had already dialled past.
+    if (stateLock()) { g_player.volumeSetAtMs = millis(); stateUnlock(); }
   }
   // Explicit play/pause decided by the UI (no round-trip, correct action).
   if (p.setPlay == 0)      sonos::pause(s_coordIp);
   else if (p.setPlay == 1) sonos::play(s_coordIp);
-  if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
+  if (p.restartTrack) {
+    // Deliberately does NOT fall back to previous() when the seek fails. It fails on live radio,
+    // which has no position to seek to — and silently skipping to another station because a
+    // restart was impossible is a worse surprise than the button doing nothing.
+    if (sonos::seekToStart(s_coordIp)) {
+      if (stateLock()) {
+        g_player.positionSec  = 0;      // paint it immediately; the poll confirms
+        g_player.positionAtMs = millis();
+        g_player.dirty = true;
+        stateUnlock();
+      }
+      s_lastPoll = 0;
+    } else {
+      LOG.println("[transport] restart failed (live stream?) — leaving playback alone");
+    }
+  }
   if (p.next) sonos::next(s_coordIp);
 
   // A ready-made URI + DIDL from the UI — a Radio station, or a favourite played from the cache.
@@ -190,9 +237,15 @@ static void processPending() {
     else         sonos::becomeStandalone(op.ip);
   }
   if (p.ungroupAll || !p.groupOps.empty()) {
+    // Give Sonos a moment to actually apply it before asking what the topology is — without this
+    // the read usually returns the pre-change state.
+    vTaskDelay(pdMS_TO_TICKS(800));
     sonos::ssdpDiscover();
     selectZoneByIp(s_zoneIp);
     g_zonesGen++;
+    // And confirm a few seconds later, because 800 ms is a heuristic and this is the only thing
+    // that re-reads the zone list at all.
+    s_topoRecheckMs = millis() + 4000;
     // Deliberately NOT dropping the per-room status cache here: roomstatus carries volume and
     // still-valid transport across the topology change itself. Blanking it made every checkbox
     // tap wipe the page back to "--" for a second and a half.
@@ -241,14 +294,14 @@ static void processPending() {
     // A device-name change: reboot so the DHCP hostname, mDNS and OTA name all come up fresh
     // from the new name. The web handler has already sent its HTTP response by now; the short
     // delay lets that TCP flush before the reset drops the link.
-    Serial.println("[app] rebooting to apply new device name");
+    LOG.println("[app] rebooting to apply new device name");
     delay(800);
     ESP.restart();
   }
 
   // After a transport change the track/state (and art) update — poll again soon, once the
   // speaker has settled out of TRANSITIONING, rather than waiting up to a full second.
-  if (p.prev || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;
+  if (p.restartTrack || p.next || p.setPlay >= 0) s_lastPoll = millis() - 600;
 
   // Browse / play requests (ContentDirectory off the UI thread).
   library::service(s_coordIp, s_coordIp, s_coordUuid);
@@ -319,14 +372,14 @@ static void netTask(void *) {
       const uint32_t now = millis();
       if (now - s_lastWifiKick > 10000) {
         s_lastWifiKick = now;
-        Serial.println("[net] wifi down — reconnecting");
+        LOG.println("[net] wifi down — reconnecting");
         wifiReconnect();
       }
       // A genuine disconnect is NOT the fault netLinkRecover() exists for, and the RSSI-0 readings
       // around a reconnect are normal. Disarm, or an ordinary router reboot ends in a device
       // reboot — exactly what the "requires the symptom twice" rule was written to prevent.
       if (s_deadLinkStreak) {
-        Serial.println("[net] wifi genuinely down — clearing the dead-link streak");
+        LOG.println("[net] wifi genuinely down — clearing the dead-link streak");
         s_deadLinkStreak = 0;
       }
       vTaskDelay(pdMS_TO_TICKS(500));
@@ -342,7 +395,7 @@ static void netTask(void *) {
     if (s_zoneIp.length() == 0 || s_coordStale) {
       const bool recovering = s_coordStale;
       s_coordStale = false;
-      if (recovering) Serial.println("[net] coordinator unreachable x3 — re-discovering Sonos");
+      if (recovering) LOG.println("[net] coordinator unreachable x3 — re-discovering Sonos");
 
       // Before blaming Sonos, check whether OUR link is the thing that died. A board whose radio
       // is a separate co-processor can report WL_CONNECTED with a live IP while the transport to
@@ -357,16 +410,16 @@ static void netTask(void *) {
       // effectively permanent: one transient RSSI 0 now and another an hour later would add up to
       // a reboot, and the two would have nothing to do with each other.
       if (s_deadLinkStreak && millis() - s_deadLinkFirstMs > kDeadLinkWindowMs) {
-        Serial.println("[net] dead-link streak expired — starting over");
+        LOG.println("[net] dead-link streak expired — starting over");
         s_deadLinkStreak = 0;
       }
       if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
         if (s_deadLinkStreak == 0) s_deadLinkFirstMs = millis();
         if (++s_deadLinkStreak >= 2) {
-          Serial.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
+          LOG.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
           if (netLinkRecover()) {   // may not return: see the board implementation
             wifiConnect();
-            Serial.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
+            LOG.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
                           (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
           }
           s_deadLinkStreak = 0;
@@ -376,7 +429,7 @@ static void netTask(void *) {
           // radio, and re-entering this branch would then cost another 3 failed polls — which is
           // why an obviously-dead link used to take ~3 minutes of empty room list to recover.
           // Skip the doomed discovery, re-arm the recovery flag, and look again shortly.
-          Serial.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
+          LOG.println("[net] RSSI 0 while 'connected' — re-checking in 3s (needs 2 in a row)");
           s_coordStale = true;
           vTaskDelay(pdMS_TO_TICKS(3000));
           continue;
@@ -393,12 +446,28 @@ static void netTask(void *) {
     // a full GetZoneGroupState fetch + parse of the whole topology XML (tens of KB in a big house),
     // String-heavy every time — and a stale IP is now caught within seconds by notePollResult()
     // anyway, so the frequent refresh bought little but heap churn.
+    if (s_topoRecheckMs && (int32_t)(millis() - s_topoRecheckMs) >= 0) {
+      s_topoRecheckMs = 0;
+      const String before = topologySignature();
+      if (sonos::ssdpDiscover()) {
+        selectZoneByIp(s_zoneIp);
+        if (topologySignature() != before) {
+          g_zonesGen++;                       // it really moved — let the Rooms page rebuild
+          LOG.println("[zone] topology settled after a grouping change");
+        }
+      }
+    }
+
     if (millis() - s_lastCoordRefresh > 60000) {
       s_lastCoordRefresh = millis();
       String c = sonos::coordinatorIpFor(s_zoneName);
+      heapwatch::note("coord.refresh");   // full topology XML fetch + parse
       if (c.length() && c != s_coordIp) {
         s_coordIp = c;
         if (stateLock()) { g_player.coordinatorIp = c; stateUnlock(); }
+        // Subscriptions are per-coordinator, so they have to follow it. This is the one place the
+        // coordinator changes at runtime (grouping), and genaTick() does the actual resubscribe.
+        sonos::genaSetCoordinator(c);
       }
     }
 
@@ -408,6 +477,9 @@ static void netTask(void *) {
     // Per-room status for the Rooms screen. Costs nothing unless that page is actually open, and
     // polls at most one room per pass — see room_status.h for why it must not burst.
     roomstatus::tick();
+    // GENA subscribe/renew. No-op without -DGENA_EVENTS; self-rate-limited, one blocking call per
+    // pass at most.
+    sonos::genaTick();
 
 #ifdef HEADLESS
     // Headless (the button): no screen to keep fresh, so poll ONLY the transport state — just
@@ -426,32 +498,105 @@ static void netTask(void *) {
       String uri;
       if (ok && st == TransportState::Playing) sonos::getMediaInfo(s_coordIp, uri);
       if (ok && stateLock()) { g_player.transport = st; g_player.currentUri = uri; stateUnlock(); }
+      heapwatch::note("poll.headless");
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #else
-    // Poll ~1 Hz, interleaving command processing so input never waits behind the full poll.
-    if (millis() - s_lastPoll > 1000) {
+    // --- Poll cadence ---------------------------------------------------------------------------
+    //
+    // 1 Hz normally — what every unit without eventing always does. 15 s while GENA is carrying
+    // the state, which is a 15x traffic cut on its own (measured 3.00 SOAP calls/sec -> ~0.09).
+    //
+    // ONLY the RATE changes. The poll body below is identical either way, on purpose; see the
+    // comment there for the bug that came from trimming it.
+    //
+    // TRUST IS REVOCABLE. It needs a live subscription AND at least one event received — a
+    // SUBSCRIBE that Sonos accepts but whose callback it cannot reach would otherwise silently
+    // downgrade the screen to 15 s updates. The moment either stops holding, this returns to 1 Hz
+    // by itself, so a lapsed subscription or a failed renewal costs latency, never correctness.
+    //
+    // Note "at least one event" is weak on its own: Sonos always sends an initial state dump at
+    // SUBSCRIBE time, so the counter is non-zero within a second of boot whether or not any LATER
+    // event will ever arrive. That is tolerable precisely BECAUSE the backstop is complete — the
+    // worst case of misplaced trust is a 15 s-stale screen, not a blank one.
+    bool genaTrusted = false;
+#ifdef GENA_EVENTS
+    {
+      sonos::GenaDiag gd;
+      sonos::genaDiag(gd);
+      genaTrusted = gd.subscribed && gd.events > 0;
+    }
+#endif
+    const uint32_t pollEveryMs = genaTrusted ? 15000 : 1000;
+
+    // ONE poll body, two cadences. The backstop is the SAME poll, just slower — it is emphatically
+    // not a reduced one.
+    //
+    // It was a reduced one, and that was a real bug: it fetched position and threw the track
+    // metadata away, on the theory that events owned those fields. So Now Playing became entirely
+    // event-dependent, and starting playback showed "Nothing playing" indefinitely — the forced
+    // immediate poll discarded the very title it had just fetched, and only an AVTransport event
+    // could fill it in. Anything that dropped or delayed one event stranded the screen, and a zone
+    // switch (which clears the track fields) stranded it too.
+    //
+    // The premise was always "events make it feel instant, the poll guarantees correctness". A
+    // backstop that cannot reconstruct the whole screen on its own does not guarantee anything.
+    // The in-flight-event race that motivated the reduction is not real either: a SOAP response is
+    // live data at the moment it lands, so writing it is never a step backwards.
+    if (millis() - s_lastPoll > pollEveryMs) {
       s_lastPoll = millis();
-      TransportState st = TransportState::Unknown;
       PlayerState np;
+      TransportState st = TransportState::Unknown;
       uint8_t vol = 0;
       bool gotVol = false;
+
       const bool ok = sonos::getTransportInfo(s_coordIp, st);  processPending();
-      sonos::getPositionInfo(s_coordIp, np);   processPending();
-      if (millis() - s_lastVolCmd > 1500) { gotVol = sonos::getVolume(s_zoneIp, vol); }
+      sonos::getPositionInfo(s_coordIp, np);                   processPending();
+
+      // Fallback for content playing OUTSIDE the queue. A direct Spotify track's TrackMetaData is
+      // a stub — item id="-1", no dc:title, no dc:creator, no art — so the screen read "Nothing
+      // playing" while the speaker was audibly fine. The title is on the speaker, just in
+      // CurrentURIMetaData instead (verified: empty TrackMetaData alongside dc:title "Apologize").
+      // Costs an extra SOAP call ONLY when the primary source produced nothing, so normal content
+      // pays nothing at all.
+      bool trackAuthoritative = np.title.length() > 0;   // came from TrackMetaData
+      if (np.title.length() == 0 && st != TransportState::Stopped) {
+        String uri, meta;
+        if (sonos::getMediaInfo(s_coordIp, uri, &meta) && meta.length() > 20) {
+          PlayerState alt;
+          sonos::parseNowPlaying(meta, alt);
+          sonos::artUriAbsolute(alt.artUri, s_coordIp);   // see didl.h
+          if (alt.title.length() || alt.artist.length()) {
+            np.title = alt.title; np.artist = alt.artist;
+            np.album = alt.album; np.artUri = alt.artUri;
+            trackAuthoritative = false;   // container metadata, not the track — see playerApplyTrack()
+          }
+        }
+        processPending();
+      }
+
+      // Same hold the GENA handler uses, so the two readers of speaker volume cannot disagree
+      // about whether the user is mid-turn. Reading it here also avoids spending a SOAP call on an
+      // answer we would discard.
+      bool volHeld;
+      if (stateLock()) { volHeld = playerVolumeHeld(g_player); stateUnlock(); } else volHeld = true;
+      if (!volHeld) { gotVol = sonos::getVolume(s_zoneIp, vol); }
 
       if (stateLock()) {
-        g_player.transport   = st;
-        g_player.positionSec = np.positionSec;
-        g_player.durationSec = np.durationSec;
-        g_player.title       = np.title;
-        g_player.artist      = np.artist;
-        g_player.album       = np.album;
-        g_player.artUri      = np.artUri;
+        g_player.transport    = st;
+        g_player.positionSec  = np.positionSec;
+        g_player.positionAtMs = millis();
+        g_player.durationSec  = np.durationSec;
+        // Same sticky-art rule the event path uses. The poll re-reads metadata every time, and for
+        // content whose title only comes from the CurrentURIMetaData fallback there is no
+        // albumArtURI in it — assigning unconditionally would drop the cover on every poll.
+        // Position is set above from the poll's own authoritative RelTime, so the return is unused.
+        (void)playerApplyTrack(g_player, np, trackAuthoritative);
         if (gotVol) g_player.volume = vol;
         g_player.dirty = true;
         stateUnlock();
       }
+      heapwatch::note("poll");
       notePollResult(ok);   // re-discover if the coordinator has gone unreachable (moved IP)
     }
 #endif
@@ -529,6 +674,12 @@ void appBoot() {
   // is published for this unit, this flashes + reboots HERE — before playback starts — rather than
   // mid-run. Runtime checks (explicit approve / portal-approved) happen in netTask via updaterTick.
   updaterBegin();
+
+  // GENA callback listener. No-op unless -DGENA_EVENTS (jukebox only for now — see plans/09 for
+  // the per-unit sizing; the sleep-machine cannot afford it). Started after selectZone() so the
+  // coordinator below is the real one, and the listener task waits for Wi-Fi itself anyway.
+  sonos::genaBegin();
+  sonos::genaSetCoordinator(s_coordIp);
 }
 
 void appStartTasks() {

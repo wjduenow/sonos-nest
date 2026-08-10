@@ -13,7 +13,9 @@
 #include "core/webconfig.h"
 #include "core/player_state.h"
 #include "core/library.h"
+#include "core/app.h"             // g_link* — netTask's published link snapshot, for the heartbeat
 #include <Arduino.h>
+#include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 // Enqueue + play round-trip over SOAP. The sleep-machine allows the same 20 s before giving up;
 // matching it keeps the two units' failure behaviour identical.
@@ -56,6 +58,12 @@ static void ringPulse() {
 void uiProvisioning(const char * /*apSsid*/) {}
 
 void uiInit() {
+  // Serial log over TCP. This unit is HEADLESS — no screen, one button — so without a cable there
+  // is no way to see what it is doing at all, which makes it the unit that benefits most. It also
+  // has by far the most room: ~243 KB free / 226 KB minimum heap, against the sleep-machine's
+  // 14.5 KB. No-op without -DLOG_MIRROR; the task waits for Wi-Fi itself.
+  logMirrorBegin();
+
   // Apply the persisted ring level. Until this runs the ring is dark (boardInit leaves it off),
   // so a reboot never flashes the ring at full brightness in a dark room.
   s_cfgGen  = webConfigGen();
@@ -67,7 +75,7 @@ void uiInit() {
   // has exactly one play mode and never wants a playlist to just stop at 3am.
   library::setLoopMode(true);
 
-  Serial.printf("[unit   ] ring %u%%, playlist \"%s\" @ vol %u\n",
+  LOG.printf("[unit   ] ring %u%%, playlist \"%s\" @ vol %u\n",
                 settingsRing(), settingsPlaylist().c_str(), settingsVolume());
 }
 
@@ -82,17 +90,46 @@ static void startPlaylist() {
   library::requestPlayNamed(settingsPlaylist());
   s_st      = St::Starting;
   s_startMs = millis();
-  Serial.printf("[unit   ] start \"%s\" @ vol %u\n", settingsPlaylist().c_str(), vol);
+  LOG.printf("[unit   ] start \"%s\" @ vol %u\n", settingsPlaylist().c_str(), vol);
 }
 
 static void stopPlayback() {
   if (stateLock()) { g_pending.setPlay = 0; stateUnlock(); }
   s_st = St::Idle;
-  Serial.println("[unit   ] stop");
+  LOG.println("[unit   ] stop");
 }
 
 void uiTick() {
   const uint32_t now = millis();
+
+  // --- heartbeat -------------------------------------------------------------------------
+  // This unit is HEADLESS and otherwise only logs on events, so an idle button produced a log
+  // mirror that connected and then said nothing at all — indistinguishable from a wedged device.
+  // For a screenless unit "is it alive, on Wi-Fi, and pointed at a room" IS the diagnostic, and
+  // this is the only place it can be answered from. Every 30 s: cheap, and rare enough that the
+  // 8 KB ring holds hours of it.
+  //
+  // Deliberately reads only netTask's published snapshot (g_link*, core/app.h) and the local
+  // state machine — never WiFi.* or sonos::, which are blocking calls that would stall uiTask
+  // in exactly the fault this exists to report.
+  {
+    static uint32_t lastBeat = 0;
+    if (now - lastBeat >= 30000) {
+      lastBeat = now;
+      String room;
+      if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
+      const uint32_t ip = g_linkIp;
+      LOG.printf("[health ] up=%lus heap=%luKB min=%luKB wifi=%d rssi=%d ip=%u.%u.%u.%u "
+                 "zones=%u room=%s state=%d\n",
+                 (unsigned long)(now / 1000),
+                 (unsigned long)(ESP.getFreeHeap() / 1024),
+                 (unsigned long)(ESP.getMinFreeHeap() / 1024),
+                 g_linkStatus, g_linkRssi,
+                 (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
+                 (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
+                 (unsigned)g_linkZones, room.length() ? room.c_str() : "-", (int)s_st);
+    }
+  }
 
   // --- ring press-pulse: restore the resting level when the transient expires ------------
   if (s_pulseEnd && (int32_t)(now - s_pulseEnd) >= 0) {
@@ -115,7 +152,7 @@ void uiTick() {
     if (vol != s_lastVol) {
       s_lastVol = vol;
       if (stateLock()) { g_pending.targetVolume = vol; stateUnlock(); }
-      Serial.printf("[unit   ] volume -> %u\n", vol);
+      LOG.printf("[unit   ] volume -> %u\n", vol);
     }
 
     // The playlist pick may have changed. Re-warm the cache for the current name so the next
@@ -160,7 +197,7 @@ void uiTick() {
     if (s_st == St::Starting || playingOurQueue) stopPlayback();
     else                                         startPlaylist();
   } else if (ev == KnobEvent::Long) {
-    Serial.println("[unit   ] button Long — reserved");
+    LOG.println("[unit   ] button Long — reserved");
   }
 
   // --- state machine ----------------------------------------------------------------------
@@ -171,7 +208,7 @@ void uiTick() {
         webConfigPlaylistsSet(labels);
         s_listed = true;
         s_st     = St::Idle;
-        Serial.printf("[unit   ] %u playlists published to the config page\n",
+        LOG.printf("[unit   ] %u playlists published to the config page\n",
                       (unsigned)labels.size());
         // Pre-warm the resolved-item cache so the very first press is already fast.
         library::requestPlayNamed(settingsPlaylist(), /*warmOnly=*/true);
@@ -186,14 +223,14 @@ void uiTick() {
       // requestPlayNamed() is doing the work on netTask. We just wait for the room to reach
       // Playing, surface a resolve failure, or time out.
       if (library::playNamedFailed()) {
-        Serial.printf("[unit   ] playlist \"%s\" not found — set one on the config page\n",
+        LOG.printf("[unit   ] playlist \"%s\" not found — set one on the config page\n",
                       settingsPlaylist().c_str());
         s_st = St::Idle;
       } else if (tr == TransportState::Playing) {
         s_st = St::Playing;
-        Serial.println("[unit   ] playing");
+        LOG.println("[unit   ] playing");
       } else if (now - s_startMs > START_TIMEOUT_MS) {
-        Serial.println("[unit   ] timed out starting playback");
+        LOG.println("[unit   ] timed out starting playback");
         s_st = St::Idle;
       }
       break;
@@ -202,7 +239,7 @@ void uiTick() {
       // Stopped from the Sonos app, or the queue ran out despite REPEAT_ALL.
       if (tr == TransportState::Stopped || tr == TransportState::Paused) {
         s_st = St::Idle;
-        Serial.println("[unit   ] stopped externally");
+        LOG.println("[unit   ] stopped externally");
       }
       break;
 

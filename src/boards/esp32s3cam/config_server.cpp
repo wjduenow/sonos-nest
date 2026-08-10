@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 static const uint16_t CONFIG_PORT = 8080;
 static WebServer     *s_server = nullptr;
@@ -255,9 +256,9 @@ static void serverTask(void *) {
   while (WiFi.status() != WL_CONNECTED) vTaskDelay(pdMS_TO_TICKS(250));
 
   s_server->begin();
-  Serial.printf("\n[config ] ============================================\n");
-  Serial.printf("[config ]   http://%s:%u/\n", WiFi.localIP().toString().c_str(), CONFIG_PORT);
-  Serial.printf("[config ] ============================================\n\n");
+  LOG.printf("\n[config ] ============================================\n");
+  LOG.printf("[config ]   http://%s:%u/\n", WiFi.localIP().toString().c_str(), CONFIG_PORT);
+  LOG.printf("[config ] ============================================\n\n");
 
   for (;;) {
     s_server->handleClient();

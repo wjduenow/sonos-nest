@@ -19,3 +19,10 @@ void albumArtClear();                // mark "no art" (e.g. radio with no image)
 // UI side: returns true once when the art changed since the last call. *dscOut is the
 // image descriptor to display, or nullptr when art was cleared.
 bool albumArtTake(const lv_image_dsc_t **dscOut);
+
+// What the pipeline has actually done since boot. `clears` is the interesting one: the UI hides
+// the cover ONLY when albumArtTake() hands back nullptr, which only happens after albumArtClear().
+// If the artwork is visibly flickering, either this is climbing (something is clearing it) or it
+// is not (and the churn is fetch/decode, not clearing).
+struct AlbumArtDiag { uint32_t fetches, failures, clears, decodeFails; };
+void albumArtDiag(AlbumArtDiag &out);

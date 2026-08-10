@@ -15,6 +15,10 @@ bool pause(const String& ip);
 bool next(const String& ip);
 bool previous(const String& ip);
 bool seekTrack(const String& ip, uint32_t trackNr);
+// Restart the CURRENT track (Seek REL_TIME 00:00:00). Fails on anything Sonos treats as an
+// open-ended stream — live radio has no position to seek to — so check the result rather than
+// assuming it worked.
+bool seekToStart(const String& ip);
 bool setAvTransportUri(const String& ip, const String& uri, const String& didlMeta);
 bool setPlayMode(const String& ip, const String& mode);   // NORMAL / REPEAT_ALL / REPEAT_ONE ...
 bool getTransportInfo(const String& ip, TransportState& out);
@@ -22,7 +26,10 @@ bool getPositionInfo(const String& ip, PlayerState& out);   // track + pos + dur
 // The AVTransport source URI (GetMediaInfo/CurrentURI). Tells apart WHERE audio comes from:
 // "x-rincon-queue:..." = the coordinator's own queue (what a saved-playlist play sets up),
 // vs "x-sonos-htastream:" (TV), "x-rincon-stream:" (line-in), "x-rincon:" (grouped member), etc.
-bool getMediaInfo(const String& ip, String& currentUriOut);
+// currentUriMetaOut (optional) returns CurrentURIMetaData — the fallback source of now-playing
+// title/artist when GetPositionInfo's TrackMetaData is a stub, which is what Sonos serves for
+// content playing outside the queue (direct Spotify tracks). Escaped DIDL, same as TrackMetaData.
+bool getMediaInfo(const String& ip, String& currentUriOut, String* currentUriMetaOut = nullptr);
 
 // Grouping: join a speaker to a coordinator's group via
 //   setAvTransportUri(memberIp, "x-rincon:" + coordinatorUuid, "")

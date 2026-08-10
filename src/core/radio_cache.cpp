@@ -37,6 +37,8 @@
 #include "board.h"
 #include "net/wifi.h"
 #include "settings.h"
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 namespace radiocache {
 
@@ -194,8 +196,8 @@ static bool writeManifest(const String &path, const std::vector<amazon::Genre> &
 }
 
 bool refresh() {
-  if (root().isEmpty()) { Serial.println("[radio ] no storage — cache unavailable"); return false; }
-  if (!amazon::linked()) { Serial.println("[radio ] Amazon not linked — cannot crawl"); return false; }
+  if (root().isEmpty()) { LOG.println("[radio ] no storage — cache unavailable"); return false; }
+  if (!amazon::linked()) { LOG.println("[radio ] Amazon not linked — cannot crawl"); return false; }
   if (s_busy) return false;
   s_busy = true;
 
@@ -204,7 +206,7 @@ bool refresh() {
 
   std::vector<amazon::Genre> genres;
   if (!amazon::genres(genres)) {
-    Serial.println("[radio ] genre browse failed");
+    LOG.println("[radio ] genre browse failed");
     amazon::endSession();
     s_busy = false; return false;
   }
@@ -215,7 +217,7 @@ bool refresh() {
     rmTree(tmp);
     mkdir(tmp.c_str(), 0777);
     if (!writeManifest(manifest, genres)) {
-      Serial.println("[radio ] could not write the resume manifest");
+      LOG.println("[radio ] could not write the resume manifest");
       amazon::endSession();
       s_busy = false; return false;
     }
@@ -224,9 +226,9 @@ bool refresh() {
   int have = 0;
   for (size_t g = 0; g < genres.size(); ++g)
     if (fileHasContent(genrePath((int)g, true))) ++have;
-  if (have) Serial.printf("[radio ] resuming: %d of %u genres already cached\n",
+  if (have) LOG.printf("[radio ] resuming: %d of %u genres already cached\n",
                           have, (unsigned)genres.size());
-  else      Serial.printf("[radio ] crawling %u genres\n", (unsigned)genres.size());
+  else      LOG.printf("[radio ] crawling %u genres\n", (unsigned)genres.size());
 
   int fetched = 0;
   for (size_t g = 0; g < genres.size(); ++g) {
@@ -239,7 +241,7 @@ bool refresh() {
 
     std::vector<amazon::Station> st;
     if (!amazon::stations(genres[g].id, st)) {
-      Serial.printf("[radio ]   %-24s FAILED — will retry next pass\n", genres[g].title.c_str());
+      LOG.printf("[radio ]   %-24s FAILED — will retry next pass\n", genres[g].title.c_str());
       continue;
     }
     // Sorted here so neither the device nor the A-Z strip has to sort later.
@@ -250,12 +252,12 @@ bool refresh() {
     Writer gf(genrePath((int)g, true));
     for (const auto &s : st) gf.line(clean(s.title) + "\t" + clean(s.id) + "\t" + clean(s.artUrl));
     if (!gf.close()) {
-      Serial.printf("[radio ]   %-24s WRITE FAILED\n", genres[g].title.c_str());
+      LOG.printf("[radio ]   %-24s WRITE FAILED\n", genres[g].title.c_str());
       amazon::endSession();
       s_busy = false; return false;
     }
     ++fetched;
-    Serial.printf("[radio ]   %-24s %2u stations\n", genres[g].title.c_str(), (unsigned)st.size());
+    LOG.printf("[radio ]   %-24s %2u stations\n", genres[g].title.c_str(), (unsigned)st.size());
   }
   amazon::endSession();   // the burst is over; do not hold a socket open on this link
 
@@ -267,11 +269,11 @@ bool refresh() {
   // finish next time. Missing and NO progress -> nothing more to gain by waiting, so publish with
   // the gaps rather than never publishing at all.
   if (missing && fetched) {
-    Serial.printf("[radio ] pass complete: %d fetched, %d still missing — resuming next run\n",
+    LOG.printf("[radio ] pass complete: %d fetched, %d still missing — resuming next run\n",
                   fetched, missing);
     s_busy = false; return false;
   }
-  if (missing) Serial.printf("[radio ] publishing with %d genre(s) unavailable\n", missing);
+  if (missing) LOG.printf("[radio ] publishing with %d genre(s) unavailable\n", missing);
 
   // Build the index and the flat search file from what is on the card. Done here, not during the
   // fetch, so a crawl spread over several passes still produces one consistent pair.
@@ -282,7 +284,7 @@ bool refresh() {
     for (size_t g = 0; g < genres.size(); ++g)
       idx.line(String((int)g) + "\t" + clean(genres[g].title) + "\t" + clean(genres[g].id));
     if (!idx.close()) {
-      Serial.println("[radio ] index write failed — keeping the previous cache");
+      LOG.println("[radio ] index write failed — keeping the previous cache");
       s_busy = false; return false;
     }
 
@@ -300,7 +302,7 @@ bool refresh() {
       fclose(f);
     }
     if (!all.close()) {
-      Serial.println("[radio ] search index write failed — keeping the previous cache");
+      LOG.println("[radio ] search index write failed — keeping the previous cache");
       s_busy = false; return false;
     }
   }
@@ -308,14 +310,14 @@ bool refresh() {
   // the previous index intact rather than a half-written one.
   rmTree(root());
   if (rename(tmp.c_str(), root().c_str()) != 0) {
-    Serial.println("[radio ] rename failed — cache left in the temp tree");
+    LOG.println("[radio ] rename failed — cache left in the temp tree");
     s_busy = false; return false;
   }
   // Only now is the resume state safe to discard: dropping it before the swap would mean a failed
   // rename lost the whole part-built tree and the next pass started from genre 0 again.
   unlink((root() + "/genres.tsv").c_str());
   s_genreCount = -1;   // force a re-read
-  Serial.printf("[radio ] cache built: %d genres, %d stations\n", (int)genres.size(), totalStations);
+  LOG.printf("[radio ] cache built: %d genres, %d stations\n", (int)genres.size(), totalStations);
   s_busy = false;
   return true;
 }

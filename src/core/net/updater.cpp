@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <ArduinoJson.h>
+#include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
 // Firmware version — injected per build by tools/git_version.py (git describe). The manifest's
 // version is string-compared against this: CI only publishes clean tags, so a device on the
@@ -127,7 +128,7 @@ static bool checkManifest(const String &base, String &version, String &url, bool
 // firmware untouched (HTTPUpdate writes the inactive OTA slot and only flips on a clean image).
 static void applyNow(const String &url) {
   s_armed = false;
-  Serial.printf("[updater] applying %s\n           from %s\n", s_available.c_str(), url.c_str());
+  LOG.printf("[updater] applying %s\n           from %s\n", s_available.c_str(), url.c_str());
 
   // Quiesce the rest of the system BEFORE any flash write. Flash writes disable the instruction
   // cache, so any other-core task executing from (uncached) flash during a write faults and the
@@ -146,7 +147,7 @@ static void applyNow(const String &url) {
     static int lastPct = -1;
     delay(1);
     int pct = total ? (int)((int64_t)cur * 100 / total) : 0;
-    if (pct != lastPct && pct % 10 == 0) { lastPct = pct; Serial.printf("[updater] %d%%\n", pct); }
+    if (pct != lastPct && pct % 10 == 0) { lastPct = pct; LOG.printf("[updater] %d%%\n", pct); }
   });
   httpUpdate.rebootOnUpdate(true);
 
@@ -163,10 +164,10 @@ static void applyNow(const String &url) {
   // Only reached on failure — HTTP_UPDATE_OK reboots. Clear the flag so the UI/art tasks resume.
   s_active = false;
   if (r == HTTP_UPDATE_FAILED)
-    Serial.printf("[updater] FAILED (%d) %s\n", httpUpdate.getLastError(),
+    LOG.printf("[updater] FAILED (%d) %s\n", httpUpdate.getLastError(),
                   httpUpdate.getLastErrorString().c_str());
   else if (r == HTTP_UPDATE_NO_UPDATES)
-    Serial.println("[updater] server reports no update");
+    LOG.println("[updater] server reports no update");
 }
 
 // Parse "vX.Y.Z[-N[-gHASH[-dirty]]]" (git describe form) into [major,minor,patch,commits]. The

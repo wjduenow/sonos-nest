@@ -15,6 +15,8 @@
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
 #include "amazon.h"
 #include "board.h"
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
 namespace artcache {
 
@@ -134,6 +136,7 @@ static size_t obtain(const Req &r) {
     const size_t avail = st->available();
     if (!avail) { if (!http.connected() && (len < 0 || got >= (size_t)len)) break; delay(5); continue; }
     got += st->readBytes(s_jpeg + got, min(avail, kJpegMax - got));
+    heapwatch::note("artcache.fetch");
     if (len > 0 && got >= (size_t)len) break;
   }
   http.end();
@@ -204,7 +207,7 @@ static void worker(void *) {
     jpegUnlock();
 
     if (jr != JDR_OK) {
-      Serial.printf("[artc  ] decode failed jr=%d for %s (%u B)\n", (int)jr, r.key, (unsigned)n);
+      LOG.printf("[artc  ] decode failed jr=%d for %s (%u B)\n", (int)jr, r.key, (unsigned)n);
       continue;                            // slot stays not-ready and will be reused
     }
     if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) {
@@ -225,7 +228,7 @@ bool init(int tilePx, int slots) {
   const size_t px = (size_t)s_px * s_px * 2;
   for (int i = 0; i < slots; i++) {
     s_slots[i].pix = (uint16_t *)heap_caps_malloc(px, MALLOC_CAP_SPIRAM);
-    if (!s_slots[i].pix) { Serial.println("[artc  ] PSRAM alloc failed"); return false; }
+    if (!s_slots[i].pix) { LOG.println("[artc  ] PSRAM alloc failed"); return false; }
     lv_image_dsc_t &d = s_slots[i].dsc;
     memset(&d, 0, sizeof d);
     d.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -242,7 +245,7 @@ bool init(int tilePx, int slots) {
   if (!s_jpeg || !s_lock || !s_q) return false;
   // Core 0 with the network, low priority: fetching tiles must never compete with rendering.
   xTaskCreatePinnedToCore(worker, "artcache", 6144, nullptr, 1, nullptr, 0);
-  Serial.printf("[artc  ] %d slots x %dx%d = %u KB PSRAM\n", slots, s_px, s_px,
+  LOG.printf("[artc  ] %d slots x %dx%d = %u KB PSRAM\n", slots, s_px, s_px,
                 (unsigned)(px * slots / 1024));
   return true;
 }

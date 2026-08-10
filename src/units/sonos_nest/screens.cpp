@@ -130,7 +130,8 @@ static void fmtTime(char *buf, size_t n, uint32_t sec) {
   snprintf(buf, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
 }
 
-static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.prev = true; stateUnlock(); } pressPulse(); }
+// Back restarts the current track (see PendingCmds::restartTrack), matching the jukebox.
+static void prevCb(lv_event_t *) { if (stateLock()) { g_pending.restartTrack = true; stateUnlock(); } pressPulse(); }
 static void nextCb(lv_event_t *) { if (stateLock()) { g_pending.next = true; stateUnlock(); } pressPulse(); }
 
 static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv_event_cb_t cb) {

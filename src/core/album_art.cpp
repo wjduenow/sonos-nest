@@ -3,6 +3,8 @@
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
+#include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
@@ -94,37 +96,46 @@ bool albumArtInit() {
   return true;
 }
 
+// Pipeline counters — see AlbumArtDiag in album_art.h. Plain uint32 stores written by artTask and
+// read by the HTTP task; a torn read skews one diagnostic number and nothing else.
+static uint32_t s_nFetch = 0, s_nFail = 0, s_nClear = 0, s_nDecodeFail = 0;
+void albumArtDiag(AlbumArtDiag &out) {
+  out.fetches = s_nFetch; out.failures = s_nFail; out.clears = s_nClear; out.decodeFails = s_nDecodeFail;
+}
+
 bool albumArtFetch(const String &url) {
-  if (!s_jpeg) return false;
+  ++s_nFetch;
+  if (!s_jpeg) { ++s_nFail; return false; }
 
   // Download the JPEG (plain HTTP — Sonos serves art off the speaker itself).
   WiFiClient client;
   HTTPClient http;
-  if (!http.begin(client, url)) return false;
+  if (!http.begin(client, url)) { ++s_nFail; return false; }
   int code = http.GET();
-  if (code != 200) { Serial.printf("[art] HTTP %d\n", code); http.end(); return false; }
+  if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
   // writeToStream() de-chunks the body (the raw stream pointer would include chunk framing).
   BufSink sink(s_jpeg, JPEG_MAX);
   http.writeToStream(&sink);
   size_t got = sink.len;
+  heapwatch::note("art.fetch");
   size_t dropped = sink.dropped;
   http.end();
-  if (got < 100) { Serial.printf("[art] short read (%u bytes)\n", (unsigned)got); return false; }
+  if (got < 100) { LOG.printf("[art] short read (%u bytes)\n", (unsigned)got); ++s_nFail; return false; }
   // A cover larger than JPEG_MAX used to be truncated silently: TJpg then failed or produced a
   // garbled image, with nothing in the log pointing at the buffer. Refuse it loudly instead —
   // no art beats wrong art, and the message says exactly what to raise.
   if (dropped) {
-    Serial.printf("[art] TRUNCATED: %u bytes did not fit (JPEG_MAX=%u). Raise JPEG_MAX.\n",
+    LOG.printf("[art] TRUNCATED: %u bytes did not fit (JPEG_MAX=%u). Raise JPEG_MAX.\n",
                   (unsigned)dropped, (unsigned)JPEG_MAX);
     return false;
   }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
-  if (!jpegLock()) { Serial.println("[art] decoder busy"); return false; }
+  if (!jpegLock()) { LOG.println("[art] decoder busy"); ++s_nFail; return false; }
   uint16_t w = 0, h = 0;
   if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) {
     jpegUnlock();
-    Serial.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
+    LOG.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
     return false;
   }
   uint8_t scale = 1;
@@ -138,7 +149,7 @@ bool albumArtFetch(const String &url) {
   JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
   jpegUnlock();
   if (jr != JDR_OK) {
-    Serial.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
+    LOG.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
                   (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
     return false;
   }
@@ -159,6 +170,7 @@ bool albumArtFetch(const String &url) {
 }
 
 void albumArtClear() {
+  ++s_nClear;
   if (stateLock()) { s_hasArt = false; s_changed = true; stateUnlock(); }
 }
 

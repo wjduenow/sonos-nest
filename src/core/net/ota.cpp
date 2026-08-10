@@ -5,6 +5,10 @@
 #include <WiFi.h>
 
 // Optional OTA password via include/secrets.h: #define OTA_PASSWORD "..."
+#include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+// NB above the secrets conditional on purpose: inside it, LOG would only be defined on
+// machines that happen to have include/secrets.h, which is gitignored.
+
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -34,20 +38,20 @@ void otaBegin() {
 #ifdef OTA_PASSWORD
   ArduinoOTA.setPassword(OTA_PASSWORD);
 #endif
-  ArduinoOTA.onStart([]() { s_active = true; s_progress = 0; Serial.println("[ota] start"); });
-  ArduinoOTA.onEnd([]()   { s_active = false; s_progress = -1; Serial.println("[ota] done"); });
+  ArduinoOTA.onStart([]() { s_active = true; s_progress = 0; LOG.println("[ota] start"); });
+  ArduinoOTA.onEnd([]()   { s_active = false; s_progress = -1; LOG.println("[ota] done"); });
   ArduinoOTA.onProgress([](unsigned p, unsigned t) {
     s_progress = t ? (int)(p * 100 / t) : 0;
-    Serial.printf("[ota] %d%%\r", s_progress);
+    LOG.printf("[ota] %d%%\r", s_progress);
   });
-  ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; Serial.printf("[ota] error %u\n", e); });
+  ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; LOG.printf("[ota] error %u\n", e); });
   ArduinoOTA.begin();
   // ArduinoOTA advertises a generic _arduino._tcp; every ESP32 running ArduinoOTA does. Tag ours
   // with a compiled-in marker (NOT the user-settable hostname) so the portal's mDNS discovery
   // fallback can tell a sonos-nest-project device from any other board on the LAN. See
   // sonos-portal/app/mdns.py — devices without this TXT key are ignored.
   MDNS.addServiceTxt("arduino", "tcp", "app", "sonos-nest");
-  Serial.printf("[ota] ready as %s @ %s\n", otaHostname(), WiFi.localIP().toString().c_str());
+  LOG.printf("[ota] ready as %s @ %s\n", otaHostname(), WiFi.localIP().toString().c_str());
 }
 
 void otaHandle() { ArduinoOTA.handle(); }
