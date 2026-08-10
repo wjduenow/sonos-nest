@@ -179,6 +179,22 @@ static void processPending() {
   if (p.setPlay == 0)      sonos::pause(s_coordIp);
   else if (p.setPlay == 1) sonos::play(s_coordIp);
   if (p.prev) sonos::previous(s_coordIp);   // transport -> the coordinator
+  if (p.restartTrack) {
+    // Deliberately does NOT fall back to previous() when the seek fails. It fails on live radio,
+    // which has no position to seek to — and silently skipping to another station because a
+    // restart was impossible is a worse surprise than the button doing nothing.
+    if (sonos::seekToStart(s_coordIp)) {
+      if (stateLock()) {
+        g_player.positionSec  = 0;      // paint it immediately; the poll confirms
+        g_player.positionAtMs = millis();
+        g_player.dirty = true;
+        stateUnlock();
+      }
+      s_lastPoll = 0;
+    } else {
+      LOG.println("[transport] restart failed (live stream?) — leaving playback alone");
+    }
+  }
   if (p.next) sonos::next(s_coordIp);
 
   // A ready-made URI + DIDL from the UI — a Radio station, or a favourite played from the cache.

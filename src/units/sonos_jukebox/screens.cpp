@@ -164,7 +164,9 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
 // --- Commands ---------------------------------------------------------------------------------
 static void prevCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
-  if (stateLock()) { g_pending.prev = true; stateUnlock(); }
+  // Back restarts the CURRENT track rather than skipping to the previous one — the behaviour
+  // asked for on this unit. The nest keeps `prev` (previous track); hence the separate command.
+  if (stateLock()) { g_pending.restartTrack = true; stateUnlock(); }
 }
 static void nextCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);

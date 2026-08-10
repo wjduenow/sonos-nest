@@ -15,6 +15,10 @@ bool pause(const String& ip);
 bool next(const String& ip);
 bool previous(const String& ip);
 bool seekTrack(const String& ip, uint32_t trackNr);
+// Restart the CURRENT track (Seek REL_TIME 00:00:00). Fails on anything Sonos treats as an
+// open-ended stream — live radio has no position to seek to — so check the result rather than
+// assuming it worked.
+bool seekToStart(const String& ip);
 bool setAvTransportUri(const String& ip, const String& uri, const String& didlMeta);
 bool setPlayMode(const String& ip, const String& mode);   // NORMAL / REPEAT_ALL / REPEAT_ONE ...
 bool getTransportInfo(const String& ip, TransportState& out);

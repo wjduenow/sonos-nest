@@ -154,6 +154,11 @@ bool seekTrack(const String &ip, uint32_t trackNr) {
                 String(trackNr) + "</Target>";
   return soapAction(ip, PATH_AVT, SVC_AVT, "Seek", args, r);
 }
+bool seekToStart(const String &ip) {
+  String r;
+  return soapAction(ip, PATH_AVT, SVC_AVT, "Seek",
+                    "<InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>00:00:00</Target>", r);
+}
 bool setAvTransportUri(const String &ip, const String &uri, const String &didlMeta) {
   String r;
   String args = "<InstanceID>0</InstanceID><CurrentURI>" + xmlEscape(uri) +

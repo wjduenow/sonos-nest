@@ -49,6 +49,10 @@ struct PendingCmds {
   int    setPlay      = -1;   // -1 = none; 0 = pause; 1 = play (explicit, decided by the UI)
   bool   next         = false;
   bool   prev         = false;
+  // Restart the current track instead of skipping to the previous one. A SEPARATE command rather
+  // than a reinterpretation of `prev`, because the two units want different things from their back
+  // button and `prev` is shared with the nest and the headless button.
+  bool   restartTrack = false;
   String requestZoneIp;       // non-empty: switch the controlled zone to this speaker IP
 
   // --- Grouping ---------------------------------------------------------------------------
