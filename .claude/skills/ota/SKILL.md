@@ -39,10 +39,14 @@ Skip this step entirely on a native Linux/macOS build host.
 1. **Build** the app firmware:
    ```bash
    export PATH="$PATH:$HOME/.platformio/penv/bin"
-   pio run -e nest        # or: pio run -e sleep-machine (advertises sonos-sleep)
+   tools/pio run -e nest  # or: tools/pio run -e sleep-machine (advertises sonos-sleep)
    ```
+   Use `tools/pio`, not bare `pio` — it selects the per-chip PlatformIO package tree
+   (`docs/dev-setup.md` § 3). Both units here are ESP32-S3, so they build in the default
+   `~/.platformio`, which is why the espota path below is still under it.
+
    A transient GCC "internal compiler error / Segmentation fault" in the Arduino_GFX or
-   FrameworkArduino step is flaky — just re-run `pio run`. It is not a real error.
+   FrameworkArduino step is flaky — just re-run. It is not a real error.
 
 2. **Find the device IP via mDNS.** The device advertises ArduinoOTA over mDNS as
    `sonos-nest._arduino._tcp`. WSL2 has no built-in mDNS resolver (`ping sonos-nest.local`

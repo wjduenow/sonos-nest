@@ -149,8 +149,17 @@ Much better fit for the design than an ESP32-S3 would have been:
 > **Both pins are load-bearing. Don't loosen either.**
 
 **2. Switching envs re-downloads the framework.** The P4 framework (3.3.11) and the S3 framework
-(3.20017) install to the *same* `framework-arduinoespressif32` package directory, so alternating
-`pio run -e nest` and a jukebox env re-fetches ~78 MB each way. Annoying, not dangerous.
+(3.20017) contend for the *same* `framework-arduinoespressif32` package directory, so alternating
+`pio run -e nest` and a jukebox env re-fetches each way. Annoying, not dangerous.
+
+> **FIXED — build with `tools/pio`, not bare `pio`.** Each platform now gets its own
+> `PLATFORMIO_CORE_DIR` (`~/.platformio` for S3, `~/.platformio-p4` for the jukebox), so switching
+> costs nothing. Rationale, measurements and the two PlatformIO traps that survive the fix:
+> **`docs/dev-setup.md` § 3**. Two corrections to what this section originally claimed: the twelve
+> shared package names include the toolchains and `tool-esptoolpy`, not just the framework; and the
+> two frameworks do *not* literally share one directory — a URL-sourced package lands in
+> `name@src-<md5>` — yet PlatformIO evicts one anyway, so the observable symptom here was right even
+> though the stated mechanism was not.
 
 **3. `custom_sdkconfig` makes PlatformIO build this as an IDF project.** It prints
 "the 'src_filter' option cannot be used with ESP-IDF" — **cosmetic here**; `build_src_filter` was
