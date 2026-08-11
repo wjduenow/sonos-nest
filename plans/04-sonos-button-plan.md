@@ -14,6 +14,11 @@ This is the **third unit** in the repo (after `nest` and `sleep-machine`) and th
 > `worktree-button-measurements`, draft PR #1):
 > - **Phases 0–3 done.** Button → playlist toggle, and a config page on `:8080` with ring
 >   on/off + dimming, room, playlist (listed live from Sonos), volume, and device name.
+> - **Double/triple press (issue #2) — built, NOT yet run on hardware.** Each maps to its own
+>   playlist + volume on the config page; both default to unmapped. See §1 for the three rules.
+>   The press-timing constants (`MULTI_GAP_MS` 350 ms) are the usual comfortable values, not
+>   measured on this switch — if a double press ever registers as two singles, that is the knob
+>   to turn, and `bringup.cpp` prints the held time on every release.
 > - **The ring needs no MOSFET** — a bare GPIO sinks it low-side (§4). One fewer part, one less
 >   thing in the case.
 > - **Case built** — `hardware/cam-button/`, 26.81 mm, both meshes watertight (§6).
@@ -41,10 +46,40 @@ This is the **third unit** in the repo (after `nest` and `sleep-machine`) and th
 | Question | Decision |
 |---|---|
 | Button behavior | **Toggle.** Press = start sleep playlist (looped). Press again = stop. |
+| Multi-press | **Double and triple press each start their own playlist + volume** (issue #2). |
 | Playlist source | **Sonos saved playlist (`SQ:`)**, enqueued + `REPEAT_ALL` — the proven path. |
-| Volume | **Configurable fixed volume.** Set the room's volume, *then* play. |
+| Volume | **Configurable fixed volume, per press slot.** Set the room's volume, *then* play. |
 | Camera | **Not used.** Unplug the FPC ribbon and remove the module (see §6). |
-| Config surface | Embedded web UI on `:8080` — ring, room, playlist, volume, device name. ✅ built. |
+| Config surface | Embedded web UI on `:8080` — ring, room, 3× playlist+volume, device name. ✅ built. |
+
+### Multi-press (issue #2) — three press slots
+
+Slot 1 = single press, 2 = double, 3 = triple. Each maps to one saved playlist (or playlist-type
+favourite) **and its own volume**, on the `:8080` page. Slots 2 and 3 default to **unmapped**, so a
+device that predates this behaves exactly as it did — including its stored pick, because slot 1
+kept the original NVS keys (`playlist`/`btnvol`).
+
+Three rules worth keeping straight, each of which is the answer to a real question:
+
+- **Only the single press stops.** Double/triple *always* start, replacing whatever is playing.
+  With three gestures that can start something, "which press stops it?" needs exactly one answer.
+- **The single press is now ~350 ms slower.** A release is only a single press once the multi-press
+  window closes without another one — that is the unavoidable cost of counting presses. Feedback
+  therefore moved to the press *edge*: the unit pulses the ring off `knobDown()`, not off
+  `KnobEvent::Short`, so your finger still gets an instant answer (and a double press gives two
+  visible pulses, which makes it countable in the dark).
+- **A 4th fast press is a fresh single press.** Triple is emitted on its own release (no point
+  waiting out a window for a count that cannot grow), so press-press-press-press reads as
+  `Triple, Short` — i.e. start slot 3, then stop it. Verified along with the rest of the table
+  below by compiling `button.cpp` against a stub `Arduino.h` on the host and driving the clock:
+  single→Short · double at 150 ms and 300 ms→Double · triple→Triple · two presses 500 ms apart→two
+  Shorts · hold→Long only · press-then-hold→Long only · a 10 ms contact bounce→one Short.
+- **The resolved-item cache holds three names, not one.** It exists to keep a press off the
+  multi-second ContentDirectory browse; with a playlist per press count, a one-slot cache would
+  evict on every alternating press and pay that browse every time. Warm-ups are a queue for the
+  same reason — the unit warms every mapped slot at boot and after a config change, one browse per
+  netTask pass, and a warm-up never reports a resolve failure (only a real press does, or an
+  unrelated slot's bad name would abort a start that was fine).
 
 ### WiFi provisioning — **C is reached in code: A + B both built (B untested on hardware)**
 

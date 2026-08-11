@@ -22,7 +22,14 @@ int32_t encoderDelta();            // signed detents since last call; 0 if no en
 
 // Press classification: Short fires on release of a quick press; Long fires as soon as
 // the button has been held past the long-press threshold (no need to release first).
-enum class KnobEvent { None, Short, Long };
+//
+// Double/Triple are emitted only by boards that classify MULTI-presses (today just the
+// sonos-button's FLM12 — see boards/esp32s3cam/button.cpp). Everywhere else they never occur, so
+// existing units need no new branches. Note what enabling multi-press costs on such a board:
+// Short can no longer fire on release, because a release is only a *single* press once the
+// multi-press window has expired without another press. A unit wanting instant press feedback
+// should drive it off knobDown() (which is still edge-immediate), not off Short.
+enum class KnobEvent { None, Short, Long, Double, Triple };
 KnobEvent knobEvent();             // next queued press event; None if no knob
 bool      knobPressed();           // true once per Short press; false if no knob
 bool      knobDown();              // true while the knob is held; false if no knob

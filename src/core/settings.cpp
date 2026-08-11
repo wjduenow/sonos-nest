@@ -105,18 +105,33 @@ void settingsSetRing(uint8_t pct) {
 }
 
 // --- sonos-button ---
-// "Sleep" matches the playlist the sleep-machine's Bedtime button already starts, so a fresh
-// device does the right thing before anyone opens the config page.
-String settingsPlaylist() { return s_prefs.getString("playlist", "Sleep"); }
-void   settingsSetPlaylist(const String &name) { s_prefs.putString("playlist", name); }
+// Slot 1 deliberately keeps the un-suffixed keys the single-press build has always written, so an
+// upgrade doesn't silently reset a device that is already taped to a nightstand. See settings.h.
+static const char *playlistKey(uint8_t slot) {
+  return (slot == 2) ? "playlist2" : (slot == 3) ? "playlist3" : "playlist";
+}
+static const char *volumeKey(uint8_t slot) {
+  return (slot == 2) ? "btnvol2" : (slot == 3) ? "btnvol3" : "btnvol";
+}
 
-uint8_t settingsVolume() {
-  uint8_t v = s_prefs.getUChar("btnvol", 30);
+// "Sleep" matches the playlist the sleep-machine's Bedtime button already starts, so a fresh
+// device does the right thing before anyone opens the config page. Only slot 1 gets that default:
+// a fresh device inventing two more things to play on presses nobody has configured would be a
+// surprise, not a convenience.
+String settingsPlaylist(uint8_t slot) {
+  return s_prefs.getString(playlistKey(slot), (slot == 2 || slot == 3) ? "" : "Sleep");
+}
+void settingsSetPlaylist(uint8_t slot, const String &name) {
+  s_prefs.putString(playlistKey(slot), name);
+}
+
+uint8_t settingsVolume(uint8_t slot) {
+  uint8_t v = s_prefs.getUChar(volumeKey(slot), 30);
   return v > 100 ? 100 : v;
 }
-void settingsSetVolume(uint8_t pct) {
+void settingsSetVolume(uint8_t slot, uint8_t pct) {
   if (pct > 100) pct = 100;
-  s_prefs.putUChar("btnvol", pct);
+  s_prefs.putUChar(volumeKey(slot), pct);
 }
 
 String settingsZones() { return s_prefs.getString("zones", ""); }

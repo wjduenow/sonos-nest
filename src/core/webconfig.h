@@ -34,8 +34,11 @@ String registrationJson();
 //                          the unit applies it (see webConfigGen below).
 //   brightness           — value is 0..100, screen backlight % (nest); floored at 10. Persisted;
 //                          the unit applies it via webConfigGen, same as ring.
-//   playlist             — value is a Sonos saved-playlist name (sonos-button).
-//   volume               — value is 0..100, the fixed volume the button plays at.
+//   playlist[2|3]        — value is a Sonos saved-playlist name (sonos-button). The bare name is
+//                          the single press; 2 and 3 are the double and triple press. "" un-maps
+//                          a double/triple press (refused for the single press — that one is the
+//                          whole product).
+//   volume[2|3]          — value is 0..100, the volume set before starting that press's playlist.
 //   deviceName           — value is the DHCP hostname shown by the router. Sanitized to
 //                          letters/digits/hyphen; reconnects so the new name registers.
 // Returns false and fills err (a short human-readable reason) if the field or value is bad.
@@ -58,6 +61,13 @@ void webConfigPlaylistsSet(const std::vector<String> &names);
 // the applying keeps the field meaningless on units that don't. Cheap: one int compare per tick
 // versus hitting NVS.
 uint32_t webConfigGen();
+
+// Bumped ONLY when a playlist pick itself was edited — a strict subset of webConfigGen(), which
+// also moves for volume, ring, brightness and the screensaver. The button uses it to decide when a
+// re-warm must actually re-resolve: a playlist deleted and recreated under the same name needs a
+// fresh browse, but paying that browse on every drag of a volume slider (which bumps the general
+// counter several times a second) would put minutes of SOAP in front of the next press.
+uint32_t webConfigPlaylistGen();
 
 // Call when a track is removed from local storage: clears any pick that referenced it, so a
 // deleted file can't leave the sleep/wake track pointing at something that no longer exists.
