@@ -62,6 +62,13 @@ void webConfigPlaylistsSet(const std::vector<String> &names);
 // versus hitting NVS.
 uint32_t webConfigGen();
 
+// Bumped ONLY when a playlist pick itself was edited — a strict subset of webConfigGen(), which
+// also moves for volume, ring, brightness and the screensaver. The button uses it to decide when a
+// re-warm must actually re-resolve: a playlist deleted and recreated under the same name needs a
+// fresh browse, but paying that browse on every drag of a volume slider (which bumps the general
+// counter several times a second) would put minutes of SOAP in front of the next press.
+uint32_t webConfigPlaylistGen();
+
 // Call when a track is removed from local storage: clears any pick that referenced it, so a
 // deleted file can't leave the sleep/wake track pointing at something that no longer exists.
 void webConfigTrackDeleted(const String &path);

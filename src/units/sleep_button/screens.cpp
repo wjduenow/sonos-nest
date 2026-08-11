@@ -44,6 +44,7 @@ static St       s_st        = St::Idle;
 static uint32_t s_startMs   = 0;
 static bool     s_listed    = false;   // the config page's playlist list has been published once
 static uint32_t s_cfgGen    = 0;
+static uint32_t s_plGen     = 0;       // playlist-pick generation; see the re-warm in uiTick
 static uint8_t  s_lastVol   = 0;       // last volume we pushed to Sonos; seeded in uiInit()
 static uint32_t s_pulseEnd  = 0;       // ring-pulse deadline (0 = not pulsing)
 static bool     s_wasDown   = false;   // previous knobDown(), for the press-edge pulse
@@ -75,6 +76,7 @@ void uiInit() {
   // Apply the persisted ring level. Until this runs the ring is dark (boardInit leaves it off),
   // so a reboot never flashes the ring at full brightness in a dark room.
   s_cfgGen  = webConfigGen();
+  s_plGen   = webConfigPlaylistGen();
   s_lastVol = settingsVolume(1);  // seed, don't apply: a reboot must not shove the room's
                                   // volume around on its own
   ringRest();
@@ -177,12 +179,20 @@ void uiTick() {
       LOG.printf("[unit   ] volume -> %u (slot %u)\n", vol, s_slot);
     }
 
-    // A playlist pick may have changed. Re-warm every mapped slot so the next press is fast
-    // whichever one it is (and a same-name delete/recreate re-resolves). warmOnly => resolve, no
-    // play; requestPlayNamed ignores an unmapped "" and queues the rest one browse per netTask
-    // pass, so this costs nothing on the press path.
+    // Re-warm every mapped slot so the next press is fast whichever one it is. warmOnly =>
+    // resolve, no play; requestPlayNamed ignores an unmapped "" and queues the rest one browse per
+    // netTask pass, so this costs nothing on the press path.
+    //
+    // FORCE the re-resolve only when a playlist pick was what changed. A cache hit is normally the
+    // right answer and is free, but it is exactly wrong after a playlist was deleted and recreated
+    // under the same name: the title matches, the res URI does not, and the press would enqueue a
+    // URI that no longer exists and silently do nothing. Gating on the playlist-specific generation
+    // is what keeps that browse off a volume drag, which bumps the general counter continuously.
+    const uint32_t plGen = webConfigPlaylistGen();
+    const bool     force = (plGen != s_plGen);
+    s_plGen = plGen;
     for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s)
-      library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true);
+      library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true, force);
   }
 
   // --- snapshot the shared state once -----------------------------------------------------

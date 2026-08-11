@@ -38,23 +38,38 @@ static uint32_t s_playChild = 0;
 // multi-second browse each time — exactly the latency the cache exists to remove. Capacity matches
 // the press slots; entries are a few KB of DIDL each, on a unit with ~240 KB free.
 static const size_t  kCacheMax = 3;
+// The warm queue is BOUNDED. It only ever holds the configured slot names, but nothing stops a
+// config page from being edited faster than netTask drains one browse per pass, and names from
+// superseded generations are pure waste — a browse for a playlist nobody has mapped any more.
+// Dropping the OLDEST is the right end to drop: the newest names are the current configuration.
+static const size_t  kWarmMax  = 6;
 static String        s_reqName;          // "" = none — a real play request
 // Warm-ups are a QUEUE, not another single slot: the unit warms every configured slot at boot and
 // after a config change, and back-to-back requests into one slot would drop all but the last.
-static std::vector<String> s_warmQueue;
+// `force` re-resolves even on a cache hit — see requestPlayNamed().
+struct WarmReq { String name; bool force; };
+static std::vector<WarmReq> s_warmQueue;
 struct NamedItem { String name; sonos::DidlItem item; };
 static std::vector<NamedItem> s_cache;   // most-recently-resolved last
 static bool          s_nameFailed = false;   // last requestPlayNamed couldn't resolve
 
-void requestPlayNamed(const String &name, bool warmOnly) {
+void requestPlayNamed(const String &name, bool warmOnly, bool forceRefresh) {
   if (name.length() == 0) return;        // an unmapped press slot: nothing to resolve or play
   if (stateLock()) {
     if (!warmOnly) {
       s_reqName = name;
+      // Drop any failure recorded for an EARLIER request. Without this a stale flag is consumed by
+      // whichever start happens to read it next, which aborts a perfectly good press and blames it
+      // on the wrong playlist — easy to hit with one bad slot and a quick second press.
+      s_nameFailed = false;
     } else {
       bool queued = false;
-      for (const String &n : s_warmQueue) if (n == name) { queued = true; break; }
-      if (!queued) s_warmQueue.push_back(name);
+      for (WarmReq &w : s_warmQueue)
+        if (w.name == name) { w.force = w.force || forceRefresh; queued = true; break; }
+      if (!queued) {
+        if (s_warmQueue.size() >= kWarmMax) s_warmQueue.erase(s_warmQueue.begin());
+        s_warmQueue.push_back({name, forceRefresh});
+      }
     }
     stateUnlock();
   }
@@ -196,6 +211,11 @@ static void cachePut(const String &name, const sonos::DidlItem &item) {
     // only matters if a name is reconfigured, and then the stale one is the right thing to drop.
     if (s_cache.size() >= kCacheMax) s_cache.erase(s_cache.begin());
     s_cache.push_back({name, item});
+    // Noted here, while the entry is held: this is the one allocation on the play-by-name path with
+    // any size to it (a DIDL item carries its <res> + <r:resMD>, a few KB each, x3 slots). If the
+    // internal-heap low-water ever lands on this tag, kCacheMax is the dial. health.heapLow reads
+    // it back over HTTP — see core/heap_watch.h.
+    heapwatch::note("library.namecache");
     stateUnlock();
   }
 }
@@ -204,21 +224,27 @@ void service(const String &browseIp, const String &coordIp, const String &coordU
   // 0) Play-by-name (the button's fast path). Handled before the generic browse/play below so a
   // press never waits behind anything, and so it can short-circuit on a cache hit.
   {
-    String name; bool warm = false, have = false;
+    String name; bool warm = false, have = false, force = false;
     if (stateLock()) {
       if (s_reqName.length()) {
         name = s_reqName; s_reqName = ""; have = true;
       } else if (!s_warmQueue.empty()) {
         // One warm-up per service() call, and only when no press is waiting: warming is
         // housekeeping and must never put a browse in front of somebody's button.
-        name = s_warmQueue.front(); s_warmQueue.erase(s_warmQueue.begin());
+        name  = s_warmQueue.front().name;
+        force = s_warmQueue.front().force;
+        s_warmQueue.erase(s_warmQueue.begin());
         have = true; warm = true;
       }
       stateUnlock();
     }
     if (have) {
       sonos::DidlItem item;
-      const bool cached = cacheGet(name, item);
+      // A forced warm-up ignores the cache deliberately. A playlist deleted and recreated under the
+      // SAME name keeps its title but gets a new res URI, so a cache hit is exactly the wrong
+      // answer — the press would enqueue a URI that no longer exists and silently do nothing. Only
+      // a playlist edit on the config page sets this, so ordinary warm-ups still cost nothing.
+      const bool cached = !force && cacheGet(name, item);
       bool hit = cached;
       if (!hit) {
         // Cold: resolve (the expensive browse) and cache it for next time.

@@ -41,6 +41,10 @@ static bool knownTrack(const String &path) {
 static uint32_t s_gen = 0;
 uint32_t webConfigGen() { return s_gen; }
 
+// Bumped only by a playlist-pick edit — see webconfig.h.
+static uint32_t s_playlistGen = 0;
+uint32_t webConfigPlaylistGen() { return s_playlistGen; }
+
 // Last LVGL pool sample reported by the unit (see webconfig.h). Plain uint32/uint8 stores written
 // by the UI task and read by the HTTP task — a torn read just skews one diagnostic number, so no
 // lock needed.
@@ -472,7 +476,7 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     if (value.length() == 0) {
       if (slot == 1) { err = "pick a playlist"; return false; }
       settingsSetPlaylist(slot, "");
-      s_gen++;
+      s_gen++; s_playlistGen++;
       return true;
     }
     // Validate against the browsed list when we have one: a typo'd name fails at 2am with the
@@ -484,7 +488,8 @@ bool webConfigApply(const String &field, const String &value, String &err) {
       if (!known) { err = "no such playlist"; return false; }
     }
     settingsSetPlaylist(slot, value);
-    s_gen++;   // signal the unit to re-warm its play-by-name cache for the new pick
+    s_gen++;           // signal the unit to re-warm its play-by-name cache for the new pick
+    s_playlistGen++;   // ...and that this one must re-RESOLVE, not accept a cache hit
     return true;
   }
 

@@ -31,7 +31,11 @@ void clearResults();                                         // free cached item
 // overwrite, so warming every configured slot in a row actually warms all of them. An empty name
 // is ignored outright — that's an unmapped press slot, not a request. Warm-ups never set
 // playNamedFailed(); only a real play does.
-void requestPlayNamed(const String &name, bool warmOnly = false);
+// `forceRefresh` (warm-ups only) re-resolves even on a cache hit. Use it when the PICK itself was
+// edited: a playlist deleted and recreated under the same name keeps its title but gets a new res
+// URI, and a cache hit would then hand the press a URI that no longer exists — a press that looks
+// wired up and silently does nothing. It costs a browse, so it is not the default.
+void requestPlayNamed(const String &name, bool warmOnly = false, bool forceRefresh = false);
 
 // One-shot: true if the most recent requestPlayNamed() couldn't find the playlist (so the unit
 // can log what's available). Cleared by reading it.
