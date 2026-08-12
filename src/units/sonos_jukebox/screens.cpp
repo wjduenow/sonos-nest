@@ -191,7 +191,7 @@ struct Shown {
   // the meta label is built showing "starting up", so a track with no artist AND no album (a
   // direct Spotify track reports neither) rendered "" , compared equal to the empty cache, and the
   // boot placeholder stayed on screen forever under a correct title.
-  String   room = "\x01", title = "\x01", meta = "\x01", badge = "\x01";
+  String   room = "\x01", title = "\x01", meta = "\x01", badge = "\x01", group = "\x01";
   int      pct = -1, volPct = -1;
   uint32_t elapsed = UINT32_MAX, remain = UINT32_MAX;
   int      playing = -1;      // tri-state so the first tick always paints
@@ -372,7 +372,13 @@ static void buildStatusBar() {
   s_room = label(s_content, JB_DASH, &lv_font_montserrat_16, JB_TEXT);
   lv_obj_align(s_room, LV_ALIGN_TOP_LEFT, 18, PAD_TOP);
 
+  // The rest of the group, under the active room. Built but never written until now — the status
+  // bar said "Dining Room" whether that speaker was alone or leading five others, which is exactly
+  // the thing you need to know before touching the volume. Width-capped and ellipsised: nine rooms
+  // would otherwise run under the Wi-Fi glyph on the right.
   s_group = label(s_content, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_label_set_long_mode(s_group, LV_LABEL_LONG_DOT);
+  lv_obj_set_size(s_group, SCREEN_W - RAIL_W - PAD_X * 2 - 18 - 40, 15);
   lv_obj_align(s_group, LV_ALIGN_TOP_LEFT, 18, PAD_TOP + 20);
 
   s_clock = label(s_content, LV_SYMBOL_WIFI, &lv_font_montserrat_16, JB_TEXT_MUTED);
@@ -1840,6 +1846,13 @@ static void ssBlankCb(lv_event_t *e) {
   uiSoundPlay(UiSound::Tick);
 }
 
+static void ssAwakePlayingCb(lv_event_t *e) {
+  settingsSetSaverAwakeWhilePlaying(
+      lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED));
+  saverConfigChanged();
+  uiSoundPlay(UiSound::Tick);
+}
+
 static void ssDimCb(lv_event_t *e) {
   const int v = lv_slider_get_value((lv_obj_t *)lv_event_get_target(e));
   lv_label_set_text_fmt(s_ssDimVal, "%d", v);
@@ -2067,7 +2080,7 @@ static void buildSettings() {
     static const uint8_t kOrder[] = {SAVER_AUTO, SAVER_COVER, SAVER_CLOCK, SAVER_OFF};
     uint16_t modeSel = 0;
     for (uint16_t i = 0; i < 4; i++) if (kOrder[i] == settingsSaverMode()) modeSel = i;
-    ssDropdown(pg, "Art when playing, else clock\nAlbum art\nClock\nNothing", modeSel,
+    ssDropdown(pg, "Album art when available\nAlbum art\nClock\nNothing", modeSel,
                ssModeCb, 300, Y + 100, 420);
 
     lv_obj_t *dl = label(pg, "Appears after", &lv_font_montserrat_16, JB_TEXT_MUTED);
@@ -2098,9 +2111,21 @@ static void buildSettings() {
     lv_obj_align(s_ssDimVal, LV_ALIGN_TOP_LEFT, 700, Y + 302);
     lv_label_set_text_fmt(s_ssDimVal, "%d", settingsSaverDimPct());
 
-    lv_obj_t *sn = label(pg, "A touch or a turn of the dial wakes it, even with the screen off.",
-                         &lv_font_montserrat_12, JB_TEXT_DIM);
-    lv_obj_align(sn, LV_ALIGN_TOP_LEFT, 0, Y + 350);
+    lv_obj_t *pl = label(pg, "Keep the screen on while playing", &lv_font_montserrat_16,
+                         JB_TEXT_MUTED);
+    lv_obj_align(pl, LV_ALIGN_TOP_LEFT, 0, Y + 356);
+    lv_obj_t *psw = lv_switch_create(pg);
+    lv_obj_set_size(psw, 72, 38);
+    lv_obj_align(psw, LV_ALIGN_TOP_LEFT, 300, Y + 350);
+    lv_obj_set_style_bg_color(psw, lv_color_hex(JB_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    if (settingsSaverAwakeWhilePlaying()) lv_obj_add_state(psw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(psw, ssAwakePlayingCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    lv_obj_t *sn = label(pg,
+        "A touch or a turn of the dial wakes it, even with the screen off. Keeping the screen on\n"
+        "while playing overrides both timers above.",
+        &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(sn, LV_ALIGN_TOP_LEFT, 0, Y + 400);
   }
 
   s_amzBtn = lv_button_create(pg);
@@ -2174,12 +2199,11 @@ namespace {
 // The drifting group. Everything that could burn in lives inside this container and nothing else
 // moves, so a drift step invalidates one rectangle rather than the whole screen — which matters,
 // because repainting behind it means re-running the background image transform for that area.
-const lv_coord_t SAVER_W = 760, SAVER_H = 440;
-const lv_coord_t SAVER_DRIFT_X = 110, SAVER_DRIFT_Y = 70;
-const lv_coord_t SAVER_TILE = 200;           // sharp cover tile inside the group
+const lv_coord_t SAVER_W = 760, SAVER_H = 220;
+const lv_coord_t SAVER_DRIFT_X = 110, SAVER_DRIFT_Y = 120;
 
 lv_obj_t *s_saver = nullptr, *s_saverBg = nullptr, *s_saverScrim = nullptr, *s_saverGrp = nullptr,
-         *s_saverCard = nullptr, *s_saverCover = nullptr, *s_saverClock = nullptr,
+         *s_saverClock = nullptr,
          *s_saverAmPm = nullptr, *s_saverDate = nullptr, *s_saverTitle = nullptr,
          *s_saverMeta = nullptr;
 
@@ -2192,6 +2216,7 @@ SaverState s_prevLogged = SaverState::Awake;   // separate from s_saverState so 
 // page calls saverConfigChanged() — NVS reads on every 5 ms tick would be absurd.
 uint8_t  s_cfgMode = SAVER_AUTO, s_cfgDim = 40, s_cfgBright = 100;
 uint32_t s_cfgDelayMs = 120000, s_cfgBlankMs = 3600000;
+bool     s_cfgAwakePlaying = true;
 uint32_t s_cfgGen = 0;
 bool     s_cfgLoaded = false;
 
@@ -2215,6 +2240,7 @@ void saverReadCfg() {
   s_cfgBright  = settingsBrightness();
   s_cfgDelayMs = (uint32_t)settingsSaverDelaySec() * 1000u;
   s_cfgBlankMs = (uint32_t)settingsSaverBlankMin() * 60000u;
+  s_cfgAwakePlaying = settingsSaverAwakeWhilePlaying();
 }
 
 // Move the group. Called only when the minute changes, so the reposition and the clock repaint are
@@ -2242,14 +2268,15 @@ void saverApplyLayout(bool cover) {
   };
   show(s_saverBg,    cover);
   show(s_saverScrim, cover);
-  show(s_saverCard,  cover);
   show(s_saverTitle, cover);
   show(s_saverMeta,  cover);
 
-  // Clock-only centres the time/date pair in the group; the cover layout hangs everything off the
-  // tile at the top.
-  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, cover ? 232 : 150);
-  lv_obj_align(s_saverDate,  LV_ALIGN_TOP_MID, 0, cover ? 330 : 248);
+  // Both layouts are the same stack; the cover one simply has two more rows under it, so the pair
+  // starts higher to keep the whole block centred in the group.
+  //   clock:  time(86) + 12 + date(24)                                = 122, centred in 220
+  //   cover:  time(86) + 12 + date(24) + 28 + title(34) + 6 + meta(18) = 208
+  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, cover ? 0 : 49);
+  lv_obj_align(s_saverDate,  LV_ALIGN_TOP_MID, 0, cover ? 98 : 147);
 
   // Force a clock repaint. AM/PM is hung off the TIME's right edge with lv_obj_align_to(), which
   // resolves to an absolute position ONCE — so moving the clock between layouts leaves the
@@ -2262,10 +2289,10 @@ void saverApplyLayout(bool cover) {
   // the mode did not persist, there is no decoded cover to show, or the images are drawing at the
   // wrong scale — and they are indistinguishable from across the room. One line per layout change,
   // which is at most a few an hour.
-  LOG.printf("[saver ] layout=%s mode=%u art=%s %ldx%ld bgScale=%ld tileScale=%ld\n",
+  LOG.printf("[saver ] layout=%s mode=%u art=%s %ldx%ld bgScale=%ld\n",
              cover ? "cover" : "clock", (unsigned)s_cfgMode, s_artDsc ? "yes" : "none",
              (long)(s_artDsc ? s_artDsc->header.w : 0), (long)(s_artDsc ? s_artDsc->header.h : 0),
-             (long)lv_image_get_scale_x(s_saverBg), (long)lv_image_get_scale_x(s_saverCover));
+             (long)lv_image_get_scale_x(s_saverBg));
 }
 
 void saverPaintClock() {
@@ -2319,7 +2346,6 @@ void saverPaintClock() {
 void saverApplyArt() {
   if (!s_saverBg || !s_artDsc || !s_artDsc->header.w || !s_artDsc->header.h) return;
   lv_image_set_src(s_saverBg, s_artDsc);
-  lv_image_set_src(s_saverCover, s_artDsc);
 }
 
 void saverBuild() {
@@ -2354,22 +2380,13 @@ void saverBuild() {
   lv_obj_align(s_saverGrp, LV_ALIGN_CENTER, 0, 0);
   lv_obj_clear_flag(s_saverGrp, LV_OBJ_FLAG_SCROLLABLE);
 
-  s_saverCard = panel(s_saverGrp, SAVER_TILE, SAVER_TILE, JB_SCREEN_ELEV, JB_R_LG);
-  lv_obj_align(s_saverCard, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_border_width(s_saverCard, 1, 0);
-  lv_obj_set_style_border_color(s_saverCard, lv_color_hex(JB_SCREEN_LINE), 0);
-  s_saverCover = lv_image_create(s_saverCard);
-  lv_obj_set_size(s_saverCover, SAVER_TILE, SAVER_TILE);
-  lv_obj_center(s_saverCover);
-  lv_image_set_inner_align(s_saverCover, LV_IMAGE_ALIGN_CONTAIN);  // ...and the fit maths
-
   s_saverClock = label(s_saverGrp, "--:--", &lv_font_clock_120, JB_TEXT);
-  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, 232);
+  lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, 0);
 
   s_saverAmPm = label(s_saverGrp, "", &lv_font_montserrat_28, JB_TEXT_MUTED);
 
   s_saverDate = label(s_saverGrp, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
-  lv_obj_align(s_saverDate, LV_ALIGN_TOP_MID, 0, 330);
+  lv_obj_align(s_saverDate, LV_ALIGN_TOP_MID, 0, 98);
 
   // Both ellipsise on one line, for the reason the Now Playing labels do: a height-less LONG_DOT
   // label grows downwards instead of truncating, and here it would grow off the group.
@@ -2377,13 +2394,13 @@ void saverBuild() {
   lv_label_set_long_mode(s_saverTitle, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_saverTitle, SAVER_W, 34);
   lv_obj_set_style_text_align(s_saverTitle, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(s_saverTitle, LV_ALIGN_TOP_MID, 0, 372);
+  lv_obj_align(s_saverTitle, LV_ALIGN_TOP_MID, 0, 150);
 
   s_saverMeta = label(s_saverGrp, "", &lv_font_montserrat_16, JB_TEXT_DIM);
   lv_label_set_long_mode(s_saverMeta, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_saverMeta, SAVER_W, 18);
   lv_obj_set_style_text_align(s_saverMeta, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(s_saverMeta, LV_ALIGN_TOP_MID, 0, 410);
+  lv_obj_align(s_saverMeta, LV_ALIGN_TOP_MID, 0, 190);
 }
 
 }  // namespace
@@ -2428,8 +2445,19 @@ static void saverTick(const PlayerState &p) {
   if (!s_cfgLoaded || s_cfgGen != webConfigGen()) saverReadCfg();
 
   const uint32_t idle = lv_display_get_inactive_time(nullptr);
-  const bool wantBlank = s_cfgBlankMs && idle >= s_cfgBlankMs;
-  const bool wantShow  = s_cfgMode != SAVER_OFF && s_cfgDelayMs && idle >= s_cfgDelayMs;
+
+  // Playing wins over both timers. On a wall panel the thing worth showing while music plays is
+  // what is playing — hiding the transport controls mid-song to display a clock is the wrong
+  // trade, and it is what this unit was doing. Note this suppresses BLANKING too, not just the
+  // screensaver: "stay on" has to mean the panel is actually lit, or the setting does nothing
+  // visible past the blank timer. The cost (music all night = a lit panel all night) is exactly
+  // why this is a switch — see settings.h.
+  const bool playing   = (p.transport == TransportState::Playing);
+  const bool holdAwake = playing && s_cfgAwakePlaying;
+
+  const bool wantBlank = !holdAwake && s_cfgBlankMs && idle >= s_cfgBlankMs;
+  const bool wantShow  = !holdAwake && s_cfgMode != SAVER_OFF && s_cfgDelayMs &&
+                         idle >= s_cfgDelayMs;
 
   const SaverState next = wantBlank ? SaverState::Blank
                         : wantShow  ? SaverState::Showing
@@ -2473,13 +2501,11 @@ static void saverTick(const PlayerState &p) {
 
   if (next != SaverState::Showing) return;
 
-  // AUTO falls back to the clock whenever there is nothing worth showing a cover for — paused
-  // counts, because a paused track's art sitting on the wall all night is exactly the static image
-  // this is meant to avoid.
-  const bool playing = (p.transport == TransportState::Playing);
+  // Cover needs a decoded cover; without one both modes fall back to the clock rather than framing
+  // an empty tile. AUTO and COVER now agree whenever art exists — see the SaverMode comment in
+  // settings.h for why AUTO stopped keying off "playing" (that branch became unreachable).
   const bool canCover = (s_artDsc != nullptr);
-  const bool cover = canCover && (s_cfgMode == SAVER_COVER ||
-                                  (s_cfgMode == SAVER_AUTO && playing));
+  const bool cover = canCover && (s_cfgMode == SAVER_COVER || s_cfgMode == SAVER_AUTO);
   if (cover && s_saverLayout != 1) saverApplyArt();
   saverApplyLayout(cover);
 
@@ -2672,6 +2698,43 @@ void uiTick() {
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));
+
+  // The rest of the group, under the room name. Grouping is a property of the TOPOLOGY, not of the
+  // player state, so it comes from the SSDP snapshot rather than g_player: rooms sharing the active
+  // room's coordinatorUuid are in its group.
+  //
+  // Recomputed only when the topology generation or the active room changes — zonesSnapshot()
+  // copies a vector of structs and ssdp.h says as much ("call it when rebuilding, not per frame").
+  // g_zonesGen is the same signal the Rooms page rebuilds on, so a join/leave made anywhere shows
+  // up here too. Deliberately NOT sourced from roomstatus:: — that poller only runs while the Rooms
+  // page asks for it (keepAlive), so on Now Playing its table is stale or empty.
+  {
+    static uint32_t shownGen  = UINT32_MAX;
+    static String   shownZone = "\x01";
+    if (shownGen != g_zonesGen || shownZone != p.zoneName) {
+      shownGen  = g_zonesGen;
+      shownZone = p.zoneName;
+
+      std::vector<sonos::Zone> zs;
+      sonos::zonesSnapshot(zs);
+      String coord;
+      for (const sonos::Zone &z : zs) {
+        if (z.name == p.zoneName) { coord = z.coordinatorUuid; break; }
+      }
+      String others;
+      if (coord.length()) {
+        for (const sonos::Zone &z : zs) {
+          if (z.name == p.zoneName || z.coordinatorUuid != coord) continue;
+          if (others.length()) others += JB_SEP;
+          others += z.name;
+        }
+      }
+      // Named rather than just listed: "Kitchen • Family Room" under "Dining Room" could be read
+      // as a picker. Empty when ungrouped, so a solo room shows nothing at all.
+      setTextIfChanged(s_group, s_shown.group,
+                       others.length() ? String("Grouped with ") + others : String(""));
+    }
+  }
   const String wantTitle = p.title.length() ? p.title : String("Nothing playing");
   if (s_shown.title != wantTitle) {
     setTextIfChanged(s_title, s_shown.title, wantTitle);
@@ -2959,7 +3022,7 @@ void uiTick() {
       // this log would stall or crash the UI task in exactly the fault it exists to report.
       const uint32_t ip = g_linkIp;
       LOG.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
-                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu\n",
+                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu art=%s\n",
                     (unsigned long)(millis() / 1000),
                     (unsigned long)(ESP.getFreeHeap() / 1024),
                     (unsigned long)(ESP.getMinFreeHeap() / 1024),
@@ -2968,7 +3031,13 @@ void uiTick() {
                     (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
                     (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
                     (unsigned)g_linkZones, (unsigned)(mon.free_size / 1024),
-                    logMirrorClients(), (unsigned long)logMirrorDropped());
+                    logMirrorClients(), (unsigned long)logMirrorDropped(),
+                    // Does the UI actually HOLD a decoded cover? Distinct from the artFetch /
+                    // artFail counters, which describe the fetch task: those can look perfectly
+                    // healthy while albumArtTake() has never handed anything over, and then the
+                    // album-art screensaver silently shows a clock with no way to tell why from
+                    // off-device. This is the answer to that exact question.
+                    s_artDsc ? "yes" : "none");
     }
   }
 

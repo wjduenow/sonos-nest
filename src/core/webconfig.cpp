@@ -125,6 +125,7 @@ String webConfigJson() {
   doc["saver_delay_sec"] = settingsSaverDelaySec();
   doc["saver_dim"]       = settingsSaverDimPct();
   doc["saver_blank_min"] = settingsSaverBlankMin();
+  doc["saver_awake_playing"] = settingsSaverAwakeWhilePlaying();
   doc["radio_refresh_hour"] = settingsRadioRefreshHour();
   doc["radio_auto_refresh"] = settingsRadioAutoRefresh();
   doc["fav_refresh_hour"]   = settingsFavRefreshHour();
@@ -212,6 +213,13 @@ String webConfigJson() {
       n["artFetch"]  = ad.fetches;
       n["artFail"]   = ad.failures;
       n["artClear"]  = ad.clears;
+      // Decode failures were counted into a variable nothing ever read, and the two decode error
+      // paths did not even increment it — so "fetched 4, failed 0, still no cover on screen" was
+      // unexplainable from outside the device. `fetches` counts ATTEMPTS and `failures` only the
+      // pre-decode ones (HTTP, short read, busy decoder), which is why the pair can look healthy
+      // while every image is being thrown away. TJpg is baseline-only, so a progressive JPEG from
+      // one music service lands here and nowhere else.
+      n["artDecodeFail"] = ad.decodeFails;
 #endif
       // The TAIL of the URL, not a bool. "art disappears and comes back" can be artUri toggling
       // between two different URLs for the same track, or going empty — a boolean cannot tell
@@ -457,6 +465,12 @@ bool webConfigApply(const String &field, const String &value, String &err) {
     if (v > 65535) { err = field + " is too large"; return false; }
     if (field == "saver_delay_sec") settingsSetSaverDelaySec((uint16_t)v);
     else                            settingsSetSaverBlankMin((uint16_t)v);
+    s_gen++;
+    return true;
+  }
+
+  if (field == "saver_awake_playing") {
+    settingsSetSaverAwakeWhilePlaying(value == "1" || value == "true" || value == "on");
     s_gen++;
     return true;
   }

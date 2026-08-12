@@ -142,6 +142,7 @@ bool albumArtFetch(const String &url) {
   uint16_t w = 0, h = 0;
   if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) {
     jpegUnlock();
+    ++s_nDecodeFail;   // counted, not just logged — see albumArtDiag()
     LOG.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
     return false;
   }
@@ -156,6 +157,7 @@ bool albumArtFetch(const String &url) {
   JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
   jpegUnlock();
   if (jr != JDR_OK) {
+    ++s_nDecodeFail;
     LOG.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
                   (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
     return false;
