@@ -106,6 +106,21 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > PSRAM (`heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`) — watch `heapLargest`, not just `heapFree`,
   > because on the nest it was *fragmentation* that starved LWIP and surfaced as Sonos
   > "connection refused". The 512 KB LVGL pool peaks at only ~48 KB (`lvMemMax`) so far.
+  > ⚠️ **Album art has TWO decoders now, and the order is the design (issue #16).** `TJpg_Decoder`
+  > is baseline-only, and about **half of Amazon Prime Station (`sid=201`) covers are progressive**
+  > — measured across 108 art URLs off this household's speakers, where all 94 Amazon Music
+  > (`sid=284`), Spotify and TuneIn covers are baseline. Those covers were being dropped in silence.
+  > `core/ui/jpeg_decode.{h,cpp}` (vendored libjpeg-turbo, `lib/jpegdec`) decodes them, but **only
+  > after TJpgDec has refused the file** — TJpgDec streams MCU blocks in a few KB, while progressive
+  > decode holds the entire coefficient array before emitting a pixel (**~3 bytes per SOURCE pixel**;
+  > 762 KB peak / a 480 KB single block for a 488 px cover, all of it PSRAM via the one patch in
+  > `jmemnobs.c`). Measured on hardware: **45 ms** for a 300 px cover, and `artProgressive` in
+  > `/api/config` → `.health.nowPlaying` counts them. Three traps: **`scale_denom` buys time, never
+  > memory** (1/2 scaling moved that peak by 17 KB), so the guard is on source dimensions and
+  > `ART_MAX_PX` bounds nothing here; **`getaa` has no rendition knob** (`s=`, `&v=`, `&size=` all
+  > return byte-identical data, and it 404s an arbitrary URL) so there is no cheap escape; and **the
+  > P4's hardware JPEG decoder is baseline-only too**, as is `esp_new_jpeg` — same dead end as the
+  > encode-only H.264 block in plans/10.
   > ⚠️ **`ART_MAX_PX` is a ceiling the decoder UNDERSHOOTS, not a target.** TJpgDec scales only by
   > powers of two, so decoded size is source/(1,2,4,8) — the largest that fits under the cap. Sonos
   > serves 640 px covers, so a cap of **280 yielded 160 px art**: a cap 100 px larger than the tile
@@ -332,8 +347,10 @@ Key modules (all under `src/core/` — device-agnostic):
   sleep/wake pick when its file is deleted, so a pick can't dangle.
 - `core/ui/` — **the only LVGL/TJpg-coupled part of core**, kept in its own subtree so headless
   envs exclude it wholesale (`-<core/ui/>`) instead of maintaining a per-file list. Members:
-  `album_art.{h,cpp}` (art fetch + TJpg decode → LVGL image, form-factor-agnostic) and
-  `art_cache.{h,cpp}` (the jukebox tile cache). Callers in device-agnostic core (`app.cpp`,
+  `album_art.{h,cpp}` (art fetch + TJpg decode → LVGL image, form-factor-agnostic),
+  `art_cache.{h,cpp}` (the jukebox tile cache) and `jpeg_decode.{h,cpp}` (the progressive-JPEG
+  fallback both use, over vendored libjpeg-turbo in `lib/jpegdec` — see `lib/jpegdec/VENDORING.md`).
+  Callers in device-agnostic core (`app.cpp`,
   `webconfig.cpp`) guard include *and* call sites with `#ifndef HEADLESS`. See its README.
 - `core/net/` — `wifi`, `ota` (OTA hostname = `DEVICE_HOSTNAME` macro, set per env), `logmirror`
   (see below).

@@ -220,6 +220,10 @@ String webConfigJson() {
       // while every image is being thrown away. TJpg is baseline-only, so a progressive JPEG from
       // one music service lands here and nowhere else.
       n["artDecodeFail"] = ad.decodeFails;
+      // Covers TJpg refused that the libjpeg fallback rescued (issue #16). Read it WITH the line
+      // above: decodeFails now means "no cover at all", and this means "cover, via the slow path".
+      // Both zero on a unit playing Prime Stations means the fallback never ran, not that all is well.
+      n["artProgressive"] = ad.progressives;
 #endif
       // The TAIL of the URL, not a bool. "art disappears and comes back" can be artUri toggling
       // between two different URLs for the same track, or going empty — a boolean cannot tell

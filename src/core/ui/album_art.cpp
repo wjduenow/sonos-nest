@@ -1,5 +1,6 @@
 #include "album_art.h"
 #include "core/player_state.h"
+#include "core/ui/jpeg_decode.h"   // progressive-JPEG fallback (lib/jpegdec); TJpgDec cannot parse those
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
@@ -105,9 +106,21 @@ bool albumArtInit() {
 
 // Pipeline counters — see AlbumArtDiag in album_art.h. Plain uint32 stores written by artTask and
 // read by the HTTP task; a torn read skews one diagnostic number and nothing else.
-static uint32_t s_nFetch = 0, s_nFail = 0, s_nClear = 0, s_nDecodeFail = 0;
+static uint32_t s_nFetch = 0, s_nFail = 0, s_nClear = 0, s_nDecodeFail = 0, s_nProgressive = 0;
 void albumArtDiag(AlbumArtDiag &out) {
-  out.fetches = s_nFetch; out.failures = s_nFail; out.clears = s_nClear; out.decodeFails = s_nDecodeFail;
+  out.fetches = s_nFetch; out.failures = s_nFail; out.clears = s_nClear;
+  out.decodeFails = s_nDecodeFail; out.progressives = s_nProgressive;
+}
+
+// Second chance for anything TJpgDec would not take — in practice a progressive JPEG, which is
+// about half of what Amazon Prime Stations serve (issue #16). Decodes into the same back buffer
+// and reports the size it landed on, so the caller publishes it exactly as it does a TJpg decode.
+// Called with the jpeg lock HELD.
+static bool decodeFallback(size_t got) {
+  if (!jpegDecodeRgb565(s_jpeg, got, s_buf[s_front ^ 1], 0, ART_MAX, ART_MAX, &s_decW, &s_decH))
+    return false;
+  ++s_nProgressive;
+  return true;
 }
 
 bool albumArtFetch(const String &url) {
@@ -138,29 +151,39 @@ bool albumArtFetch(const String &url) {
   }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
+  //
+  // TJpgDec is tried first and handles almost everything: it streams MCU blocks with a few KB of
+  // state, where the libjpeg fallback below holds the whole coefficient array (~760 KB for a
+  // 488 px cover). So the order matters — the fallback is for what TJpgDec REFUSES, not a
+  // replacement for it. It refuses progressive JPEGs at the header, which is the bug in issue #16.
   if (!jpegLock()) { LOG.println("[art] decoder busy"); ++s_nFail; return false; }
   uint16_t w = 0, h = 0;
   if (TJpgDec.getJpgSize(&w, &h, s_jpeg, got) != JDR_OK || !w || !h) {
+    LOG.printf("[art] getJpgSize failed (%u bytes)%s\n", (unsigned)got,
+               jpegIsProgressive(s_jpeg, got) ? " — progressive, using libjpeg" : "");
+    const bool ok = decodeFallback(got);
     jpegUnlock();
-    ++s_nDecodeFail;   // counted, not just logged — see albumArtDiag()
-    LOG.printf("[art] getJpgSize failed (%u bytes)\n", (unsigned)got);
-    return false;
-  }
-  uint8_t scale = 1;
-  while ((max(w, h) / scale) > ART_MAX && scale < 8) scale <<= 1;
-  TJpgDec.setJpgScale(scale);
-  s_decW = min((int)(w / scale), ART_MAX);
-  s_decH = min((int)(h / scale), ART_MAX);
+    if (!ok) { ++s_nDecodeFail; return false; }   // counted, not just logged — see albumArtDiag()
+  } else {
+    uint8_t scale = 1;
+    while ((max(w, h) / scale) > ART_MAX && scale < 8) scale <<= 1;
+    TJpgDec.setJpgScale(scale);
+    s_decW = min((int)(w / scale), ART_MAX);
+    s_decH = min((int)(h / scale), ART_MAX);
 
-  memset(s_buf[s_front ^ 1], 0, ART_MAX * ART_MAX * 2);
-  TJpgDec.setCallback(tjpgCb);      // re-assert: another decoder may have pointed it elsewhere
-  JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
-  jpegUnlock();
-  if (jr != JDR_OK) {
-    ++s_nDecodeFail;
-    LOG.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
-                  (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
-    return false;
+    memset(s_buf[s_front ^ 1], 0, ART_MAX * ART_MAX * 2);
+    TJpgDec.setCallback(tjpgCb);      // re-assert: another decoder may have pointed it elsewhere
+    JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, got);
+    // A header TJpgDec accepted can still fail mid-decode, so it gets the same second chance —
+    // there is no reason to reserve the fallback for one of the two failure points.
+    const bool ok = (jr == JDR_OK) || decodeFallback(got);
+    jpegUnlock();
+    if (!ok) {
+      ++s_nDecodeFail;
+      LOG.printf("[art] drawJpg failed jr=%d  hdr=%02X%02X  %ux%u  %u bytes\n",
+                    (int)jr, s_jpeg[0], s_jpeg[1], w, h, (unsigned)got);
+      return false;
+    }
   }
 
   // Publish: swap buffers and update the descriptor under the lock.

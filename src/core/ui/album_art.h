@@ -24,5 +24,9 @@ bool albumArtTake(const lv_image_dsc_t **dscOut);
 // the cover ONLY when albumArtTake() hands back nullptr, which only happens after albumArtClear().
 // If the artwork is visibly flickering, either this is climbing (something is clearing it) or it
 // is not (and the churn is fetch/decode, not clearing).
-struct AlbumArtDiag { uint32_t fetches, failures, clears, decodeFails; };
+//
+// `progressives` counts covers TJpgDec refused that the libjpeg fallback then decoded (issue #16).
+// It is the one number that says the fallback is earning its ~78 KB of flash: if it stays 0 on a
+// unit that plays Amazon Prime Stations, either the content changed or the fallback is not wired in.
+struct AlbumArtDiag { uint32_t fetches, failures, clears, decodeFails, progressives; };
 void albumArtDiag(AlbumArtDiag &out);
