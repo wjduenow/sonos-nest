@@ -99,6 +99,33 @@ under namespaced tags. Calling `refreshAuthToken` as an operation returns **404 
 parsing the fault is not the convenient path, it is the only one. Handled inside `request()` so no
 caller has to think about it.
 
+### A fifth, found later: this feature's own artwork is half PROGRESSIVE JPEG
+
+Now-playing covers for `sid=201` come off the speaker's `getaa` proxy, and roughly half of them are
+progressive — which `TJpg_Decoder` cannot parse at all. Radio played with no cover and the
+screensaver fell back to its clock ([issue #16](https://github.com/wjduenow/sonos-nest/issues/16)).
+Fixed by a **fallback decoder**, vendored libjpeg-turbo in `lib/jpegdec`, called only when TJpgDec
+refuses the file (`core/ui/jpeg_decode.{h,cpp}`). Measured on the wall unit: a 300×298 progressive
+cover decodes in **45 ms**, and `.health.nowPlaying.artProgressive` counts how often it happens.
+
+Four things about it are worth not rediscovering:
+
+- **The blast radius is service-specific, and it was measurable without touching the device.**
+  Of 108 art URLs pulled from every zone's queue and favourites: 94/94 Amazon Music (`sid=284`)
+  baseline, Spotify baseline, TuneIn baseline, and `sid=201` **half progressive**. Every progressive
+  sample is an odd unresized size (300×298, 488×488, 500×497) while Amazon Music's are all resized
+  544×544 — the resizer normalises, the passthrough does not. So this is a Prime-content problem,
+  which is to say a Radio-feature problem.
+- **`getaa` has no rendition control.** `s=0/2/3/4`, `&v=`, `&size=` all return byte-identical
+  bytes; it will not proxy an arbitrary URL (404) and leaks nothing about the Amazon origin in its
+  headers. The cheap fix does not exist — don't go looking for it again.
+- **The P4's hardware JPEG decoder would not have helped**: it is baseline-only, as is Espressif's
+  `esp_new_jpeg`. Same shape of dead end as the encode-only H.264 block in plans/10 §5.
+- **Progressive decode is bounded by the SOURCE size, not the output.** It needs the whole
+  coefficient array before the first pixel (~3 bytes per source pixel), so `ART_MAX_PX` does not
+  bound it and `scale_denom` does not either — 1/2 scaling moved a measured peak from 762 KB to
+  745 KB. The guard is on source dimensions (`JPEG_PROG_MAX_PX`), and the allocations go to PSRAM.
+
 ## Measured on hardware
 
 | | |

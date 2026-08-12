@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
+#include "jpeg_decode.h" // progressive-JPEG fallback for tiles TJpgDec refuses
 #include "core/amazon.h"
 #include "core/board.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
@@ -247,14 +248,13 @@ static void worker(void *) {
 
     if (!jpegLock()) continue;            // shared with album art — TRANSIENT, so no blacklist
     uint16_t w = 0, h = 0;
-    if (TJpgDec.getJpgSize(&w, &h, s_jpeg, n) != JDR_OK || !w || !h) {
-      LOG.printf("[artc  ] unusable image for %s (%u B) — not retrying\n", r.key, (unsigned)n);
-      markBad(r.key);                     // deterministic: these bytes will never parse
-      jpegUnlock();
-      continue;
-    }
+    // A tile whose header TJpgDec will not read is not necessarily a broken tile — it may be
+    // progressive (issue #16). Amazon's resizer has produced baseline for every `_SL128_` sampled
+    // so far, so this is expected to be rare here, but the whole point of thumbUrl() is that
+    // UNKNOWN hosts fall through unresized, and those serve whatever they like.
+    const bool tjpgOk = (TJpgDec.getJpgSize(&w, &h, s_jpeg, n) == JDR_OK) && w && h;
     uint8_t scale = 1;
-    while ((max(w, h) / scale) > s_px && scale < 8) scale <<= 1;
+    if (tjpgOk) while ((max(w, h) / scale) > s_px && scale < 8) scale <<= 1;
 
     int slot;
     if (xSemaphoreTake(s_lock, portMAX_DELAY) != pdTRUE) { jpegUnlock(); continue; }
@@ -265,18 +265,33 @@ static void worker(void *) {
 
     s_target = s_slots[slot].pix;
     memset(s_target, 0, (size_t)s_px * s_px * 2);
-    TJpgDec.setJpgScale(scale);
-    TJpgDec.setSwapBytes(false);
-    TJpgDec.setCallback(tjpgCb);
-    const JRESULT jr = TJpgDec.drawJpg(0, 0, s_jpeg, n);
+    JRESULT jr = JDR_OK;
+    bool ok;
+    if (tjpgOk) {
+      TJpgDec.setJpgScale(scale);
+      TJpgDec.setSwapBytes(false);
+      TJpgDec.setCallback(tjpgCb);
+      jr = TJpgDec.drawJpg(0, 0, s_jpeg, n);
+      ok = (jr == JDR_OK);
+    } else {
+      // Tiles are square slots that the image is drawn into at 0,0, so the fallback writes at the
+      // slot stride rather than packed — the memset above leaves the remainder black, exactly as
+      // the TJpg path does for a non-square image.
+      int dw = 0, dh = 0;
+      ok = jpegDecodeRgb565(s_jpeg, n, s_target, s_px, s_px, s_px, &dw, &dh);
+    }
     s_target = nullptr;
     jpegUnlock();
 
-    if (jr != JDR_OK) {
-      LOG.printf("[artc  ] decode failed jr=%d for %s (%u B) — not retrying\n",
-                 (int)jr, r.key, (unsigned)n);
-      markBad(r.key);   // same bytes, same result — retrying only burned heap and bandwidth
-      continue;         // slot stays not-ready and will be reused
+    if (!ok) {
+      LOG.printf("[artc  ] decode failed jr=%d for %s (%u B)%s — not retrying\n", (int)jr, r.key,
+                 (unsigned)n, jpegIsProgressive(s_jpeg, n) ? " [progressive]" : "");
+      // Blacklisted only HERE, after the libjpeg fallback has also refused the bytes -- at that
+      // point the result really is deterministic. Doing it at the TJpgDec header failure instead
+      // (which is what this did before the fallback existed) would condemn every progressive tile
+      // the fallback is here to rescue.
+      markBad(r.key);
+      continue;                            // slot stays not-ready and will be reused
     }
     if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) {
       s_slots[slot].ready = true;

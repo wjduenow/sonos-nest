@@ -44,6 +44,7 @@ includes these as `core/ui/album_art.h`.
 |---|---|
 | `album_art.{h,cpp}` | `<lvgl.h>`, `<TJpg_Decoder.h>` — fetch + decode the now-playing cover, expose it as an LVGL image. Also owns the `jpegLock()`/`jpegUnlock()` mutex around the TJpgDec singleton. |
 | `art_cache.{h,cpp}` | `<lvgl.h>`, `<TJpg_Decoder.h>` — the jukebox station/favourite tile cache (bounded PSRAM slot ring + SD disk cache). Takes `jpegLock()` from `album_art.h`. |
+| `jpeg_decode.{h,cpp}` | `lib/jpegdec` (vendored libjpeg-turbo) — the **progressive**-JPEG fallback for the two above, which TJpgDec cannot parse (issue #16). No LVGL, but it lives here anyway: it exists only for the display path, and a headless unit has no reason to carry 68 KB of decoder. |
 
 ## Backstop
 
