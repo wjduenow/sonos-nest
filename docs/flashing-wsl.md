@@ -93,13 +93,13 @@ cd /home/wesd/Projects/sonos-nest
 
 # First build pulls the ESP32 platform + toolchain + libs (~hundreds of MB, needs internet).
 # This compiles the Phase-0 self-test (the `nest-bringup` env).
-pio run -e nest-bringup
+tools/pio run -e nest-bringup
 ```
 
 If it compiles clean, flash and open the serial monitor:
 
 ```bash
-pio run -e nest-bringup -t upload --upload-port /dev/ttyACM0
+tools/pio run -e nest-bringup -t upload --upload-port /dev/ttyACM0
 pio device monitor -e nest-bringup -p /dev/ttyACM0 -b 115200
 ```
 
@@ -126,7 +126,7 @@ The serial monitor prints the self-test, and the screen shows a test pattern. Ve
 Once that all checks out, flash the real app to confirm the flicker-free-redraw gate:
 
 ```bash
-pio run -e nest -t upload --upload-port /dev/ttyACM0
+tools/pio run -e nest -t upload --upload-port /dev/ttyACM0
 ```
 
 You should get an animated spinner + "sonos-nest" that twisting/pressing updates live.
