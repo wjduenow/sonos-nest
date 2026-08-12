@@ -105,10 +105,16 @@ and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name). Adding a new form factor 
 Arduino (pinned v1.3.1 — has both ST7701 RGB and ILI9341 SPI drivers), ArduinoJson,
 TJpg_Decoder, ESP32Encoder.
 
+Build with **`tools/pio`** — a thin wrapper taking the same arguments as `pio`, which gives each
+chip its own PlatformIO package tree. The four units span two different SoCs whose toolchains
+otherwise evict each other from PlatformIO's one global package directory; see
+[`docs/dev-setup.md`](docs/dev-setup.md) § 3.
+
 ```bash
-pio run -e nest                       # build the nest app (default env)
-pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
-pio run -e sleep-machine              # build the sleep-machine app
+tools/pio run -e nest                  # build the nest app (default env)
+tools/pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
+tools/pio run -e sleep-machine         # build the sleep-machine app
+tools/pio run -e sonos-jukebox         # the ESP32-P4 wall panel
 ```
 
 Env variants: `nest-bringup` (Phase-0 hardware self-test), `nest-phase1` (interactive SOAP
@@ -119,7 +125,10 @@ On **WSL2 (Windows)**, USB needs bridging first — see
 
 ### First-time setup
 
-1. `pio run -e nest` once to fetch libraries.
+Full walkthrough — prerequisites, disk budget, the package-tree split, CI — is in
+**[`docs/dev-setup.md`](docs/dev-setup.md)**. The short version:
+
+1. `tools/pio run -e nest` once to fetch libraries.
 2. Copy `include/secrets.example.h` → `include/secrets.h`. WiFi creds (`WIFI_SSID` / `WIFI_PASS`)
    are **optional** — set them to bake WiFi in at flash time, or leave them blank and provision
    over the air on first boot (below). Set `OTA_PASSWORD` (required for wireless flashing);

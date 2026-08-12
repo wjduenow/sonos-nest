@@ -207,12 +207,15 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 
 ## Build / flash
 
-`pio` lives at `~/.platformio/penv/bin` — prepend it to PATH first:
+**Build with `tools/pio`, not `pio`** — same arguments, same subcommands; it just selects the right
+PlatformIO package tree first (§ env switching below, and `docs/dev-setup.md`). `pio` itself lives
+at `~/.platformio/penv/bin`; put it on PATH for the non-build subcommands.
 ```bash
 export PATH="$PATH:$HOME/.platformio/penv/bin"
-pio run -e nest            # build the nest app (default env)
-pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
-pio run -e sleep-machine   # build the sleep-machine app
+tools/pio run -e nest            # build the nest app (default env)
+tools/pio run -e nest -t upload --upload-port /dev/ttyACMx   # USB flash
+tools/pio run -e sleep-machine   # build the sleep-machine app
+tools/pio --print-core-dir -e sonos-jukebox   # which tree an env builds in
 ```
 Envs: **`nest`** / **`sleep-machine`** (the apps), **`nest-bringup`** (`-DPHASE0_BRINGUP`
 hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
@@ -222,18 +225,38 @@ hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
 mic → TFLM; see Phase-1 note below). Each env selects one board + one unit + the
 core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
 
-> ⚠️ **Which env you pass to `-e` rewrites shared global state — PlatformIO packages live in
-> `~/.platformio`, NOT in the project, and are shared across every checkout and worktree.** The
-> jukebox envs are ESP32-P4 and pull the pioarduino framework, which installs over the *same*
-> `packages/framework-arduinoespressif32` directory the S3 envs use. So `pio run -e sonos-jukebox`
-> leaves Arduino 3.3.11 there, and the next `pio run -e nest` fails with **`Implicit dependency
-> 'FreeRTOS.h' not found`** or **`esp_timer.h: No such file`** — errors that name the framework,
-> never the env you actually built. It swaps back the same way. **The fix is
-> `pio pkg install -e <env>` for the env you want**, then rebuild.
-> Two consequences: **two Claude sessions must not build different silicon at the same time** (the
-> loser sees a build break with no cause anywhere in its own diff), and a green `nest` build proves
-> nothing about a jukebox build you ran an hour ago. CI is immune — every matrix job is a fresh
-> runner, and the PlatformIO cache is keyed per env precisely so the two platforms never share one.
+> ⚠️ **Env switching across silicon is solved by `tools/pio` — use it and this whole class of
+> problem goes away. Bare `pio` still builds correctly, it just costs you a reinstall each way.**
+> PlatformIO keeps platforms/frameworks/toolchains in ONE directory per machine
+> (`PLATFORMIO_CORE_DIR`, default `~/.platformio`), shared across every checkout and worktree — and
+> our two platforms require **twelve package names in common** (`framework-arduinoespressif32`
+> 2.0.17 vs 3.3.11, `tool-esptoolpy`, `toolchain-riscv32-esp`, …) at incompatible versions. Only one
+> version of each can occupy the tree, so crossing silicon evicts the other.
+>
+> `tools/pio` gives each platform its own tree — `~/.platformio` for the S3 envs (the stock default,
+> so nothing had to migrate), `~/.platformio-p4` for `sonos-jukebox` and `jukebox-*`. It reads the
+> mapping out of `platformio.ini` by resolving the env's `extends` chain, so **a new `jukebox-*` env
+> needs no change to the wrapper**; `tools/pio --print-core-dir -e <env>` shows where one lands, and
+> asking for two silicons in one command is refused rather than silently half-wrong. Full rationale,
+> measurements and disk layout: **`docs/dev-setup.md`**.
+>
+> Two traps that survive the fix, because they are PlatformIO's behaviour and not ours:
+> - **`pio pkg list` MUTATES the package tree.** Running it here (once per env, to inspect
+>   resolution) pruned five packages, including `tool-esptoolpy` and `toolchain-riscv32-esp` that
+>   *both* platforms need — so the next build reinstalled them. It reads like a query and is not one.
+> - **A directory listing does not predict churn.** Both variants of a clashing package are often
+>   present at once — a registry-sourced `name` beside a URL-sourced `name@src-<md5>` — and
+>   PlatformIO evicts one anyway. Only running the build tells you. This one cost a wrong
+>   conclusion once: the `@src` split is real and is still not sufficient.
+>
+> Measured 2026-08-11, PlatformIO 6.1.19. **One shared tree**, `nest` → `sonos-jukebox` → `nest`:
+> 2 / 3 / 3 packages reinstalled, the last including the S3 Arduino core, 29.7 / 161.6 / 24.0 s.
+> All three *succeeded* — the repair is automatic, so bare `pio` is a delay and a network
+> dependency, not breakage (offline, it is breakage; `pio pkg install -e <env>` is the manual
+> repair). **Split trees**, `sonos-jukebox` → `nest` → `sonos-jukebox` → `nest`: 20 packages and
+> 282 s to populate `~/.platformio-p4` once, then **0 / 0 / 0 packages** and 9.9 / 11.8 / 8.7 s.
+> Costs 8.5 GB. CI is immune either way — fresh runner per matrix job, cache keyed per env — but it
+> builds through `tools/pio` regardless so the wrapper is exercised on every PR.
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.

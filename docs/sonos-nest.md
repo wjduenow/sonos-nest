@@ -151,8 +151,8 @@ power-on any time to re-open it. Optional but recommended:
 
 ```bash
 export PATH="$PATH:$HOME/.platformio/penv/bin"
-pio run -e nest
-pio run -e nest -t upload --upload-port /dev/ttyACM0
+tools/pio run -e nest
+tools/pio run -e nest -t upload --upload-port /dev/ttyACM0
 ```
 
 The **first** USB flash needs download mode: hold **BOOT**, tap **RST**, release **BOOT**.
@@ -163,7 +163,7 @@ reset, and the port number bumps — see [`flashing-wsl.md`](flashing-wsl.md) fo
 story. Resolve the port dynamically rather than hardcoding it:
 
 ```bash
-pio run -e nest -t upload --upload-port "$(ls /dev/ttyACM* | head -1)"
+tools/pio run -e nest -t upload --upload-port "$(ls /dev/ttyACM* | head -1)"
 ```
 
 ### 3. First boot
@@ -184,7 +184,7 @@ Once it's on WiFi with an `OTA_PASSWORD` flashed, you never need the cable again
 Get the device's IP from **Settings** on the device, then:
 
 ```bash
-pio run -e nest-ota -t upload --upload-port <device-ip>
+tools/pio run -e nest-ota -t upload --upload-port <device-ip>
 ```
 
 The device shows an update overlay with a progress bar and reboots itself when done. A failed

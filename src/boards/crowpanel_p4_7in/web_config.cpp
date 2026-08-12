@@ -132,6 +132,26 @@ button.ghost{background:var(--elev2);color:var(--text)}
   <input type="number" id="bright" min="10" max="100">
 </section>
 
+<section>
+  <h2>Software update</h2>
+  <div class="sw"><label for="otaauto" style="margin:0">Install updates automatically</label>
+    <input type="checkbox" id="otaauto"></div>
+  <label for="updmode">Update source</label>
+  <select id="updmode">
+    <option value="auto">Automatic</option>
+    <option value="off">Off</option>
+    <option value="custom">Custom URL&hellip;</option>
+  </select>
+  <div class="row" id="updurlrow" hidden style="margin-top:10px">
+    <input type="text" id="updurl" autocapitalize="off" autocorrect="off" spellcheck="false"
+           placeholder="https://&hellip;/manifest.json">
+    <button class="ghost" id="usave" type="button" style="flex:0 0 auto">Save</button></div>
+  <p style="color:var(--dim);font-size:13px;margin:10px 0 0" id="otahint"></p>
+  <div class="row" id="updrow" hidden style="margin-top:12px">
+    <span id="updinfo" style="font-size:14px"></span>
+    <button id="updnow" type="button" style="flex:0 0 auto">Update now</button></div>
+</section>
+
 <div id="msg"></div>
 <script>
 const $=s=>document.querySelector(s), msg=t=>$('#msg').textContent=t;
@@ -172,6 +192,43 @@ async function load(){
   $('#ssmode').value=String(c.saver_mode??3);
   $('#ssplay').checked=c.saver_awake_playing!==false;
   $('#ssdim').value=c.saver_dim??40; $('#ssdimv').textContent=($('#ssdim').value)+'%';
+  drawOta(c);
+}
+// Software update (core/net/updater). c.ota = {auto, updateUrl, source, sourceKind, running,
+// available}. updateUrl is the RAW stored tri-state, which is what the mode select shows:
+// "" = automatic, "off" = disabled, anything else = a custom manifest URL.
+let otaAvail='';
+function drawOta(c){
+  const o=c.ota||{};
+  $('#otaauto').checked=!!o.auto;
+  const raw=o.updateUrl||'';
+  const mode = raw==='off' ? 'off' : (raw==='' ? 'auto' : 'custom');
+  $('#updmode').value=mode;
+  $('#updurlrow').hidden=(mode!=='custom');
+  if(document.activeElement!==$('#updurl')) $('#updurl').value=(mode==='custom'?raw:'');
+  otaAvail=o.available||'';
+  // "Update now" appears only when something is waiting AND auto is off — an auto device applies it
+  // at its next boot by itself, so offering the button there just invites a needless reboot.
+  $('#updrow').hidden=!(otaAvail&&!o.auto);
+  if(otaAvail) $('#updinfo').textContent='Ready: '+otaAvail;
+  const src = o.sourceKind==='portal' ? 'Portal'
+    : o.sourceKind==='github' ? 'GitHub (latest release)'
+    : o.sourceKind==='custom' ? (o.source||'custom') : 'Off';
+  $('#otahint').innerHTML='Running <code>'+(o.running||'?')+'</code> &middot; source: <b>'+src+'</b>. '+(
+    o.sourceKind==='off' ? 'Update checks are disabled.'
+    : otaAvail ? (o.auto ? 'Will auto-update to '+otaAvail+' on next reboot.'
+                         : 'Version '+otaAvail+' is ready to install.')
+    : 'Up to date.');
+}
+// Changing the source only queues a re-check (updaterForceCheck runs on netTask), so availability
+// lands a second or two later — re-poll a few times so the hint settles without a manual reload.
+// Redraws ONLY the update widgets: a full load() would overwrite the device-name field under
+// someone still typing in it.
+function otaRecheck(){
+  let n=0;
+  const pull=async()=>drawOta(await (await fetch('/api/config')).json());
+  pull();   // at once, so toggling auto hides/shows the button now rather than in two seconds
+  const t=setInterval(()=>{pull(); if(++n>=3) clearInterval(t)},2000);
 }
 $('#snd').oninput=e=>$('#sndv').textContent=e.target.value+'%';
 $('#snd').onchange=e=>{put('uiSound',e.target.value);
@@ -189,6 +246,18 @@ $('#ssdelay').onchange=e=>put('saver_delay_sec',e.target.value);
 $('#ssblank').onchange=e=>put('saver_blank_min',e.target.value);
 $('#ssdim').oninput=e=>$('#ssdimv').textContent=e.target.value+'%';
 $('#ssdim').onchange=e=>put('saver_dim',e.target.value);
+$('#otaauto').onchange=e=>put('otaAuto',e.target.checked?'1':'0').then(otaRecheck);
+$('#updmode').onchange=e=>{
+  const m=e.target.value;
+  if(m==='custom'){$('#updurlrow').hidden=false;$('#updurl').focus()}
+  else put('updateUrl', m==='off'?'off':'').then(otaRecheck);   // auto -> "" ; off -> "off"
+};
+$('#usave').onclick=()=>put('updateUrl',$('#updurl').value).then(otaRecheck);
+$('#updnow').onclick=async()=>{
+  if(!confirm('Download and install '+(otaAvail||'the update')+'?\n\nThe device reboots to apply.')) return;
+  await put('updateNow','1');
+  msg('Updating — the device reboots when the download finishes.');
+};
 $('#savename').onclick=()=>put('deviceName',$('#name').value)
   .then(()=>msg('Saved. The device reboots to register the new name.'));
 $('#favnow').onclick=async()=>{msg('Refreshing favorites...');
