@@ -1,0 +1,43 @@
+{
+  "name": "jpegdec",
+  "version": "0.0.0-libjpeg-turbo-2.1.5.1-vendored",
+  "description": "Vendored decoder-only subset of libjpeg-turbo 2.1.5.1, with all allocations redirected to PSRAM. Exists for ONE reason: TJpg_Decoder is baseline-only and Amazon Prime Stations serve progressive JPEGs (issue #16). TJpgDec stays the fast path; this is the fallback. See VENDORING.md.",
+  "license": "IJG",
+  "build": {
+    "flags": [
+      "-I src",
+      "-w"
+    ],
+    "srcFilter": [
+      "-<*>",
+      "+<jdapimin.c>",
+      "+<jdapistd.c>",
+      "+<jdatasrc.c>",
+      "+<jdcoefct.c>",
+      "+<jdcolor.c>",
+      "+<jddctmgr.c>",
+      "+<jdhuff.c>",
+      "+<jdinput.c>",
+      "+<jdmainct.c>",
+      "+<jdmarker.c>",
+      "+<jdmaster.c>",
+      "+<jdmerge.c>",
+      "+<jdphuff.c>",
+      "+<jdpostct.c>",
+      "+<jdsample.c>",
+      "+<jerror.c>",
+      "+<jidctint.c>",
+      "+<jidctred.c>",
+      "+<jidctfst.c>",
+      "+<jidctflt.c>",
+      "+<jmemmgr.c>",
+      "+<jmemnobs.c>",
+      "+<jutils.c>",
+      "+<jcomapi.c>",
+      "+<jquant1.c>",
+      "+<jquant2.c>",
+      "+<jsimd_none.c>"
+    ],
+    "libArchive": false
+  }
+}
