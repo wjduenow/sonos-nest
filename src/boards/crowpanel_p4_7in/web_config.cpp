@@ -102,11 +102,14 @@ button.ghost{background:var(--elev2);color:var(--text)}
   <h2>Screensaver</h2>
   <label for="ssmode">Show when idle</label>
   <select id="ssmode">
-    <option value="3">Album art when playing, clock otherwise</option>
+    <option value="3">Album art when available, clock otherwise</option>
     <option value="2">Album art</option>
     <option value="1">Clock</option>
     <option value="0">Nothing</option>
   </select>
+  <div class="sw" style="margin-top:4px">
+    <label for="ssplay" style="margin:0">Keep the screen on while music is playing</label>
+    <input type="checkbox" id="ssplay"></div>
   <label for="ssdelay">Appears after</label>
   <select id="ssdelay"></select>
   <label for="ssdim">Brightness while it is up <span id="ssdimv" style="color:var(--text)"></span></label>
@@ -115,7 +118,9 @@ button.ghost{background:var(--elev2);color:var(--text)}
   <select id="ssblank"></select>
   <p style="color:var(--dim);font-size:13px;margin:10px 0 0">
     Touching the screen or turning the dial wakes it, even with the backlight off. This panel is an
-    IPS LCD, so image retention is temporary — the screen-off timer is what actually prevents it.</p>
+    IPS LCD, so image retention is temporary — the screen-off timer is what actually prevents it.
+    Keeping the screen on while playing overrides both timers, so music left on overnight leaves the
+    panel lit.</p>
 </section>
 
 <section>
@@ -165,6 +170,7 @@ async function load(){
   fillOpts($('#ssblank'),[[0,'Never'],[5,'5 minutes'],[15,'15 minutes'],[30,'30 minutes'],
     [60,'1 hour'],[120,'2 hours'],[480,'8 hours']], c.saver_blank_min??60);
   $('#ssmode').value=String(c.saver_mode??3);
+  $('#ssplay').checked=c.saver_awake_playing!==false;
   $('#ssdim').value=c.saver_dim??40; $('#ssdimv').textContent=($('#ssdim').value)+'%';
 }
 $('#snd').oninput=e=>$('#sndv').textContent=e.target.value+'%';
@@ -178,6 +184,7 @@ $('#favhour').onchange=e=>put('fav_refresh_hour',e.target.value);
 $('#favauto').onchange=e=>put('fav_auto_refresh',e.target.checked?'1':'0');
 $('#bright').onchange=e=>put('brightness',e.target.value);
 $('#ssmode').onchange=e=>put('saver_mode',e.target.value);
+$('#ssplay').onchange=e=>put('saver_awake_playing',e.target.checked?'1':'0');
 $('#ssdelay').onchange=e=>put('saver_delay_sec',e.target.value);
 $('#ssblank').onchange=e=>put('saver_blank_min',e.target.value);
 $('#ssdim').oninput=e=>$('#ssdimv').textContent=e.target.value+'%';

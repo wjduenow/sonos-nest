@@ -92,6 +92,9 @@ void settingsSetSaverDimPct(uint8_t pct) {
 uint16_t settingsSaverBlankMin()            { return s_prefs.getUShort("ssblank", 60); }
 void     settingsSetSaverBlankMin(uint16_t m) { s_prefs.putUShort("ssblank", m); }
 
+bool settingsSaverAwakeWhilePlaying()           { return s_prefs.getUChar("ssplay", 1) != 0; }
+void settingsSetSaverAwakeWhilePlaying(bool on) { s_prefs.putUChar("ssplay", on ? 1 : 0); }
+
 // No 10% floor here, unlike settingsBrightness() above — see settings.h. 0 means "ring off",
 // which is a state a bedside device genuinely wants.
 uint8_t settingsRing() {

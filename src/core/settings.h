@@ -21,8 +21,13 @@ void    settingsSetBrightness(uint8_t pct);
 enum SaverMode : uint8_t {
   SAVER_OFF   = 0,   // never; the UI stays up (the blank timer still applies)
   SAVER_CLOCK = 1,   // clock + date on near-black
-  SAVER_COVER = 2,   // clock over the current album art, always
-  SAVER_AUTO  = 3,   // cover while something is playing with art, else clock  (default)
+  SAVER_COVER = 2,   // clock over the album art, always
+  SAVER_AUTO  = 3,   // album art when there is a decoded cover, else clock  (default)
+  // AUTO used to mean "cover while PLAYING, else clock". That test became unreachable the moment
+  // settingsSaverAwakeWhilePlaying() defaulted on — the screensaver only ever appears when the
+  // room is NOT playing, so the playing branch could never fire and AUTO silently degraded to
+  // SAVER_CLOCK. It now keys off whether there is artwork to show, which is the question that
+  // actually distinguishes the two layouts.
 };
 uint8_t settingsSaverMode();
 void    settingsSetSaverMode(uint8_t mode);
@@ -41,6 +46,17 @@ void    settingsSetSaverDimPct(uint8_t pct);
 // safe to set aggressively.
 uint16_t settingsSaverBlankMin();
 void     settingsSetSaverBlankMin(uint16_t min);
+
+// Hold the screen awake — full UI, full brightness — for as long as the room is PLAYING, ignoring
+// both timers above. Default on: on a wall panel the thing you want to see while music is playing
+// is what is playing, and a controller that hides its own transport controls mid-song is annoying
+// in a way a screensaver is not worth.
+//
+// The trade-off is real and is why this is a switch rather than a hardcoded rule: music left on
+// all night means a lit panel all night, which is the one thing the blank timer exists to prevent.
+// Turn it off if that matters more than the always-visible transport.
+bool settingsSaverAwakeWhilePlaying();
+void settingsSetSaverAwakeWhilePlaying(bool on);
 
 // Button-ring level % (0..100), default 100. Deliberately NOT settingsBrightness(): that one
 // floors at 10 so nobody can blank an LCD and lose the UI needed to un-blank it. A ring has no
