@@ -55,14 +55,21 @@
     }
     .badge.nest   { --c: #6366f1; }   /* indigo */
     .badge.sleep  { --c: #0ea5a3; }   /* teal   */
-    .badge.button { --c: #d97706; }   /* amber  */
+    /* button AND button2 share amber DELIBERATELY. The pill names the FORM FACTOR, and those two
+       are the same product — one button, no screen — differing only in the board inside
+       (ESP32-S3-CAM vs XIAO ESP32S3). Giving them separate hues would read as two unrelated
+       device types on a dashboard whose whole job is to be scannable; the label carries the
+       distinction instead. */
+    .badge.button,
+    .badge.button2{ --c: #d97706; }   /* amber  */
     .badge.jukebox{ --c: #e11d48; }   /* rose — the jukebox's own accent is amber, which the
                                          button already owns, so it takes the design system's
                                          coral/rose alternate instead */
     @media (prefers-color-scheme: dark) {
       .badge.nest   { --c: #a5b4fc; }
       .badge.sleep  { --c: #5eead4; }
-      .badge.button { --c: #fbbf24; }
+      .badge.button,
+      .badge.button2{ --c: #fbbf24; }
       .badge.jukebox{ --c: #fda4af; }
     }
     .meta { color: var(--muted); font-size: 13px; display: grid; gap: 5px; }
@@ -115,8 +122,14 @@
     // /api/hassio_ingress/<token>/ prefix without knowing the base path.
     const API = (p) => new URL(p, document.baseURI).toString();
 
+    // Keyed by the unit id core/net/updater.cpp's unitId() reports. A MISSING KEY IS NOT A BUG --
+    // the render falls back to the raw id below, so a new unit shows up as e.g. "button2" rather
+    // than breaking. Adding it here is purely so it reads as a product name.
+    // NOTE the two buttons are the same product on different boards, so the label is what tells
+    // them apart (the badge tint is shared) -- and their ids MUST stay distinct, because pull-OTA
+    // keys firmware assets off exactly this string.
     const UNIT_LABEL = { nest: "Nest (round)", sleep: "Sleep Machine", button: "Button",
-                         jukebox: "Jukebox (7\")", unknown: "Unknown" };
+                         button2: "Button (XIAO)", jukebox: "Jukebox (7\")", unknown: "Unknown" };
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
