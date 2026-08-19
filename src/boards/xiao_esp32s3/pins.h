@@ -56,10 +56,15 @@
 // The button's own ring is the real indicator, exactly as on the ESP32-S3-CAM (whose GPIO2 LED
 // has the same limitation).
 #define PIN_STATUS_LED      21
-// ⚠️ UNVERIFIED POLARITY. XIAO boards conventionally wire the user LED active-LOW (3V3 -> R -> LED
-// -> GPIO), the opposite of the ESP32-S3-CAM's active-HIGH D5. `button-v2-bringup` drives it both
-// ways and prints which one lit, because getting this backwards means a "dead" LED that is
-// actually just inverted — and this is the only status light inside the case.
+// ACTIVE-LOW — VERIFIED ON HARDWARE 2026-08-19 (3V3 -> R -> LED -> GPIO), i.e. the opposite of the
+// ESP32-S3-CAM's active-HIGH D5. Confirmed without a reflash: the app calls statusLed(true) once
+// in boardInit() and never touches GPIO21 again, so a running unit holds the pin at the "on"
+// level indefinitely and the LED simply being lit IS the proof. Had it been dark on a healthy
+// board, that would have meant active-HIGH.
+//
+// Keep every write going through board.cpp's statusLed() helper rather than calling
+// digitalWrite() directly — this constant is the single place the sense is decided, which is what
+// made settling it a one-line change instead of a hunt.
 #define PIN_STATUS_LED_ACTIVE_LOW  1
 
 // --- Committed by the board; do not reuse ---

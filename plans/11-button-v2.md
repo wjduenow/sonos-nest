@@ -34,9 +34,11 @@ smaller box.
 > - **END TO END, CONFIRMED BY THE OWNER:** the button starts and stops the configured playlist
 >   on the configured room. The unit is doing its job on real hardware.
 >
-> **Still open in Phase B:** the GPIO21 LED polarity (step 2 — needs an eyeball, not a log), a
-> hold long enough to exercise `LONG_PRESS_MS`, and RSSI with the antenna inside a *closed* case
-> (the case is not printed yet).
+> - **GPIO21 LED polarity settled: ACTIVE-LOW**, as `pins.h` assumed. No code change needed.
+>   Verified without a reflash — see §2.
+>
+> **Still open in Phase B:** a hold long enough to exercise `LONG_PRESS_MS`, and RSSI with the
+> antenna inside a *closed* case (the case is not printed yet).
 > **Phase C (case) — done, both STLs watertight.** `hardware/button-v2/`, 36.78 × 29.00 ×
 > **22.96 mm, 24.5 cm³** against the cam-button's 57.1. Not yet printed.
 > The button was **calipered at 14.0 mm tip-to-tail** (2026-08-19), settling `04` §7.1a and
@@ -83,7 +85,7 @@ From the Arduino core's own variant header, which is what the build actually com
 |---|---|---|---|
 | ring gate (low-side) | **D10** | 9 | right-hand rail, beside 5V/GND |
 | button | **D9** | 8 | right-hand rail; GPIO1–9 are RTC-capable, so deep-sleep wake stays open |
-| status LED | — | 21 | `LED_BUILTIN`, onboard only — ⚠️ polarity unverified, see below |
+| status LED | — | 21 | `LED_BUILTIN`, onboard only — **active-LOW**, verified on hardware |
 
 **Avoid:** **GPIO3 (D2) is a strapping pin** (JTAG source select) — the one strapping pin that is
 on a pad. **GPIO43/44 (D6/D7) are UART0.** GPIO0/45/46 are not on the pads. Everything else on
@@ -112,7 +114,15 @@ D9   -> brown  (switch)
 > enabling the output; the unavoidable exposure is reset → `boardInit()`, which the cam-button
 > has lived with since Phase 0.
 
-> ⚠️ **LED polarity is a guess.** XIAO boards conventionally wire the user LED **active-LOW**, the
+> ✅ **LED polarity: ACTIVE-LOW, verified on hardware 2026-08-19.** It needed no reflash and no
+> bring-up run, because the app pins the state itself: `boardInit()` calls `statusLed(true)` once
+> and nothing touches GPIO21 again, so a running unit holds the pin at the "on" level forever —
+> the LED being lit *is* the measurement, and a dark LED on a healthy board would have meant
+> active-HIGH. Worth remembering as a technique: a constant-state output is self-reporting, and
+> reaching for the bring-up first would have cost two flashes to learn the same thing.
+>
+> The original reasoning, kept because it is why the guess was worth flagging at all:
+> ⚠️ XIAO boards conventionally wire the user LED **active-LOW**, the
 > opposite of the ESP32-S3-CAM's active-HIGH D5. `pins.h` declares
 > `PIN_STATUS_LED_ACTIVE_LOW 1` and routes every write through one helper, so a bring-up
 > correction is a one-line change. Getting it backwards reads as dead hardware, and this is the
@@ -235,7 +245,7 @@ tools/pio run -e button-v2-bringup -t upload --upload-port "$P"
 ## 5. Open
 
 - **Phase B has not been run.** Everything above is build-verified only.
-- **LED polarity** (§2) — settled by Phase B step 2.
+- ~~LED polarity~~ — **settled: active-LOW** (§2). No change was needed.
 - **u.FL antenna RF in the closed box** (§1) — the one genuine regression of the swap.
 - **The FLM12-FJ-6 is now measured** — 14.0 mm tip to tail, which contradicted both readings of
   the datasheet (`04` §7.1a is closed). The remaining unmeasured term is the **dome height**
