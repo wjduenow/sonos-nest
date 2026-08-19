@@ -9,6 +9,7 @@
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
+#include "app.h"                 // appNetStage()/appNetStallSec() — netTask liveness (see app.h)
 #ifndef HEADLESS
 #include "ui/album_art.h"        // albumArtDiag() — art fetch/fail/clear counters
 #endif
@@ -169,6 +170,12 @@ String webConfigJson() {
   h["soapReconnects"] = sRe;
   h["soapLastMs"]     = sLast;
   h["soapMaxMs"]      = sMax;
+  // netTask liveness. THE FIELD DIAGNOSTIC (see app.h): a wedged unit answers this request
+  // perfectly — the web server is a different task — while netStallSec climbs and netStage names
+  // the call it went into and never came back from. Catching it previously took sampling
+  // soapCalls twice and noticing that a "live" RSSI never varied by a single dB.
+  h["netStage"]    = appNetStage();
+  h["netStallSec"] = appNetStallSec();
   // LVGL pool usage (see webConfigReportLvMem). lvMemMax is the peak since boot — the number to
   // size LV_MEM_SIZE against. 0 until the UI task reports its first sample.
   h["lvMemUsed"]    = s_lvUsed;

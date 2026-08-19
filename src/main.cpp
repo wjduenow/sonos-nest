@@ -99,6 +99,10 @@ void loop() {
     !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP) && !defined(BUTTON_V2_BRINGUP)
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
+  // ...and watches netTask, which has been observed stopping while every other task keeps running
+  // (see app.h). loopTask is the right host precisely because it is independent of netTask and
+  // already runs here — no extra task, no extra stack, no per-unit change.
+  appSupervisorTick();
 #endif
   vTaskDelay(pdMS_TO_TICKS(20));
 }

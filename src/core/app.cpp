@@ -358,9 +358,53 @@ static void publishLinkStats() {
   g_linkZones = (uint32_t)sonos::zones().size();
 }
 
+// --- netTask liveness (see app.h for the field report this exists for) -------------------------
+// Written only by netTask, read by loopTask. A 32-bit scalar and a pointer to a string LITERAL,
+// so both writes are single-word and neither can tear or dangle — no lock, and safe to read from
+// another task. Deliberately cheap: netStage() is on the hot path of every loop iteration.
+static volatile uint32_t    s_netAliveMs = 0;     // 0 = netTask has not started yet
+static volatile const char *s_netStage   = "start";
+static inline void netStage(const char *s) { s_netStage = s; s_netAliveMs = millis(); }
+
+const char *appNetStage() { return (const char *)s_netStage; }
+uint32_t    appNetStallSec() {
+  if (s_netAliveMs == 0) return 0;
+  return (millis() - s_netAliveMs) / 1000;
+}
+
+// How long netTask may go without completing an iteration before we call it wedged. Its longest
+// LEGITIMATE blocking pass is a rediscovery — ssdpSeed (3 x 1200 ms) plus a topology SOAP fetch
+// that can itself burn ~14 s on the retry path — so a realistic worst case is well under a
+// minute. 120 s is deliberately several times that: this ends in a reboot, and a reboot the user
+// did not need is worse than a slow poll.
+static const uint32_t kNetStallRebootMs = 120000;
+
+void appSupervisorTick() {
+  if (s_netAliveMs == 0) return;                  // tasks not started yet
+
+  // A flash legitimately parks netTask for minutes: espota holds it at the top of the loop, and a
+  // pull-flash runs INSIDE it (updater.cpp's applyNow downloads ~1 MB there). Re-stamp rather
+  // than merely skipping, so finishing a flash cannot land us in an instant false positive.
+  if (otaActive() || updaterActive()) { s_netAliveMs = millis(); return; }
+
+  const uint32_t stalled = millis() - s_netAliveMs;
+  if (stalled < kNetStallRebootMs) return;
+
+  // Name the stage before rebooting: this line is the whole point of the instrumentation, and it
+  // is the thing that was missing when this was first investigated from outside the device.
+  LOG.printf("[net] STALLED in stage '%s' for %lus — rebooting to recover\n",
+             appNetStage(), (unsigned long)(stalled / 1000));
+  LOG.flush();
+  delay(250);            // let UART and the TCP log mirror drain before the reset takes the line
+  ESP.restart();
+}
+
 static void netTask(void *) {
+  netStage("start");
   for (;;) {
+    netStage("idle");
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
+    netStage("linkstats");
     publishLinkStats();
 
     // Wi-Fi supervisor: a transient outage (router reboot, DHCP renewal, AP roam) is near-certain
@@ -438,6 +482,7 @@ static void netTask(void *) {
       } else if (WiFi.RSSI() != 0) {
         s_deadLinkStreak = 0;
       }
+      netStage("discover");
       if (sonos::ssdpDiscover()) selectZone();
       if (s_zoneIp.length() == 0) { vTaskDelay(pdMS_TO_TICKS(2000)); continue; }
       if (recovering) { processPending(); s_lastPoll = 0; continue; }
@@ -449,6 +494,7 @@ static void netTask(void *) {
     // anyway, so the frequent refresh bought little but heap churn.
     if (s_topoRecheckMs && (int32_t)(millis() - s_topoRecheckMs) >= 0) {
       s_topoRecheckMs = 0;
+      netStage("topo-recheck");
       const String before = topologySignature();
       if (sonos::ssdpDiscover()) {
         selectZoneByIp(s_zoneIp);
@@ -461,6 +507,7 @@ static void netTask(void *) {
 
     if (millis() - s_lastCoordRefresh > 60000) {
       s_lastCoordRefresh = millis();
+      netStage("coord-refresh");
       String c = sonos::coordinatorIpFor(s_zoneName);
       heapwatch::note("coord.refresh");   // full topology XML fetch + parse
       if (c.length() && c != s_coordIp) {
@@ -472,14 +519,19 @@ static void netTask(void *) {
       }
     }
 
+    netStage("pending");
     processPending();
+    netStage("registrar");
     registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
+    netStage("updater");
     updaterTick();     // OTA pull check (self-rate-limited ~6 h; applies only on explicit approve)
     // Per-room status for the Rooms screen. Costs nothing unless that page is actually open, and
     // polls at most one room per pass — see room_status.h for why it must not burst.
+    netStage("roomstatus");
     roomstatus::tick();
     // GENA subscribe/renew. No-op without -DGENA_EVENTS; self-rate-limited, one blocking call per
     // pass at most.
+    netStage("gena");
     sonos::genaTick();
 
 #ifdef HEADLESS
@@ -490,6 +542,7 @@ static void netTask(void *) {
     // drove the SOAP socket churn. One call every 3 s instead of ~3 every 1 s.
     if (millis() - s_lastPoll > 3000) {
       s_lastPoll = millis();
+      netStage("poll");
       TransportState st = TransportState::Unknown;
       const bool ok = sonos::getTransportInfo(s_coordIp, st);
       // When playing, also learn the SOURCE (GetMediaInfo/CurrentURI) so a press can tell "already

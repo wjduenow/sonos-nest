@@ -19,8 +19,25 @@
 #define DEVICE_HOSTNAME "sonos-nest"
 #endif
 
-static volatile bool s_active = false;
-static volatile int  s_progress = -1;
+static volatile bool     s_active   = false;
+static volatile int      s_progress = -1;
+// When the in-flight transfer last showed a sign of life (start, or a progress callback).
+static volatile uint32_t s_progressMs = 0;
+
+// s_active PARKS netTask (app.cpp's loop begins `if (otaActive()) { delay; continue; }`) and backs
+// off uiTask/artTask, so a flag that gets stuck ON is indistinguishable from the field failure
+// app.h documents: a device that pings, serves its config page and prints [health], while doing no
+// Sonos work and never heartbeating to the portal.
+//
+// It is only cleared by onEnd/onError. A transfer whose client vanishes normally trips ArduinoOTA's
+// own stall-reboot, but that is ArduinoOTA's guarantee, not ours, and it does not hold for every
+// abort path — so anything that gets us into onStart without ever reaching onEnd/onError would
+// wedge the unit until a power cycle. Bound it here instead of trusting the library.
+//
+// 30 s without a single progress callback is unambiguous: espota reports continuously (a ~1 MB
+// image is hundreds of callbacks), so this can only fire on a genuinely dead transfer. It also
+// means the netTask supervisor can never be disabled indefinitely by this flag.
+static const uint32_t kOtaStallMs = 30000;
 
 // The mDNS/OTA name follows the device name (settingsDeviceName, else the DEVICE_HOSTNAME
 // default) — same source as the DHCP hostname — so two of the same unit on one LAN don't both
@@ -38,10 +55,13 @@ void otaBegin() {
 #ifdef OTA_PASSWORD
   ArduinoOTA.setPassword(OTA_PASSWORD);
 #endif
-  ArduinoOTA.onStart([]() { s_active = true; s_progress = 0; LOG.println("[ota] start"); });
+  ArduinoOTA.onStart([]() {
+    s_active = true; s_progress = 0; s_progressMs = millis(); LOG.println("[ota] start");
+  });
   ArduinoOTA.onEnd([]()   { s_active = false; s_progress = -1; LOG.println("[ota] done"); });
   ArduinoOTA.onProgress([](unsigned p, unsigned t) {
     s_progress = t ? (int)(p * 100 / t) : 0;
+    s_progressMs = millis();          // proof of life for the stall guard in otaActive()
     LOG.printf("[ota] %d%%\r", s_progress);
   });
   ArduinoOTA.onError([](ota_error_t e) { s_active = false; s_progress = -1; LOG.printf("[ota] error %u\n", e); });
@@ -55,5 +75,20 @@ void otaBegin() {
 }
 
 void otaHandle() { ArduinoOTA.handle(); }
-bool otaActive() { return s_active; }
+bool otaActive() {
+  if (!s_active) return false;
+  // See kOtaStallMs. Clearing from a getter is deliberate: this is read every loop by netTask,
+  // uiTask and artTask, so it is the one place guaranteed to run often enough to notice, and
+  // there is no other supervisor that could — the flag's whole effect is to stop those loops.
+  // The writes are single-word volatiles and the transition is one-way, so a concurrent read
+  // sees either the old or the new value and both are safe.
+  if (millis() - s_progressMs > kOtaStallMs) {
+    s_active = false;
+    s_progress = -1;
+    LOG.printf("[ota] no progress for %lus — clearing the active flag (was wedging netTask)\n",
+               (unsigned long)(kOtaStallMs / 1000));
+    return false;
+  }
+  return s_active;
+}
 int  otaProgress() { return s_progress; }
