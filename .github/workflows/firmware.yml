@@ -3,11 +3,12 @@
 # TWO jobs, deliberately:
 #
 #   build    Compiles EVERY app env, on every PR and every push to main (plus tags and manual
-#            runs). This is the gate. `core/` is swept wholesale into all four envs by +<core/>
-#            but is NOT uniformly device-agnostic — the headless `sleep-button` env has no LVGL
-#            at all — so a core file that touches graphics breaks exactly one env, and it is the
-#            one nobody builds by habit. That is issue #7: sleep-button was broken for weeks and
-#            was found by accident. Building all of them here is what closes the category.
+#            runs). This is the gate. `core/` is swept wholesale into all five envs by +<core/>
+#            but is NOT uniformly device-agnostic — the two headless button envs have no LVGL
+#            at all — so a core file that touches graphics breaks exactly those, and they are
+#            the ones nobody builds by habit. That is issue #7: sleep-button was broken for
+#            weeks and was found by accident. Building all of them here is what closes the
+#            category.
 #            See src/core/ui/README.md for the convention this backstops.
 #
 #   release  Tags only (`v*`). Publishes firmware-<unit>.bin + manifest.json for the units that
@@ -71,10 +72,15 @@ jobs:
       # Neither compiles wrong, so only comparing the two ladders catches it.
       - name: unitId() and registrationJson() agree on the unit ids
         run: |
+          # [a-z0-9]+, NOT [a-z]+. Unit ids carry digits now ("button2"), and a letters-only class
+          # does not fail — it TRUNCATES, matching "button" on both ladders. The two button units
+          # then collapse into one entry, the diff passes, and the check goes quietly blind to the
+          # exact pair it exists to keep apart. Widen this class before adding an id with new
+          # characters in it.
           asks=$(sed -n '/const char \*unitId()/,/^}/p' src/core/net/updater.cpp \
-                 | grep -oP 'return "\K[a-z]+' | grep -v '^unknown$' | sort -u)
+                 | grep -oP 'return "\K[a-z0-9]+' | grep -v '^unknown$' | sort -u)
           tells=$(sed -n '/^String registrationJson()/,/^}/p' src/core/webconfig.cpp \
-                  | grep -oP 'doc\["unit"\] *= *"\K[a-z]+' | grep -v '^unknown$' | sort -u)
+                  | grep -oP 'doc\["unit"\] *= *"\K[a-z0-9]+' | grep -v '^unknown$' | sort -u)
           echo "updater.cpp   unitId() asks for : $(echo $asks)"
           echo "webconfig.cpp registers as      : $(echo $tells)"
           [ -n "$asks" ] && [ -n "$tells" ] || { echo "::error::parsed an empty set — a ladder was renamed or reformatted; fix this check"; exit 1; }
@@ -100,6 +106,9 @@ jobs:
           - { env: nest,          unit: nest,    release: true }
           - { env: sleep-machine, unit: sleep,   release: true }
           - { env: sleep-button,  unit: button,  release: true }
+          # Same product as sleep-button on a XIAO ESP32S3, and NOT pin-compatible with it, so it
+          # ships as its own asset under its own id. `button` and `button2` must never be merged.
+          - { env: button-v2,     unit: button2, release: true }
           - { env: sonos-jukebox, unit: jukebox, release: true }
     steps:
       - uses: actions/checkout@v4

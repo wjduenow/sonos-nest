@@ -298,13 +298,17 @@ String registrationJson() {
   doc["mdnsName"]   = String(otaHostname()) + ".local";     // stable id + "<name>.local" address
   doc["ip"]         = WiFi.localIP().toString();
   // Unit/board are compile-time — the same macro that selects the board+unit in the env. The
-  // button is HEADLESS with neither UNIT_ macro; keep this branch order in sync with that.
+  // original button is HEADLESS with no UNIT_ macro; keep this branch order in sync with
+  // updater.cpp's unitId(), including UNIT_BUTTON_V2 sitting ABOVE the HEADLESS fallback (both
+  // button units are headless, and the two boards are not pin-compatible — see that file).
 #if defined(UNIT_NEST)
   doc["unit"] = "nest";    doc["board"] = "crowpanel_rotary";
 #elif defined(UNIT_SLEEP)
   doc["unit"] = "sleep";   doc["board"] = "es3c28p";
 #elif defined(UNIT_JUKEBOX)
   doc["unit"] = "jukebox"; doc["board"] = "crowpanel_p4_7in";
+#elif defined(UNIT_BUTTON_V2)
+  doc["unit"] = "button2"; doc["board"] = "xiao_esp32s3";
 #elif defined(HEADLESS)
   doc["unit"] = "button";  doc["board"] = "esp32s3cam";
 #else

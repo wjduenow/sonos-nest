@@ -34,9 +34,48 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > exactly how `art_cache.cpp` broke it for weeks (issue #7). **Two things now stop that
   > recurring, and both matter: every graphics-coupled core file lives in `core/ui/`, which this
   > env drops in one line (`-<core/ui/>`) — so put a new LVGL-touching file THERE, don't grow a
-  > per-file exclusion list back; and CI builds all four app envs on every PR and every push to
+  > per-file exclusion list back; and CI builds all five app envs on every PR and every push to
   > `main`.** (A push to a side branch with no PR open is not covered — build it yourself.) The
   > convention is written up in `src/core/ui/README.md`.
+- **sonos-button-v2** (`button-v2` env) — **the same product as sonos-button, on a Seeed XIAO
+  ESP32S3** (21 × 17.8 mm, ~$7). Identical behaviour and **the identical unit**: it runs
+  `units/sleep_button/` unchanged, and the press classifier + `:8080` page live in
+  `boards/button_common/`, shared by both. Only `boards/xiao_esp32s3/` is specific to it — ring on
+  **D10 (GPIO9)**, button on **D9 (GPIO8)**, both on the right-hand pad rail beside 5V/GND.
+  Same ESP32-S3R8 as the nest, so it stays on the pinned platform and needs no `tools/pio` change.
+  Case: `hardware/button-v2/` (36.8 × 29.0 × 23.0 mm, **24.5 cm³ — 2.3× smaller than
+  cam-button's 57.1**, and under the 23 mm `plans/04` §6 set and never reached).
+  > ⚠️ **The FLM12-FJ-6 is MEASURED now: 14.0 mm dome-top to back-of-connector** (2026-08-19),
+  > which contradicts both readings of the datasheet and closed `plans/04` §7.1a. It took 3.35 mm
+  > off this box. **`hardware/cam-button` still carries the old disputed 13.35** and is ~3 mm
+  > taller than it needs to be — same button, not yet re-derived because its STLs are committed
+  > and may already be printed. Also mind the datum: cam-button measures `BEHIND_T` from the
+  > panel's *inner* face, button-v2's `INSIDE_T` from the *outer* face — copying one into the
+  > other double-counts the 2 mm panel.
+  Plan: `plans/11-button-v2.md`.
+  > ⚠️ **THE TWO BUTTON UNITS MUST NEVER SHARE A UNIT ID.** Both are `HEADLESS`, and
+  > `core/net/updater.cpp:unitId()` derives its pull-OTA manifest key from that macro alone — so
+  > without `-DUNIT_BUTTON_V2` → `"button2"` sitting **above** the `HEADLESS` fallback, one button
+  > pull-flashes the other's binary. Same ISA, so it **boots** and then drives pins that do not
+  > exist on that board: a dead device that reports healthy. Keep the branch, in the same order, in
+  > **both** `updater.cpp` and `webconfig.cpp`'s `registrationJson()`.
+  > ⚠️ **The CI guard that cross-checks those two ladders is regex-fragile.** It was `[a-z]+`,
+  > which did not *fail* on `button2` — it **truncated** it to `button` on both sides, collapsed
+  > the two units into one entry and passed, going silently blind to the exact pair it exists to
+  > keep apart. It is `[a-z0-9]+` now; widen it again before adding an id with new characters.
+  > ⚠️ **Flashing it is not like the other S3 boards, and it fails looking like dead hardware.**
+  > The XIAO has **no UART bridge** — it enumerates as the S3's built-in USB-Serial-JTAG
+  > (`303a:1001`, NOT the `2886:0056` in the board JSON). So `[env]`'s **921600 cannot be
+  > negotiated** (esptool IDs the chip, runs the stub, then `No serial data received`) and
+  > **esptool's stub re-inits USB mid-flash**, dropping the usbip attachment under WSL
+  > (`urb->status -104` → `Unable to verify flash chip connection`). Both envs therefore pin
+  > `upload_speed = 115200` and `upload_flags = --no-stub`. The post-flash reset also
+  > **re-enumerates and bumps `/dev/ttyACM0` → `ttyACM1` every time** — resolve the port
+  > dynamically, and kill any `readser.py` first or it holds the stale node.
+  > ⚠️ **This board has NO onboard antenna and NO mounting holes**, unlike every other board here.
+  > The u.FL antenna is not optional, and the case holds the PCB with ledges + a lid rib bearing on
+  > the RF shield can — so the lid is structural, and USB-C cable force is taken by pinch ribs
+  > rather than by screws. See `hardware/button-v2/README.md` §3.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -170,6 +209,7 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 `src/boards/<board>/` (drivers) and `src/units/<unit>/` (UX). See **Architecture** below.
 
 - Full plan + feature scorecard + history: **`plans/01-sonos-knob-controller-plan.md`**
+- The button on a XIAO ESP32S3 + why not the C6: **`plans/11-button-v2.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
 - Jukebox screensaver — what shipped, and the video/photo options that did not:
@@ -372,6 +412,16 @@ bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card �
 `mic_test` are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
 (round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (touch screens + ui_scale.h).
 
+The two headless button boards — `src/boards/esp32s3cam/` and `src/boards/xiao_esp32s3/` (each
+just `pins.h` · `board.cpp` · `bringup.cpp`) — share **`src/boards/button_common/`**: the press
+classifier (`button.{h,cpp}`, `buttonInit(pin)`) and the `:8080` config page
+(`config_server.{h,cpp}`, ~13 KB of embedded HTML, zero board coupling). **That directory is
+deliberately NOT in `core/`** — `+<core/>` sweeps into every env, so `<WebServer.h>` there would
+land in nest/sleep-machine/jukebox, which is the `core/ui/` rule running the other way. It defines
+no `boardInit()`/`uiInit()`, so it doesn't trip the one-board-per-env link guard; an env opts in
+with `+<boards/button_common/>`. See its README. **Both boards run the same unit**,
+`src/units/sleep_button/`.
+
 nest UI screens: Now Playing (home), Menu hub, Rooms, Group, Playlists/Favorites (shared browse
 list), Settings, Clock. From Now Playing: **swipe right** (drag in from the left edge) = Menu,
 **swipe up** = queue, **swipe down** = clock; twist = volume, press = play/pause. On list
@@ -539,6 +589,10 @@ button is headless. Hold the knob/button through power-on to re-provision. Also 
 ## Conventions
 - Commit/push only when asked. Branch `main`, remote `origin` (github.com/wjduenow/sonos-nest).
 - Keep `hardware/` commits separate from firmware — the user owns that work. Layout:
-  `hardware/round-nest-2.8/` (original round CrowPanel unit: `wall/` mount) and
-  `hardware/rec-2.8/` (ES3C28P rectangular board: `countertop/` nightstand stand).
+  `hardware/round-nest-2.8/` (original round CrowPanel unit: `wall/` mount),
+  `hardware/rec-2.8/` (ES3C28P rectangular board: `countertop/` nightstand stand),
+  `hardware/cam-button/` (`shell/` — the ESP32-S3-CAM button) and `hardware/button-v2/`
+  (`shell/` — the XIAO ESP32S3 button, half the volume). All of `hardware/` is Python CSG
+  (trimesh + manifold3d) under `conda run -n img23d`, never OpenSCAD; each part directory derives
+  its dimensions in a `*_params.py` and asserts its own clearances at build time.
 - Test loop: build → flash (USB or `/ota`) → user confirms on device → commit + push.

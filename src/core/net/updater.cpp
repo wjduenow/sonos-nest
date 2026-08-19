@@ -42,6 +42,11 @@ void   updaterForceCheck()       { s_force = true; }
 // reports one id to the portal and asks the manifest for another is invisible to pull-OTA while
 // looking perfectly healthy on the dashboard. That is exactly what happened to the jukebox — it
 // registered as "jukebox" and requested "unknown" from the day it was added.
+//
+// UNIT_BUTTON_V2 MUST STAY ABOVE THE HEADLESS FALLBACK. Both button units are HEADLESS, so
+// without its own branch the XIAO ESP32S3 unit would ask the manifest for "button" and pull-flash
+// the ESP32-S3-CAM's binary — same ISA, so it boots, and then drives pins that unit doesn't have.
+// A dead button that reports healthy, which is the worst failure this file can produce.
 static const char *unitId() {
 #if defined(UNIT_NEST)
   return "nest";
@@ -49,6 +54,8 @@ static const char *unitId() {
   return "sleep";
 #elif defined(UNIT_JUKEBOX)
   return "jukebox";
+#elif defined(UNIT_BUTTON_V2)
+  return "button2";
 #elif defined(HEADLESS)
   return "button";
 #else

@@ -1,9 +1,9 @@
-// Debounce + Short/Double/Triple/Long classification for the FLM12-FJ-6 on PIN_BUTTON. See button.h.
+// Debounce + Short/Double/Triple/Long classification for the FLM12-FJ-6. See button.h.
 //
-// Thresholds are the ones measured by the Phase-0 bring-up (bringup.cpp) on the real button:
-// ~2 raw edges per press, all absorbed by a 30 ms window, with no chatter at idle.
+// Thresholds are the ones measured by the Phase-0 bring-up (boards/esp32s3cam/bringup.cpp) on the
+// real button: ~2 raw edges per press, all absorbed by a 30 ms window, with no chatter at idle.
+// They are switch properties, not board properties, so both button boards share them.
 #include "button.h"
-#include "pins.h"
 #include <Arduino.h>
 
 // 30 ms is the usual safe floor for a cheap momentary and is imperceptible. The bring-up
@@ -21,6 +21,7 @@ static const uint32_t LONG_PRESS_MS = 700;
 static const uint32_t MULTI_GAP_MS  = 350;
 static const uint8_t  MAX_CLICKS    = 3;   // Triple is the deepest press this HAL classifies
 
+static uint8_t   s_pin        = 0xFF;    // set by buttonInit(); 0xFF = never initialised
 static bool      s_raw        = false;   // last raw sample
 static bool      s_stable     = false;   // debounced level
 static uint32_t  s_lastChange = 0;
@@ -30,10 +31,13 @@ static uint8_t   s_clicks     = 0;       // releases so far in the current multi
 static uint32_t  s_lastRelease= 0;       // when the most recent one landed
 static KnobEvent s_queued     = KnobEvent::None;
 
-static inline bool rawDown() { return digitalRead(PIN_BUTTON) == LOW; }   // active-low
+// Active-low. Before buttonInit() there is no pin to read, and reading GPIO 0xFF would be a
+// wild access — report "up", which is what an unwired button looks like anyway.
+static inline bool rawDown() { return s_pin != 0xFF && digitalRead(s_pin) == LOW; }
 
-void buttonInit() {
-  pinMode(PIN_BUTTON, INPUT_PULLUP);     // idle HIGH; the button shorts to GND
+void buttonInit(uint8_t pin) {
+  s_pin = pin;
+  pinMode(s_pin, INPUT_PULLUP);          // idle HIGH; the button shorts to GND
   s_raw = s_stable = rawDown();
   s_lastChange = millis();
   s_clicks = 0;

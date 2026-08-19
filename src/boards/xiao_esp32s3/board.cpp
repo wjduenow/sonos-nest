@@ -1,28 +1,42 @@
-// Board HAL for the nulllab/emakefun ESP32-S3-CAM — see core/board.h.
+// Board HAL for the Seeed XIAO ESP32S3 — see core/board.h.
 //
-// A headless board: no display, no touch, no encoder, no SD, no audio, no mic. The whole
-// external interface is four wires on header J4 (plans/04-sonos-button-plan.md §3):
+// The `button-v2` unit: the same product as `sonos-button`, on a board a quarter the size. A
+// headless board — no display, no touch, no encoder, no SD, no audio, no mic. The whole external
+// interface is four wires soldered to the right-hand pad rail (pins.h):
 //
-//     J4.1  +5V   -> white  (ring +)
-//     J4.2  GND   -> brown  (switch)
-//     J4.6  IO47  -> black  (ring -, switched low-side by the pin itself — no MOSFET)
-//     J4.7  IO14  -> brown  (switch)
+//     5V   -> white  (ring +)
+//     GND  -> brown  (switch)
+//     D10  -> black  (ring -, switched low-side by the pin itself — no MOSFET)
+//     D9   -> brown  (switch)
 //
-// Most of core/board.h is stubbed here; that's the established pattern (crowpanel stubs audio
-// and SD the same way), and it means webconfig/library/app need no special case for us.
+// Deliberately a near-copy of boards/esp32s3cam/board.cpp: same silicon, same switch, same ring,
+// same stubs. What the two boards actually share — the press classifier and the :8080 config
+// page — lives in boards/button_common/ rather than being duplicated here. See its README.
 #include "core/board.h"
 #include "pins.h"
-#include "boards/button_common/button.h"          // shared with xiao_esp32s3 — see its README
+#include "boards/button_common/button.h"
 #include "boards/button_common/config_server.h"
 #include <Arduino.h>
 #include <WiFi.h>          // boardConfigUrl() — WiFi.status()/localIP()
 
 // --- Ring PWM ---------------------------------------------------------------------------
 // LEDC channel 0. 5 kHz is well above flicker and far below anything the LED cares about.
+// Arduino 2.0.17 API (ledcSetup/ledcAttachPin), matching the pinned platform — see platformio.ini.
 static const int      RING_CH   = 0;
 static const uint32_t RING_FREQ = 5000;
 static const uint8_t  RING_RES  = 8;         // 8-bit: duty 0..255
 static bool           s_pwmOn   = false;     // is LEDC currently attached to the pin?
+
+// The onboard user LED, hidden inside the case. Polarity is a board property and is still
+// unverified on this one — see pins.h. Routed through these two so a bring-up correction is a
+// one-line change in pins.h rather than a hunt through call sites.
+static inline void statusLed(bool on) {
+#if PIN_STATUS_LED_ACTIVE_LOW
+  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
+#else
+  digitalWrite(PIN_STATUS_LED, on ? HIGH : LOW);
+#endif
+}
 
 bool boardInit() {
   buttonInit(PIN_BUTTON);
@@ -35,10 +49,8 @@ bool boardInit() {
   digitalWrite(PIN_RING_GATE, HIGH);         // start dark; the unit applies the saved level
   ledcSetup(RING_CH, RING_FREQ, RING_RES);
 
-  // The onboard D5 (IO2 -> R6 1K -> D5, active-HIGH). Confirmed real from the schematic, but
-  // NOT broken out to a header — only visible with the case open. Liveness tell, not product UI.
   pinMode(PIN_STATUS_LED, OUTPUT);
-  digitalWrite(PIN_STATUS_LED, HIGH);        // solid = powered
+  statusLed(true);                           // solid = powered
 
   configServerStart();                       // its task waits for WiFi itself
 
@@ -68,7 +80,7 @@ void backlightSet(uint8_t pct) {
 }
 
 // --- Rotary input: there is no encoder, but the button IS a press-classified momentary, which
-// is exactly what the knob HAL describes. Mapping onto it costs no core change (§5).
+// is exactly what the knob HAL describes. Mapping onto it costs no core change (plans/04 §5).
 int32_t   encoderDelta() { return 0; }
 KnobEvent knobEvent()    { return buttonEvent(); }
 bool      knobPressed()  { return buttonEvent() == KnobEvent::Short; }
@@ -91,8 +103,9 @@ const char *localFileUrl(const char *) { return nullptr; }   // no local storage
 // we don't have. Reporting nullptr keeps that honest; the URL is printed to serial at boot.
 const char *localManagerUrl()          { return nullptr; }
 
-// ...but the button DOES serve a web config page (config_server.cpp, port 8080) — that's what the
-// portal's "Open config" should point at. Valid whenever WiFi is up. Port mirrors CONFIG_PORT.
+// ...but the button DOES serve a web config page (button_common/config_server.cpp, port 8080) —
+// that's what the portal's "Open config" should point at. Valid whenever WiFi is up. Port
+// mirrors CONFIG_PORT.
 const char *boardConfigUrl() {
   if (WiFi.status() != WL_CONNECTED) return nullptr;
   static String url;
@@ -105,7 +118,7 @@ int         localTrackCount()          { return 0; }
 const char *localTrackName(int)        { return nullptr; }
 const char *localTrackPath(int)        { return nullptr; }
 
-// No speaker on this board (or none wired for UI feedback) — see core/board.h.
+// No speaker on this board — see core/board.h.
 void uiSoundPlay(UiSound) {}
 
 // no storage wired up on this board.

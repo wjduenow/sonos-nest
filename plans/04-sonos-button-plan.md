@@ -8,6 +8,15 @@ Press again to stop. All configuration happens in a browser; the device has no s
 This is the **third unit** in the repo (after `nest` and `sleep-machine`) and the first
 **headless** one. It reuses the shared core wholesale — see "Why this is cheap" below.
 
+> ### There is a v2 of this unit: **`11-button-v2.md`**
+> Same product, same behaviour, same UX code — on a **Seeed XIAO ESP32S3** instead of the
+> ESP32-S3-CAM, in a case half the volume (`hardware/button-v2/`). The two units **share
+> `units/sleep_button/` and `boards/button_common/`**, so behaviour changes made here land on
+> both; only `boards/esp32s3cam/` is specific to this one.
+>
+> ⚠️ **They report DIFFERENT unit ids** (`button` here, `button2` there) and their boards are not
+> pin-compatible. That is deliberate and load-bearing — see `11` §3.
+
 > ## Status — the device works; the case is printable; only WiFi provisioning is left
 >
 > **Built, on hardware, verified against real Sonos** (env `sleep-button`, branch
@@ -695,6 +704,24 @@ hardware/cam-button/
   connector.** Note this errs safe — designing for 13.5 when it's really 11.85 wastes 1.65 mm of
   height rather than fouling the lid — so it does not block the shell, but it should be settled
   before the STL is final.
+
+  > ### ✅ SETTLED, 2026-08-19 — and it was neither reading
+  > **Calipered: 14.0 mm overall, dome top to the back of the connector.**
+  >
+  > | reading | implied overall |
+  > |---|---|
+  > | 13.35 = behind-panel, + a 1.5 head | 14.85 — 0.85 too tall |
+  > | 13.35 = overall, head included | 13.35 — 0.65 too short |
+  > | **measured** | **14.00** |
+  >
+  > Subtracting the datasheet's 1.5 dome leaves **12.5 mm inside the box**, measured from the
+  > panel's *outer* face. `hardware/button-v2/` is built on this and came out at **22.96 mm** —
+  > under the 23 mm target §6 sets below.
+  >
+  > **`hardware/cam-button/` has NOT been re-derived** and still carries 13.35, so it is ~3 mm
+  > taller than it needs to be. Its STLs are committed and the case may already be printed, so
+  > that is a deliberate hold, not an oversight. The remaining unknown is the **dome height**
+  > (1.5, still datasheet), which moves case height 1:1.
 
   ⚠️ **Max panel thickness is the constraint to watch.** The drawing shows the threaded section
   as only ~**4 mm** long (consistent with the product being sold as a *thin* button). Minus a
