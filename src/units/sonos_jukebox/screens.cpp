@@ -2202,6 +2202,13 @@ namespace {
 const lv_coord_t SAVER_W = 760, SAVER_H = 220;
 const lv_coord_t SAVER_DRIFT_X = 110, SAVER_DRIFT_Y = 120;
 
+// Scrim ramp, top -> bottom. See the block above s_saverScrim in saverBuild() for why it is a
+// ramp and not a flat value. Chosen so the MIDDLE of the screen lands on 128/255 — the flat 50 %
+// this replaces — because that is the height the type actually sits at, so legibility where it
+// matters is unchanged and only the parts with nothing on them move.
+const lv_opa_t SAVER_SCRIM_TOP = 89;    // 35 %
+const lv_opa_t SAVER_SCRIM_BOT = 166;   // 65 %  -> (89 + 166) / 2 == 127.5
+
 lv_obj_t *s_saver = nullptr, *s_saverBg = nullptr, *s_saverScrim = nullptr, *s_saverGrp = nullptr,
          *s_saverClock = nullptr,
          *s_saverAmPm = nullptr, *s_saverDate = nullptr, *s_saverTitle = nullptr,
@@ -2366,12 +2373,29 @@ void saverBuild() {
   // Scrim. Does two jobs: it makes white text legible over any cover, and it drops the average
   // luminance of a screen that is about to sit lit for hours.
   //
-  // 50 %, down from the 70 % this shipped with. At 70 %, on top of a screensaver backlight that
-  // defaults to 40 %, the wallpaper was so dark it read as a plain clock on black — the feature
-  // looked like it was not working at all. 120 px white type stays perfectly legible at 50 %.
+  // It is a VERTICAL RAMP, 35 % at the top to 65 % at the bottom, not a flat veil. History: this
+  // shipped at a flat 70 %, which on top of a 40 % screensaver backlight was so dark the wallpaper
+  // read as a plain clock on black and the feature looked broken; that was corrected to a flat
+  // 50 %. The flat value is the remaining problem — it lies over the whole cover equally, so a
+  // real photograph reads as a grey wash rather than as artwork, and the *only* reason the design
+  // mock looks better is that its art happens to fall off to near-black at the edges by itself.
+  // A ramp gives every cover that falloff. It costs nothing extra: LVGL builds a per-row opacity
+  // map for a LV_GRAD_DIR_VER fill (lv_draw_sw_fill.c), and no radial/conical gradient is
+  // involved — which matters, because LV_USE_DRAW_SW_COMPLEX_GRADIENTS is 0 here and a radial
+  // vignette would not draw at all.
+  //
+  // bg_opa stays COVER: the stop opacities ARE the scrim, and LVGL folds bg_opa into them with
+  // LV_OPA_MIX2, so leaving it at 50 % would halve the ramp on top of itself.
+  //
+  // Worth a look on hardware: the panel is RGB565, and 77 opacity steps spread over 600 rows can
+  // band on a flat dark cover. Photographic covers dither it away; a solid-colour one might not.
   s_saverScrim = panel(s_saver, SCREEN_W, SCREEN_H, 0x000000, 0);
   lv_obj_align(s_saverScrim, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_bg_opa(s_saverScrim, LV_OPA_50, 0);
+  lv_obj_set_style_bg_opa(s_saverScrim, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_grad_dir(s_saverScrim, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_bg_grad_color(s_saverScrim, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_bg_main_opa(s_saverScrim, SAVER_SCRIM_TOP, 0);
+  lv_obj_set_style_bg_grad_opa(s_saverScrim, SAVER_SCRIM_BOT, 0);
   lv_obj_add_flag(s_saverScrim, LV_OBJ_FLAG_HIDDEN);
 
   s_saverGrp = lv_obj_create(s_saver);

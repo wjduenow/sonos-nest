@@ -288,8 +288,23 @@ the clock font. No PSRAM, no new task, no measurable internal SRAM.
 - **Clock (A)**: 120 px time + meridiem + written-out date. A REAL font
   (`lv_font_clock_120.c`, digits/colon/hyphen only), not a scaled label — read that file's header
   before "simplifying" it.
-- **Wallpaper (B)**: the current cover scaled to fill under a 70 % scrim, sharp tile + clock +
-  track over it. `AUTO` mode falls back to the clock when nothing is playing.
+- **Wallpaper (B)**: the current cover scaled to fill under a scrim, sharp tile + clock +
+  track over it. `AUTO` mode falls back to the clock when there is no decoded cover.
+  The scrim has been through three values, and the reason it moved each time is the same one:
+  a wall panel is looked at from across a room, so it is judged as a *picture*, not as a UI.
+  **70 % flat** (shipped) — on top of a 40 % screensaver backlight the wallpaper was so dark it
+  read as a plain clock on black, and the feature looked broken. **50 % flat** — legible, but it
+  lies over the whole cover equally, so a photograph reads as a grey wash rather than as artwork.
+  **35 % → 65 % vertical ramp** (now) — every cover gets the edge falloff that made the design
+  mock look good, and the ramp is set so the MIDDLE of the screen still lands on the old flat
+  50 %, which is the height the type sits at. `LV_GRAD_DIR_VER` with `bg_main_opa`/`bg_grad_opa`;
+  `bg_opa` must stay `COVER` or LVGL folds it into the stops with `LV_OPA_MIX2` and halves the
+  ramp on top of itself. Note `LV_USE_DRAW_SW_COMPLEX_GRADIENTS` is 0, so a *radial* vignette
+  would silently not draw — this has to stay linear unless that is turned on.
+  > Known interaction, not yet judged on hardware: the drift can carry the text block 120 px
+  > ABOVE centre, into the ~40 % part of the ramp. Over a bright cover that is dimmer protection
+  > than the old flat 50 % gave. If it reads badly, raise the top stop rather than dropping the
+  > ramp — 45 % → 65 % keeps the falloff and never goes lighter than what it replaced.
 - **Drift**: one container steps along a slow Lissajous, on the minute so the move and the clock
   repaint are one event. Nothing else on screen moves, so a step invalidates one rectangle.
 - **Settings** (web page and on-screen Settings, same `core/webconfig` fields): `saver_mode`,
