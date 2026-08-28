@@ -82,14 +82,41 @@ static bool doGet(HTTPClient &http, C &client, const String &url, String &body) 
   return ok;
 }
 
+// THE CLIENT MUST OUTLIVE THE HTTPClient. Locals are destroyed in reverse declaration order, so
+// declaring `HTTPClient http` first — as this did — means the WiFiClient dies FIRST and then
+// ~HTTPClient runs:
+//
+//     HTTPClient::~HTTPClient() { if (_client) { _client->stop(); } ... }
+//
+// calling a method on a destroyed object, i.e. writing through a dangling pointer into memory the
+// client's destructor has already released. A textbook use-after-free.
+//
+// It is not saved by doGet()'s http.end(). end() -> disconnect(false) only clears _client on the
+// branch that actually closes the socket; when the server offers keep-alive it takes
+//
+//     if (_reuse && _canReuse) { log_d("tcp keep open for reuse"); }   // _client left set
+//
+// and _reuse defaults to true. The portal is uvicorn/FastAPI, HTTP/1.1 keep-alive by default, so
+// the portal manifest check took the dangling branch EVERY time.
+//
+// FOUND THE HARD WAY, 2026-08-28. It presented as random panics on whichever task next allocated:
+// "multi_heap_free (head != NULL)" under String::~String on the ui task, then — once comprehensive
+// heap poisoning was enabled — "multi_heap_malloc (ret)" on the net task, which is the check that a
+// freshly allocated block still holds the free-fill pattern. That second assert is what named this:
+// it proves memory was WRITTEN AFTER BEING FREED rather than merely double-freed. Both crashes
+// followed "[registrar] portal requests firmware re-check" in the log.
+//
+// Every other HTTPClient site in this tree already declares its client first (registrar, album_art,
+// soap_client) or uses a static one (art_cache). This was the only one out of order.
 static bool httpGetString(const String &url, String &body) {
-  HTTPClient http;
   if (url.startsWith("https:")) {
-    WiFiClientSecure sec;
+    WiFiClientSecure sec;   // declared FIRST, so it is destroyed LAST — after http
     sec.setInsecure();
+    HTTPClient http;
     return doGet(http, sec, url, body);
   }
-  WiFiClient cl;
+  WiFiClient cl;            // same ordering for the plain-HTTP path (this is the portal's)
+  HTTPClient http;
   return doGet(http, cl, url, body);
 }
 
