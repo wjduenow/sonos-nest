@@ -1101,8 +1101,22 @@ static void favPaintArt() {
 }
 
 static void favRenderRows() {
-  lv_obj_clean(s_favList);
+  // CLEAR THE TILE VECTOR BEFORE DELETING THE OBJECTS, not after. lv_obj_clean() removes children,
+  // which changes the list's scroll extent, and LVGL can fire LV_EVENT_SCROLL synchronously from
+  // inside it — straight into favScrollCb() -> favPaintArt(), which walks s_favTiles and calls
+  // lv_obj_get_y() on every entry. In the old order those entries are objects lv_obj_clean() has
+  // just freed, so the style lookup dereferences a null internal pointer.
+  //
+  // CRASHED THE DEVICE, 2026-08-28: ESP_RST_PANIC with mcause 5 (load access fault) and mtval 4 —
+  // a load from address 0x4, i.e. a member read off a null pointer — with the backtrace
+  // lv_obj_get_y <- favPaintArt <- favScrollCb <- lv_event_send(LV_EVENT_SCROLL) <-
+  // lv_obj_scroll_to_y. It needed the favourites cache to refresh under a populated list, so it
+  // took 5 hours of uptime to appear.
+  //
+  // This order makes the window impossible rather than unlikely: favPaintArt() early-returns on an
+  // empty vector, so any event fired during the clean is a harmless no-op.
   s_favTiles.clear();
+  lv_obj_clean(s_favList);
   s_favSnapped = -1;
   const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
   for (size_t i = 0; i < s_favs.size(); i++) {
@@ -1182,7 +1196,7 @@ static void favRunSearch(const String &q) {
   s_favs.clear();
   lv_obj_add_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
   if (q.length() < 2) {
-    lv_obj_clean(s_favList); s_favTiles.clear();
+    s_favTiles.clear(); lv_obj_clean(s_favList);   // clear BEFORE clean — see favRenderRows()
     lv_label_set_text(s_favStatus, "Type at least two letters.");
     lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
     return;
@@ -1190,7 +1204,7 @@ static void favRunSearch(const String &q) {
   favcache::search(q, s_favs, 60);
   favLayout(true, false);
   if (s_favs.empty()) {
-    lv_obj_clean(s_favList); s_favTiles.clear();
+    s_favTiles.clear(); lv_obj_clean(s_favList);   // clear BEFORE clean — see favRenderRows()
     lv_label_set_text(s_favStatus, "No favourites match.");
     lv_obj_remove_flag(s_favStatus, LV_OBJ_FLAG_HIDDEN);
     return;
@@ -1207,7 +1221,7 @@ static void favSearchBtnCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
   s_favSearching = true;
   s_favs.clear();
-  lv_obj_clean(s_favList); s_favTiles.clear();
+  s_favTiles.clear(); lv_obj_clean(s_favList);   // clear BEFORE clean — see favRenderRows()
   lv_obj_add_flag(s_favAz, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(s_favSearchTa, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(s_favKb, LV_OBJ_FLAG_HIDDEN);
@@ -1483,11 +1497,14 @@ static void radioLayout(bool withSearch, bool withAz) {
 }
 
 static void radioClear() {
+  // Same ordering rule as favRenderRows(), and for the same reason: radioScrollCb() ->
+  // radioPaintArt() walks s_radioTiles calling lv_obj_get_y(), and lv_obj_clean() can fire
+  // LV_EVENT_SCROLL synchronously. Empty the vector first so that callback is a no-op.
+  s_radioTiles.clear();
+  s_radioSnapped = -1;
   if (s_radioList) lv_obj_clean(s_radioList);
   s_radioStations.clear();
   s_searchHits.clear();
-  s_radioTiles.clear();
-  s_radioSnapped = -1;
 }
 
 // Fill in any tile whose artwork has finished decoding. Only rows near the viewport are asked for,
