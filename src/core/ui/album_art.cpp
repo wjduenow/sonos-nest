@@ -114,10 +114,26 @@ bool albumArtFetch(const String &url) {
   ++s_nFetch;
   if (!s_jpeg) { ++s_nFail; return false; }
 
+  // PLAIN HTTP ONLY, and this guard is a reboot fix rather than politeness — the full mechanism
+  // is written up over artUriAbsolute() in core/sonos/didl.cpp, which is where such a URL is
+  // supposed to be dropped. Short version: speaking plaintext at a TLS port can leave HTTPClient
+  // spinning in Stream::timedRead() with no yield, on a core-0 task that outranks the idle task
+  // the task watchdog is watching, and the chip resets. That is worth two guards, because the one
+  // in didl.cpp only covers URIs that arrive through parseNowPlaying().
+  if (!url.startsWith("http://")) {
+    LOG.printf("[art] refusing non-http URL (no TLS on this path): %.60s\n", url.c_str());
+    ++s_nFail;
+    return false;
+  }
+
   // Download the JPEG (plain HTTP — Sonos serves art off the speaker itself).
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) { ++s_nFail; return false; }
+  // Below the 5 s task-watchdog timeout, since this value is also what Stream::timedRead() spins
+  // for. The speaker is on the LAN and answers in tens of ms; this only ever bites on a stall,
+  // and it applies to the gap between reads, not to the whole transfer.
+  http.setTimeout(3000);
   int code = http.GET();
   if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
   // writeToStream() de-chunks the body (the raw stream pointer would include chunk framing).

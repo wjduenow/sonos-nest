@@ -50,8 +50,39 @@ static const char *DIDL_HDR =
     "xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">";
 
 void artUriAbsolute(String &artUri, const String &speakerIp) {
-  if (artUri.startsWith("/") && speakerIp.length())
-    artUri = "http://" + speakerIp + ":1400" + artUri;
+  if (artUri.length() == 0) return;
+
+  // The common case: Sonos reports art relative to the speaker, which serves it over plain HTTP.
+  if (artUri.startsWith("/")) {
+    if (speakerIp.length()) artUri = "http://" + speakerIp + ":1400" + artUri;
+    return;
+  }
+  if (artUri.startsWith("http://")) return;    // absolute and fetchable as-is
+
+  // Anything left is a cloud service handing us an ABSOLUTE https:// image URL instead of a
+  // speaker-relative one — Amazon Music does this (…media-amazon.com/images/I/…). Drop it.
+  //
+  // THIS IS A CRASH FIX, NOT A TIDY-UP. The art path (core/ui/album_art.cpp) fetches with a plain
+  // WiFiClient, and against a TLS port that does not merely fail: HTTPClient reads response
+  // headers with readStringUntil(), which is Stream::timedRead() — a tight `while (millis() -
+  // start < _timeout) read();` spin with NO yield — and HTTPClient sets that timeout to its own
+  // 5000 ms. artTask runs at priority 1 on core 0, above IDLE0 at priority 0, and this build has
+  // CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y with CONFIG_ESP_TASK_WDT_TIMEOUT_S=5. So one
+  // stalled header read starves IDLE0 for as long as the watchdog allows and the chip resets:
+  // observed on the jukebox as repeated reboots with esp_reset_reason()==6 (ESP_RST_TASK_WDT),
+  // roughly one per few hours of Amazon playback because artTask retries four times per track and
+  // each retry is a fresh coin toss between the two 5 s timers.
+  //
+  // Clearing (rather than leaving it for the fetch to reject) also stops the retry churn: artTask
+  // treats an empty URI as "nothing to show", clears immediately and stops, instead of burning
+  // four 5 s attempts on every track change.
+  //
+  // The cost is that these tracks show no cover — which is what already happened, just after four
+  // timeouts and a possible reboot. Actually RESTORING art for them is a separate job: the
+  // speaker's /getaa proxy keys off the TRACK uri, which is not currently kept in PlayerState, and
+  // fetching the https URL directly means a TLS client in shared core, whose buffers the two
+  // ESP32-S3 units cannot afford (see CLAUDE.md on internal SRAM and `connection refused`).
+  artUri.clear();
 }
 
 void parseNowPlaying(const String &trackMetaData, PlayerState &out) {
