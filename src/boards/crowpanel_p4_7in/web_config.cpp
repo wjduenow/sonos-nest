@@ -17,6 +17,7 @@
 #include <WiFi.h>
 
 #include "core/board.h"
+#include "core/crashlog.h"   // dumpSize()/dumpRead() — the flash read lives in core, not here
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/webconfig.h"
@@ -327,6 +328,36 @@ static void handleFavRefresh() {
   s_server->send(200, "application/json", "{\"ok\":true}");
 }
 
+// Stream the stored core dump so it can be unwound on a host — see core/crashlog.h for the
+// espcoredump.py command and why the on-device summary is not enough on RISC-V.
+//
+// CHUNKED BY HAND, and that is the point: the partition is 64 KB, and this board's scarce resource
+// is internal SRAM — heapLargest sits around 30 KB in normal running, so allocating the dump whole
+// (or handing WebServer a 64 KB String) would fail exactly when a crash has just made the heap
+// worth inspecting. A 1 KB stack buffer and setContentLength streams it with no allocation at all.
+static void handleCoredump() {
+  const size_t n = crashlog::dumpSize();
+  if (!n) { s_server->send(404, "text/plain", "no core dump stored\n"); return; }
+
+  s_server->setContentLength(n);
+  // A filename that carries the build hash: these are useless without the matching ELF, and a
+  // directory of files all called `coredump.bin` is how they get matched to the wrong one.
+  s_server->sendHeader("Content-Disposition",
+                       String("attachment; filename=\"coredump-") + DEVICE_HOSTNAME + ".bin\"");
+  s_server->send(200, "application/octet-stream", "");
+
+  WiFiClient client = s_server->client();
+  uint8_t buf[1024];
+  size_t sent = 0;
+  while (sent < n) {
+    const size_t got = crashlog::dumpRead(sent, buf, sizeof(buf));
+    if (!got) break;                       // truncates rather than spinning on a read fault
+    if (client.write(buf, got) != got) break;   // reader went away
+    sent += got;
+  }
+  LOG.printf("[crash ] served core dump: %u/%u bytes\n", (unsigned)sent, (unsigned)n);
+}
+
 static void serverTask(void *) {
   // boardInit() runs before appBoot() brings up WiFi, so wait here rather than failing to bind.
   while (WiFi.status() != WL_CONNECTED) vTaskDelay(pdMS_TO_TICKS(500));
@@ -338,6 +369,7 @@ static void serverTask(void *) {
   s_server->on("/api/radio/refresh", HTTP_POST, handleRefresh);
   s_server->on("/api/favorites/refresh", HTTP_POST, handleFavRefresh);
   s_server->on("/api/knob", HTTP_GET, handleKnob);
+  s_server->on("/api/coredump", HTTP_GET, handleCoredump);
   s_server->begin();
   s_url = String("http://") + WiFi.localIP().toString();
   LOG.printf("[web   ] config server on %s\n", s_url.c_str());

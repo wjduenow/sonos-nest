@@ -52,4 +52,30 @@ void report(Print &out);
 // which is the normal, healthy case — the same convention psramMin uses.
 void toJson(JsonObject health);
 
+// --- Raw dump, for host-side unwinding --------------------------------------------------------
+// The summary is not enough on RISC-V and that is not a shortcoming of this module: exc_pc for an
+// assert points into panic_abort(), i.e. at the reporting machinery rather than at the code that
+// failed, and the call chain that would name the real site cannot be walked on the chip. The whole
+// ELF dump can be, on a host, by IDF's own tool:
+//
+//     curl -o dump.bin http://<device>/api/coredump
+//     espcoredump.py --chip esp32p4 info_corefile -c dump.bin -t raw firmware.elf
+//
+// which prints the faulting backtrace AND every task's stack — the latter mattering because the
+// task that takes a heap assert is whoever happened to call free() on a corrupted block, not
+// necessarily whoever corrupted it.
+//
+// The firmware.elf must be the build that crashed; compare `elfSha` in health.crash. `pio run`
+// overwrites firmware.elf, so keep a copy of any build you ship.
+//
+// Streamed in chunks rather than read whole: the partition is 64 KB and this device's internal
+// heap is its scarce resource (CLAUDE.md — heapLargest has been as low as ~30 KB in normal
+// running, so a 64 KB contiguous buffer is not merely wasteful, it would fail).
+
+// Size in bytes of the stored dump, or 0 when there is none to serve.
+size_t dumpSize();
+
+// Copies up to `len` bytes at `offset` into `buf`. Returns bytes copied; 0 at or past the end.
+size_t dumpRead(size_t offset, uint8_t *buf, size_t len);
+
 }  // namespace crashlog

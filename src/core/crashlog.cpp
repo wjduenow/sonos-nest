@@ -4,6 +4,7 @@
 #include <esp_core_dump.h>
 #include <esp_system.h>
 #include <esp_idf_version.h>
+#include <esp_partition.h>
 
 // The summary API only exists when the dump is an ELF written to flash. Everything below collapses
 // to no-ops otherwise, so this file is safe in shared core: a board whose partition table has no
@@ -180,9 +181,44 @@ void toJson(JsonObject health) {
   const char *cn = causeName(s_sum.ex_info.exc_cause);
 #endif
   if (cn[0]) c["causeName"] = cn;
+  const size_t n = dumpSize();
+  if (n) c["dumpBytes"] = (uint32_t)n;   // tells a reader /api/coredump has something to give
 #else
   (void)health;
 #endif
+}
+
+// --- Raw dump ---------------------------------------------------------------------------------
+// Deliberately NOT gated on CRASHLOG_SUPPORTED: image_check()/image_get() exist wherever the
+// coredump component does, even on the IDF 4.4 boards whose summary API is thinner. A board with
+// no coredump partition simply finds nothing and serves 404.
+
+size_t dumpSize() {
+  size_t addr = 0, size = 0;
+  if (esp_core_dump_image_check() != ESP_OK) return 0;
+  if (esp_core_dump_image_get(&addr, &size) != ESP_OK) return 0;
+  return size;
+}
+
+size_t dumpRead(size_t offset, uint8_t *buf, size_t len) {
+  size_t addr = 0, size = 0;
+  if (!buf || !len) return 0;
+  if (esp_core_dump_image_check() != ESP_OK) return 0;
+  if (esp_core_dump_image_get(&addr, &size) != ESP_OK) return 0;
+  if (offset >= size) return 0;
+  if (offset + len > size) len = size - offset;
+
+  // image_get() returns an address in the flash map; esp_partition_read wants an offset WITHIN the
+  // partition, so it has to be rebased. Reading through the partition API rather than raw flash
+  // keeps the bounds check that stops a bad offset walking into the app image.
+  const esp_partition_t *part = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+  if (!part) return 0;
+  if (addr < part->address) return 0;
+  const size_t within = addr - part->address;
+  if (within + offset + len > part->size) return 0;
+  if (esp_partition_read(part, within + offset, buf, len) != ESP_OK) return 0;
+  return len;
 }
 
 }  // namespace crashlog
