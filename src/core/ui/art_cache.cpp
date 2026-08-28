@@ -10,6 +10,7 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <stdio.h>
+#include <string.h>   // strncmp/strncpy for the undecodable-key list
 #include <sys/stat.h>
 
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
@@ -37,6 +38,58 @@ static volatile uint32_t s_gen = 1;
 static SemaphoreHandle_t s_lock = nullptr;        // guards the slot table
 
 struct Req { char key[24]; char url[300]; };   // favourite art URLs run long
+
+// --- Keys whose IMAGE cannot be decoded ------------------------------------------------------
+// Without this the cache livelocks. A miss enqueues a fetch; the worker downloads, fails to
+// decode, and `continue`s leaving the slot not-ready — and BOTH dedupe checks (get()'s scan and
+// the worker's "did someone fill it while this queued") test `ready`, so neither sees the
+// attempt. The row is still on screen, so the next UI pass misses again, enqueues again, and the
+// worker re-downloads the same bytes to fail identically. Measured on 2026-08-27: ~15 cycles in
+// 10 s on one station, internal heap 110 KB -> 51 KB (min 25.5 KB), and favcache had to skip its
+// refresh — "[favs] refresh deferred, only 54700 B heap free". CLAUDE.md records where that ends:
+// LWIP cannot get socket buffers and the symptom is Sonos "connection refused". It also thrashes
+// an LRU slot per attempt, evicting artwork that HAD decoded.
+//
+// ONLY DECODE FAILURES GO IN HERE, and the distinction is the whole design. A JPEG that TJpg
+// rejects will be rejected identically forever, so retrying can only burn heap and bandwidth.
+// A failed FETCH is not like that — a blip on this board's famously fragile link is transient, and
+// blacklisting on it would blank a tile permanently over one bad moment. Fetch failures therefore
+// still retry; if they ever storm the same way, that wants its own backoff, not this list.
+//
+// Small and wrapping on purpose: ~1055 stations, of which a handful have unusable art. Wrapping
+// means a long-ago bad key is eventually retried, so the cache self-heals if the host fixes the
+// image, without ever growing.
+static const int kMaxBad = 16;
+static char s_bad[kMaxBad][sizeof(Req::key)] = {};
+static int  s_badNext = 0;
+
+// Both callers already hold s_lock.
+static bool isBadLocked(const char *key) {
+  for (int i = 0; i < kMaxBad; i++)
+    if (s_bad[i][0] && strncmp(s_bad[i], key, sizeof s_bad[0]) == 0) return true;
+  return false;
+}
+
+static String pathOf(const String &key);   // defined below, next to dir()
+
+static void markBad(const char *key) {
+  if (xSemaphoreTake(s_lock, portMAX_DELAY) != pdTRUE) return;
+  if (!isBadLocked(key)) {
+    strncpy(s_bad[s_badNext], key, sizeof s_bad[0] - 1);
+    s_bad[s_badNext][sizeof s_bad[0] - 1] = 0;
+    s_badNext = (s_badNext + 1) % kMaxBad;
+  }
+  xSemaphoreGive(s_lock);
+
+  // Drop the SD copy too. obtain() caches every download, INCLUDING a truncated one, and prefers
+  // the disk on the next miss — so without this a short read is cached permanently and replays the
+  // same undecodable bytes on every boot, blanking that tile forever. Deleting it costs nothing
+  // (the blacklist stops any retry this session) and makes the failure self-healing: the next boot
+  // fetches it fresh, which is exactly right if the cause was a truncated transfer rather than an
+  // image TJpg genuinely cannot read.
+  const String p = pathOf(String(key));
+  if (!p.isEmpty()) remove(p.c_str());
+}
 
 // TJpg writes into whichever slot the worker is filling.
 static uint16_t *s_target = nullptr;
@@ -172,11 +225,13 @@ static void worker(void *) {
   for (;;) {
     if (xQueueReceive(s_q, &r, portMAX_DELAY) != pdTRUE) continue;
 
-    // Someone may have filled it while this sat in the queue.
+    // Someone may have filled it while this sat in the queue — or it may have been proved
+    // undecodable since it was enqueued, which get() cannot have known when it queued it.
     bool have = false;
     if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) {
       for (int i = 0; i < s_nSlots; i++)
         if (s_slots[i].ready && s_slots[i].key == r.key) { have = true; break; }
+      if (!have) have = isBadLocked(r.key);
       xSemaphoreGive(s_lock);
     }
     if (have) continue;
@@ -184,9 +239,20 @@ static void worker(void *) {
     const size_t n = obtain(r);
     if (!n) continue;
 
-    if (!jpegLock()) continue;            // shared with album art — see album_art.h
+    // Attribute the low-water while the 48 KB scratch buffer is still held — heap_watch.h is
+    // explicit that a note AFTER the allocation, while it is live, is the useful one. artcache was
+    // untagged, which is why heapLow blamed `poll` at 54 KB during the retry storm while heapMin
+    // was 25 KB: exactly the "lower than any recorded tag" gap CLAUDE.md says to treat as the clue.
+    heapwatch::note("artcache");
+
+    if (!jpegLock()) continue;            // shared with album art — TRANSIENT, so no blacklist
     uint16_t w = 0, h = 0;
-    if (TJpgDec.getJpgSize(&w, &h, s_jpeg, n) != JDR_OK || !w || !h) { jpegUnlock(); continue; }
+    if (TJpgDec.getJpgSize(&w, &h, s_jpeg, n) != JDR_OK || !w || !h) {
+      LOG.printf("[artc  ] unusable image for %s (%u B) — not retrying\n", r.key, (unsigned)n);
+      markBad(r.key);                     // deterministic: these bytes will never parse
+      jpegUnlock();
+      continue;
+    }
     uint8_t scale = 1;
     while ((max(w, h) / scale) > s_px && scale < 8) scale <<= 1;
 
@@ -207,8 +273,10 @@ static void worker(void *) {
     jpegUnlock();
 
     if (jr != JDR_OK) {
-      LOG.printf("[artc  ] decode failed jr=%d for %s (%u B)\n", (int)jr, r.key, (unsigned)n);
-      continue;                            // slot stays not-ready and will be reused
+      LOG.printf("[artc  ] decode failed jr=%d for %s (%u B) — not retrying\n",
+                 (int)jr, r.key, (unsigned)n);
+      markBad(r.key);   // same bytes, same result — retrying only burned heap and bandwidth
+      continue;         // slot stays not-ready and will be reused
     }
     if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) {
       s_slots[slot].ready = true;
@@ -255,6 +323,7 @@ uint32_t generation() { return s_gen; }
 const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
   if (!s_slots || stationKey.isEmpty()) return nullptr;
   const lv_image_dsc_t *hit = nullptr;
+  bool bad = false;
   if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) == pdTRUE) {
     for (int i = 0; i < s_nSlots; i++) {
       if (s_slots[i].ready && s_slots[i].key == stationKey) {
@@ -263,8 +332,14 @@ const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
         break;
       }
     }
+    if (!hit) bad = isBadLocked(stationKey.c_str());
     xSemaphoreGive(s_lock);
   }
+  // THE ENQUEUE IS THE THING THAT HAS TO STOP. This runs from the UI task on every pass over a
+  // visible row, so a key that can never decode would otherwise re-request forever no matter what
+  // the worker does. Returning nullptr here leaves the tile blank, which is what it was going to
+  // be anyway — only now it costs one comparison instead of a download and a failed decode.
+  if (bad) return nullptr;
   if (hit || artUrl.isEmpty()) return hit;
 
   // Miss: queue it. The queue is short and drops when full rather than blocking the UI task — a
