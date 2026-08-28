@@ -18,6 +18,10 @@
 #endif
 #include "core/settings.h"
 #include "core/net/ota.h"      // otaHandle()
+#include "core/net/logmirror.h"  // LOG — must be included OUTSIDE any __has_include("secrets.h")
+                                 // guard, or LOG only exists on machines that happen to have the
+                                 // gitignored header (CLAUDE.md; this has cost time before)
+#include "core/crashlog.h"     // read back the last panic's core dump
 #include "core/app.h"          // appBoot(), appStartTasks()
 #endif
 
@@ -79,6 +83,9 @@ void setup() {
 #else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
+  crashlog::begin();    // read any stored core dump now; only touches flash, so it is safe this
+                        // early. Printed after appBoot() below, once there is a link for the log
+                        // mirror to carry it out on.
 
   if (!boardInit()) Serial.println("[boot] board init FAILED");  // display + touch + input
   backlightSet(settingsBrightness());   // restore saved brightness
@@ -88,6 +95,13 @@ void setup() {
 #endif
 
   appBoot();            // WiFi + time + OTA + Sonos discovery + zone selection
+
+  // Printed HERE, not at the top of setup(): the log mirror only delivers to clients connected at
+  // the time, and at the top of setup() there is no link and therefore no client — the report
+  // would go into the ring buffer and be dropped. After appBoot() a watcher that reconnects on
+  // the device coming back has had several seconds to attach. It is still best-effort, which is
+  // why the same data is in /api/config → health.crash, where it can be pulled at any time.
+  crashlog::report(LOG);
   wakeWordInit();       // mic -> wake-word engine (no-op / false on boards without a mic).
                         // After appBoot so it doesn't compete with WiFi/discovery for CPU at boot.
   appStartTasks();      // launch ui / net / art tasks

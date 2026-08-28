@@ -9,6 +9,7 @@
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
+#include "crashlog.h"            // crashlog::toJson() — the last panic's task/pc, read from flash
 #include "app.h"                 // appNetStage()/appNetStallSec() — netTask liveness (see app.h)
 #ifndef HEADLESS
 #include "ui/album_art.h"        // albumArtDiag() — art fetch/fail/clear counters
@@ -164,6 +165,10 @@ String webConfigJson() {
   const uint32_t psMin = (uint32_t)ESP.getMinFreePsram();
   if (psMin) h["psramMin"] = psMin;
   h["resetReason"] = (int)esp_reset_reason();   // 4=PANIC 6=TASK_WDT 9=BROWNOUT (esp_reset_reason_t)
+  // ...and, when that 4 came from a panic IDF managed to dump, what actually crashed. resetReason
+  // alone says "it crashed" and stops there, which on a wall panel with a power-only rear port is
+  // where the investigation used to end. Absent when there is no stored dump. See core/crashlog.h.
+  crashlog::toJson(h);
   uint32_t sCalls, sRe, sLast, sMax;
   sonos::soapDiag(sCalls, sRe, sLast, sMax);
   h["soapCalls"]      = sCalls;
