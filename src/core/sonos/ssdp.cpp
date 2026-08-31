@@ -1,4 +1,5 @@
 #include "ssdp.h"
+#include "../heap_watch.h"   // heapwatch::note — attribute the internal-heap low-water
 #include "soap_client.h"
 #include "../settings.h"
 #include <Arduino.h>
@@ -95,6 +96,10 @@ static bool buildZonesFromTopology(const String &seedIp) {
   int ge = r.indexOf("</ZoneGroupState>");
   if (gs < 0 || ge < 0) return false;
   String state = unescapeXml(r.substring(gs + 16, ge));
+  // THE TROUGH FOR A DISCOVERY: the raw SOAP response and its unescaped copy are both live here,
+  // and GetZoneGroupState is the largest response this project handles — it grows with the number
+  // of rooms. Same shape as gena.cpp's "gena.unescape", tagged for the same reason.
+  heapwatch::note("ssdp.topology");
 
   int gpos = 0;
   while ((gpos = state.indexOf("<ZoneGroup ", gpos)) >= 0) {
@@ -273,6 +278,7 @@ String coordinatorIpFor(const String &zoneName) {
   int ge = r.indexOf("</ZoneGroupState>");
   if (gs < 0 || ge < 0) return zoneOwnIp(zoneName);
   String state = unescapeXml(r.substring(gs + 16, ge));
+  heapwatch::note("ssdp.coord");   // same double-copy peak as buildZonesFromTopology()
 
   // Find this zone's member, then the nearest preceding group Coordinator UUID.
   int pn = state.indexOf("ZoneName=\"" + zoneName + "\"");

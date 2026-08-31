@@ -248,6 +248,9 @@ bool refresh() {
     std::sort(st.begin(), st.end(), [](const amazon::Station &a, const amazon::Station &b) {
       return strcasecmp(a.title.c_str(), b.title.c_str()) < 0;
     });
+    // Peak of a crawl step: up to ~50 Stations, each three heap Strings, all live until the
+    // Writer below drains them. amazon.body covers the fetch; this covers what it leaves behind.
+    heapwatch::note("radio.crawl");
 
     Writer gf(genrePath((int)g, true));
     for (const auto &s : st) gf.line(clean(s.title) + "\t" + clean(s.id) + "\t" + clean(s.artUrl));
@@ -356,6 +359,9 @@ bool stations(int genreIdx, std::vector<Station> &out) {
     if (s.title.length() && s.id.length()) out.push_back(s);
   }
   fclose(f);
+  // Held by the CALLER (the Radio page keeps it for the whole browse), so the note goes here
+  // while it is full rather than after it is handed over -- see heap_watch.h.
+  heapwatch::note("radio.stations");
   return !out.empty();
 }
 

@@ -301,6 +301,9 @@ String webConfigJson() {
 
   String out;
   serializeJson(doc, out);
+  // Document AND its serialised copy are both live here. Small (~2 KB), but it was
+  // untagged, and an untagged path is indistinguishable from the thing you are hunting.
+  heapwatch::note("webconfig.json");
   return out;
 }
 
@@ -350,6 +353,9 @@ String registrationJson() {
 
   String out;
   serializeJson(doc, out);
+  // Document AND its serialised copy are both live here. Small (~2 KB), but it was
+  // untagged, and an untagged path is indistinguishable from the thing you are hunting.
+  heapwatch::note("webconfig.json");
   return out;
 }
 
