@@ -368,8 +368,12 @@ static inline void netStage(const char *s) { s_netStage = s; s_netAliveMs = mill
 
 const char *appNetStage() { return (const char *)s_netStage; }
 uint32_t    appNetStallSec() {
-  if (s_netAliveMs == 0) return 0;
-  return (millis() - s_netAliveMs) / 1000;
+  // Read the timestamp ONCE and compare SIGNED — see appSupervisorTick() for the race this
+  // avoids. Unsigned here reported 4294967 in /api/config whenever it lost that race.
+  const uint32_t alive = s_netAliveMs;
+  if (alive == 0) return 0;
+  const int32_t d = (int32_t)(millis() - alive);
+  return d > 0 ? (uint32_t)d / 1000 : 0;
 }
 
 // How long netTask may go without completing an iteration before we call it wedged. Its longest
@@ -380,15 +384,33 @@ uint32_t    appNetStallSec() {
 static const uint32_t kNetStallRebootMs = 120000;
 
 void appSupervisorTick() {
-  if (s_netAliveMs == 0) return;                  // tasks not started yet
+  // ONE read of s_netAliveMs, and a SIGNED comparison. Both matter, and getting it wrong destroyed
+  // a healthy 20.9 h uptime on 2026-09-01:
+  //
+  //   [health] up=75385s heap=77KB rssi=-48     <- printing every 10 s, the device was fine
+  //   [net] STALLED in stage 'updater' for 4294967s — rebooting to recover
+  //
+  // 4294967 is UINT32_MAX/1000. This runs on loopTask (core 1) while netTask (core 0) calls
+  // netStage() -> s_netAliveMs = millis(). The old code evaluated millis() FIRST and read
+  // s_netAliveMs SECOND, so when netTask stamped a newer value in between, the unsigned
+  // subtraction wrapped to ~4.29e9, cleared the 120 s threshold instantly, and rebooted a device
+  // that was not stalled at all. The window is a few instructions wide — but this is called from
+  // loop() thousands of times a second against a netStage() that fires many times per poll, so it
+  // is a question of days, not luck.
+  //
+  // Reading once and comparing signed makes a slightly-future stamp a small NEGATIVE, which is
+  // correctly "not stalled". Signed also keeps the real millis() rollover at 49.7 days working:
+  // the difference stays small and positive across the wrap.
+  const uint32_t alive = s_netAliveMs;
+  if (alive == 0) return;                         // tasks not started yet
 
   // A flash legitimately parks netTask for minutes: espota holds it at the top of the loop, and a
   // pull-flash runs INSIDE it (updater.cpp's applyNow downloads ~1 MB there). Re-stamp rather
   // than merely skipping, so finishing a flash cannot land us in an instant false positive.
   if (otaActive() || updaterActive()) { s_netAliveMs = millis(); return; }
 
-  const uint32_t stalled = millis() - s_netAliveMs;
-  if (stalled < kNetStallRebootMs) return;
+  const int32_t stalled = (int32_t)(millis() - alive);
+  if (stalled < (int32_t)kNetStallRebootMs) return;
 
   // Name the stage before rebooting: this line is the whole point of the instrumentation, and it
   // is the thing that was missing when this was first investigated from outside the device.
