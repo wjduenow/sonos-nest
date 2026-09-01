@@ -4,6 +4,10 @@
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClient.h>
+#ifdef ALBUM_ART_TLS
+#include <WiFiClientSecure.h>
+#include "core/amazon.h"          // artThumbUrl — ask the CDN to resize instead of pulling ~208 KB
+#endif
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
@@ -127,22 +131,63 @@ bool albumArtFetch(const String &url) {
   ++s_nFetch;
   if (!s_jpeg) { ++s_nFail; return false; }
 
-  // PLAIN HTTP ONLY, and this guard is a reboot fix rather than politeness — the full mechanism
-  // is written up over artUriAbsolute() in core/sonos/didl.cpp, which is where such a URL is
-  // supposed to be dropped. Short version: speaking plaintext at a TLS port can leave HTTPClient
-  // spinning in Stream::timedRead() with no yield, on a core-0 task that outranks the idle task
-  // the task watchdog is watching, and the chip resets. That is worth two guards, because the one
-  // in didl.cpp only covers URIs that arrive through parseNowPlaying().
-  if (!url.startsWith("http://")) {
-    LOG.printf("[art] refusing non-http URL (no TLS on this path): %.60s\n", url.c_str());
+  // Speaker-relative art arrives as http://<ip>:1400/getaa?... and is the common case. Cloud
+  // services hand out ABSOLUTE https:// image URLs instead — Amazon Music does — and those need
+  // TLS, which only some units can afford (see ALBUM_ART_TLS below).
+  String u = url;
+  bool tls = false;
+
+#ifdef ALBUM_ART_TLS
+  if (u.startsWith("https://")) {
+    // Ask the CDN to resize rather than pulling the original. An Amazon cover is ~208 KB at full
+    // size and ~24 KB at 320 px — 8x less to move across a link that stalls for seconds, and it
+    // is the same trick art_cache.cpp already uses for station tiles. artThumbUrl() also forces
+    // a .jpg extension, so a PNG source transcodes server-side; TJpg cannot decode PNG at all.
+    //
+    // The resized image comes back PROGRESSIVE (measured: baseline at <=200 px, SOF2 at >=224),
+    // which is fine only because the libjpeg fallback exists now. Before that this would have
+    // fetched perfectly and then failed to decode.
+    u = amazon::artThumbUrl(u, ART_MAX);
+    tls = true;
+  }
+#endif
+
+  // PLAIN HTTP OTHERWISE, and this guard is a reboot fix rather than politeness — the full
+  // mechanism is written up over artUriAbsolute() in core/sonos/didl.cpp. Short version: speaking
+  // plaintext at a TLS port can leave HTTPClient spinning in Stream::timedRead() with no yield, on
+  // a core-0 task that outranks the idle task the watchdog watches, and the chip resets. Two
+  // guards, because the one in didl.cpp only covers URIs arriving through parseNowPlaying().
+  if (!tls && !u.startsWith("http://")) {
+    LOG.printf("[art] refusing non-http URL (no TLS on this build): %.60s\n", u.c_str());
     ++s_nFail;
     return false;
   }
 
-  // Download the JPEG (plain HTTP — Sonos serves art off the speaker itself).
+  // BOTH CLIENTS ARE DECLARED BEFORE THE HTTPClient, and that ordering is load-bearing: locals
+  // destruct in reverse, and ~HTTPClient calls _client->stop(). Getting this backwards in
+  // updater.cpp cost a week of heap corruption (CLAUDE.md).
   WiFiClient client;
+#ifdef ALBUM_ART_TLS
+  // Static and lazily created: a unit that never sees an https art URL never pays for a TLS
+  // client, and one that does pays once rather than per track. Same pattern as art_cache.cpp.
+  static WiFiClientSecure *secure = nullptr;
+  if (tls && !secure) {
+    secure = new WiFiClientSecure();
+    if (!secure) { ++s_nFail; return false; }
+    secure->setInsecure();     // LAN/hobby threat model; the art is public cover images
+  }
+#endif
   HTTPClient http;
-  if (!http.begin(client, url)) { ++s_nFail; return false; }
+
+#ifdef ALBUM_ART_TLS
+  const bool began = tls ? http.begin(*secure, u) : http.begin(client, u);
+#else
+  const bool began = http.begin(client, u);
+#endif
+  if (!began) { ++s_nFail; return false; }
+  // Connect timeout matters for TLS specifically — a handshake measured 0.5-1.4 s here — but it
+  // stays under the watchdog for the same reason the read timeout does.
+  http.setConnectTimeout(4000);
   // Must stay UNDER the 5 s task watchdog, because this value is also how long
   // Stream::timedRead() will spin without yielding if a read stalls mid-header. That is the whole
   // reason it is set at all — see the Stream-helper entry in CLAUDE.md.

@@ -82,7 +82,16 @@ void artUriAbsolute(String &artUri, const String &speakerIp) {
   // speaker's /getaa proxy keys off the TRACK uri, which is not currently kept in PlayerState, and
   // fetching the https URL directly means a TLS client in shared core, whose buffers the two
   // ESP32-S3 units cannot afford (see CLAUDE.md on internal SRAM and `connection refused`).
+  //
+  // UNLESS this build can actually fetch it. ALBUM_ART_TLS gives album_art.cpp a TLS client and a
+  // CDN-resize step, so on those units the URL is usable and clearing it would just throw the
+  // cover away. The flag is per-env on purpose: mbedTLS allocates from PSRAM on the jukebox
+  // (MBEDTLS_EXTERNAL_MEM_ALLOC in its custom_sdkconfig) but from INTERNAL SRAM on the two S3
+  // screens, where a 16 KB in + 16 KB out pair is exactly the thing CLAUDE.md says surfaces as
+  // Sonos "connection refused". So they keep dropping these, and keep showing no cover.
+#ifndef ALBUM_ART_TLS
   artUri.clear();
+#endif
 }
 
 void parseNowPlaying(const String &trackMetaData, PlayerState &out) {
