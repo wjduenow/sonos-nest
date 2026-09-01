@@ -143,10 +143,16 @@ bool albumArtFetch(const String &url) {
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) { ++s_nFail; return false; }
-  // Below the 5 s task-watchdog timeout, since this value is also what Stream::timedRead() spins
-  // for. The speaker is on the LAN and answers in tens of ms; this only ever bites on a stall,
-  // and it applies to the gap between reads, not to the whole transfer.
-  http.setTimeout(3000);
+  // Must stay UNDER the 5 s task watchdog, because this value is also how long
+  // Stream::timedRead() will spin without yielding if a read stalls mid-header. That is the whole
+  // reason it is set at all — see the Stream-helper entry in CLAUDE.md.
+  //
+  // 4000, not 3000. 3 s looked safely conservative and was measured to be too tight: this link
+  // stalls for 6+ seconds (soapMaxMs 6733 observed), covers run to ~220 KB, and the timeout
+  // applies to the GAP BETWEEN READS — so a stall that the retry would have ridden out instead
+  // failed the fetch. artFail ran 42-50% of artFetch on 2026-08-31. 4 s keeps a full second of
+  // watchdog margin while tolerating the stalls this network actually produces.
+  http.setTimeout(4000);
   int code = http.GET();
   if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
   // writeToStream() de-chunks the body (the raw stream pointer would include chunk framing).

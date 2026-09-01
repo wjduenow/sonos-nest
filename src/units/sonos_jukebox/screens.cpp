@@ -2485,8 +2485,6 @@ static void saverTick(const PlayerState &p) {
   if (!s_saver) return;
   if (!s_cfgLoaded || s_cfgGen != webConfigGen()) saverReadCfg();
 
-  const uint32_t idle = lv_display_get_inactive_time(nullptr);
-
   // Playing wins over both timers. On a wall panel the thing worth showing while music plays is
   // what is playing — hiding the transport controls mid-song to display a clock is the wrong
   // trade, and it is what this unit was doing. Note this suppresses BLANKING too, not just the
@@ -2495,6 +2493,30 @@ static void saverTick(const PlayerState &p) {
   // why this is a switch — see settings.h.
   const bool playing   = (p.transport == TransportState::Playing);
   const bool holdAwake = playing && s_cfgAwakePlaying;
+
+  // THE END OF A PLAYING-HOLD COUNTS AS ACTIVITY. Holding the panel awake suppresses the
+  // screensaver but nothing was feeding LVGL's inactivity timer, so `idle` kept climbing the whole
+  // time music played. After a session longer than saver_blank_min the device was therefore
+  // already past the BLANK threshold the instant playback stopped, and jumped straight to a black
+  // screen — skipping the album-art wash entirely. The cover layout could only ever appear if
+  // playback happened to stop while idle sat between saver_delay_sec and saver_blank_min, which is
+  // why it was seen for 8 seconds in three days of watching.
+  //
+  // It also stopped the panel flashing: with idle already past blank, every pause between tracks
+  // dropped the backlight to 0% and resuming slammed it back to 100%. Now a pause settles into the
+  // screensaver at the dim level and comes back from there.
+  //
+  // Resetting on the falling edge (not continuously while holding) is deliberate: it keeps the
+  // timer meaningful for a user who taps the panel mid-song, and it makes "music stopped" behave
+  // exactly like "someone touched it" — 2 min to the wash, an hour to black.
+  static bool s_wasHoldingAwake = false;
+  if (s_wasHoldingAwake && !holdAwake) lv_display_trigger_activity(nullptr);
+  s_wasHoldingAwake = holdAwake;
+
+  // Read idle AFTER that reset, not before. Reading it first would evaluate this tick against the
+  // stale pre-reset value, so a session past saver_blank_min would still satisfy wantBlank for one
+  // frame — a visible flash of black at the exact moment the fix exists to prevent.
+  const uint32_t idle = lv_display_get_inactive_time(nullptr);
 
   const bool wantBlank = !holdAwake && s_cfgBlankMs && idle >= s_cfgBlankMs;
   const bool wantShow  = !holdAwake && s_cfgMode != SAVER_OFF && s_cfgDelayMs &&
