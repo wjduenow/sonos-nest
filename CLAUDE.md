@@ -297,6 +297,16 @@ core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name
 > 282 s to populate `~/.platformio-p4` once, then **0 / 0 / 0 packages** and 9.9 / 11.8 / 8.7 s.
 > Costs 8.5 GB. CI is immune either way — fresh runner per matrix job, cache keyed per env — but it
 > builds through `tools/pio` regardless so the wrapper is exercised on every PR.
+>
+> ⚠ **BUILD THE JUKEBOX LAST when you intend to flash it.** Building the S3 envs DELETES
+> `.pio/build/sonos-jukebox/` — PlatformIO cleans on a `project.checksum` change, and the checksum
+> moves when the core dir switches silicon. So the natural order (verify all five, then flash) is
+> the one that fails, with a missing `firmware.bin` at the espota step.
+>
+> ⚠ **COMMIT BEFORE YOU BUILD what you are about to flash.** `FW_VERSION` comes from `git describe`
+> at build time, so a binary built from a dirty tree reports `<previous-tag>-dirty` and cannot be
+> tied back to a commit — which is exactly what `health.crash`'s `elfSha` and the whole coredump
+> workflow depend on. Cost two needless reflashes to get a truthful version string.
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.
@@ -500,6 +510,68 @@ Consequences worth knowing:
 - **Album art is chunked HTTP:** read it with `HTTPClient::writeToStream()` (a raw stream
   read leaks chunk-size framing into the JPEG). Plain HTTP (no TLS). Buffer ≥220 KB
   (high-res covers). TJpg decodes **baseline only** (no progressive); buffers live in PSRAM.
+- **NEVER let a Stream helper touch a socket that might not answer — this is a REBOOT, not a
+  failed read, and it has now bitten twice.** `Stream::timedRead()` is a tight
+  `do { c = read(); } while (millis() - start < _timeout);` with **no yield**, and
+  `HTTPClient` reads response headers through `readStringUntil()`, which uses it, with `_timeout`
+  set to its own 5000 ms. Any core-0 task sits at priority ≥1, above IDLE0 at 0, and this build
+  has `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y` with `TIMEOUT_S=5` — so one stalled read
+  starves the watched idle task for exactly as long as the watchdog allows. First seen in
+  `amazon::post()`; then again in 2026-08 when Amazon Music started reporting **absolute
+  `https://`** album-art URIs and the plain-`WiFiClient` art path spoke plaintext at a TLS port.
+  **Symptom to recognise: `esp_reset_reason()==6` (ESP_RST_TASK_WDT) with nothing in the log.**
+  Non-`http://` art URIs are dropped in `artUriAbsolute()` now, and the art client's timeout is
+  bounded under the 5 s watchdog.
+- **THE CLIENT MUST OUTLIVE THE `HTTPClient`.** Locals destruct in reverse declaration order, so
+  `HTTPClient http; WiFiClient cl;` destroys the client FIRST and then runs
+  `~HTTPClient() { if (_client) _client->stop(); }` — a method call on a dead object. `end()` does
+  not save you: with keep-alive, `disconnect()` takes the `if (_reuse && _canReuse)` branch that
+  deliberately KEEPS `_client` set, and `_reuse` defaults to true. Cost a week in `updater.cpp`
+  against the portal (uvicorn, keep-alive by default), presenting as heap corruption on whichever
+  task allocated next — first `String::~String` on `ui`, then ArduinoJson on `net`. Declare the
+  client first, as every other site here does.
+- **`lv_obj_clean()` fires `LV_EVENT_SCROLL` SYNCHRONOUSLY**, because removing children changes the
+  scroll extent. Any vector of child pointers must be cleared **before** the clean, never after —
+  a scroll callback that walks it in between is walking freed objects. Presented as
+  `ESP_RST_PANIC`, `mcause 5`, `mtval 0x4` (a load off a null pointer) after 5 h of uptime, and it
+  needed a cache refresh under a populated list to fire at all. Fixed at five sites in
+  `screens.cpp`; the paint functions early-return on an empty vector, so the window closes rather
+  than narrowing.
+- **Judge internal heap by `heapMin`, NOT `heapFree`.** Free heap can sit flat for days while the
+  low-water walks steadily down — that is exactly what a load-driven approach to the ~15 KB LWIP
+  floor looks like, and watching `heapFree` will show you nothing until it fails. Related:
+  `health.heapLow` names the tag *executing at the minimum*, not the biggest allocator, so a
+  frequent poller (the web config path) can win it by coincidence. If `heapMin` is below every
+  tagged low, the consumer is untagged code — or the network stack, which no `heapwatch::note()`
+  can ever attribute.
+- **A wall panel with no serial port CAN still tell you why it crashed** — `core/crashlog.*`.
+  IDF writes an ELF core dump to flash on every panic; this reads it back at boot into
+  `health.crash` (task, PC, cause) and serves the raw dump at `GET /api/coredump`:
+  ```
+  curl -o dump.bin http://<device>/api/coredump
+  python3 -m esp_coredump --chip esp32p4 info_corefile -c dump.bin -t raw firmware.elf
+  ```
+  An OTA writes the *other* app slot, so the dump survives an update and can be read by a build
+  installed after the crash. **KEEP THE `firmware.elf` OF ANYTHING YOU FLASH** — `pio run`
+  overwrites it, and without the exact build the addresses are meaningless. On RISC-V the on-device
+  summary alone is not enough: an assert's `exc_pc` points into `panic_abort()`, so the host unwind
+  is what names the real frame.
+- **`appSupervisorTick()` must read `s_netAliveMs` ONCE and compare SIGNED.** It runs on loopTask
+  while netTask stamps that timestamp; evaluating `millis()` first and reading the stamp second
+  lets a newer stamp wrap the unsigned subtraction to ~4.29e9, which clears the 120 s threshold
+  instantly and reboots a healthy device. **Symptom: `[net] STALLED ... for 4294967s`** — that is
+  `UINT32_MAX/1000`, not a real stall. Signed also keeps the genuine 49.7-day rollover working.
+- **Amazon's image CDN switches to PROGRESSIVE above 200 px.** The `._SL<px>_.jpg` resize suffix
+  (`amazon::artThumbUrl`) returns SOF0 baseline at ≤200 and SOF2 progressive at ≥224 — measured on
+  two covers, so it is a CDN rule and not image-dependent. That is why the 72 px tile cache works
+  (it asks for 128/160) and why anything asking for 320 needs the progressive fallback. The
+  original, unresized, is baseline — but 200+ KB.
+- **Do not re-run the lwIP buffer experiment.** `TCP_SND_BUF`/`WND` come from the inherited
+  `sdkconfig.defaults` at 65534 (11× the IDF default) and look absurd on ~100 KB of internal heap.
+  Capping them at 16384 was measured and made things **worse**: time to reach ~19 KB `heapMin` went
+  64 h → 19 h, crawl `heapMin` 47 KB → 28 KB, with no throughput change (crawl 56-60 s → 55 s).
+  Likely because `MBEDTLS_SSL_IN_CONTENT_LEN` is also 16384, so window == record size makes every
+  TLS record straddle a window boundary. Reverted.
 - **`lv_conf.h` must be assembly-safe:** LVGL's `.S` files include it — no unguarded
   `#include <stdint.h>`. Set `LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE` (Xtensa).
 - **LVGL memory pool (`LV_MEM_SIZE`):** scaled fonts (`transform_scale`, used for the big
