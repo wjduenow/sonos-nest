@@ -1,6 +1,7 @@
 // See updater.h. HTTP pull-OTA against the plans/06 manifest schema.
 #include "updater.h"
 #include "../settings.h"   // settingsUpdateUrl() / settingsOtaAuto()
+#include "../crashlog.h"   // noteReboot()/clearRebootNote() — a finished pull-OTA never returns
 #include "ota.h"           // otaHostname() — the stable id we send so the portal can target us
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -191,6 +192,11 @@ static void applyNow(const String &url) {
   });
   httpUpdate.rebootOnUpdate(true);
 
+  // Written BEFORE the call because HTTP_UPDATE_OK never returns — rebootOnUpdate(true) restarts
+  // inside the library, so there is no post-success point to record from. The failure paths below
+  // clear it again, so the note only survives a reboot that actually happened.
+  crashlog::noteReboot("otapull");
+
   t_httpUpdate_return r;
   if (url.startsWith("https:")) {
     WiFiClientSecure sec;
@@ -201,8 +207,11 @@ static void applyNow(const String &url) {
     r = httpUpdate.update(cl, url, FW_VERSION);
   }
 
-  // Only reached on failure — HTTP_UPDATE_OK reboots. Clear the flag so the UI/art tasks resume.
+  // Only reached on failure — HTTP_UPDATE_OK reboots. Clear the flag so the UI/art tasks resume,
+  // and retract the note above: no reboot happened, and a stale "otapull" would misattribute the
+  // NEXT one (a link recovery, a panic) to an update that never applied.
   s_active = false;
+  crashlog::clearRebootNote();
   if (r == HTTP_UPDATE_FAILED)
     LOG.printf("[updater] FAILED (%d) %s\n", httpUpdate.getLastError(),
                   httpUpdate.getLastErrorString().c_str());

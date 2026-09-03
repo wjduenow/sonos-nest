@@ -72,6 +72,43 @@ void toJson(JsonObject health);
 // heap is its scarce resource (CLAUDE.md — heapLargest has been as low as ~30 KB in normal
 // running, so a 64 KB contiguous buffer is not merely wasteful, it would fail).
 
+// --- Deliberate reboots -----------------------------------------------------------------------
+// WHY THIS EXISTS, and it is a different hole from the core dump above. A panic leaves a dump; a
+// DELIBERATE ESP.restart() leaves nothing at all. esp_reset_reason() reports 3 (ESP_RST_SW) for
+// every one of them alike — the netTask stall reboot, the ESP-Hosted link recovery, a device-name
+// change, a finished pull-OTA — so a rebooting device is indistinguishable from any other
+// rebooting device.
+//
+// That is not hypothetical. Over 2026-09-01/02 this jukebox rebooted three times; three separate
+// causes were proposed from the surrounding evidence and two were wrong, because every candidate
+// path produces byte-identical symptoms: reset reason 3, no dump, ~2 min offline.
+//
+// THE LOG CANNOT COVER THIS, and that is the crux. Each reboot path does print its reason, but:
+//   * the mirror only reaches clients connected AT THAT MOMENT, and
+//   * netLinkRecover()'s reason travels over the very SDIO link whose death it is reporting, so
+//     it can NEVER be delivered — no amount of flush or delay fixes a dead transport.
+// A note in NVS survives the reset and is read back over a link that works again by then.
+//
+// READ AND CLEARED at boot, deliberately: the value then describes THIS boot. Left in place it
+// would be read again after a power cut and blamed for a reboot it had nothing to do with — a
+// stale explanation is worse than none, because it stops the search.
+//
+// Call IMMEDIATELY before ESP.restart(); Preferences commits on write, so it is durable even
+// though the reset follows within milliseconds. Keep `reason` short and stable — it is a key to
+// grep and compare across boots, not prose.
+void noteReboot(const char *reason);
+
+// Retract a note written speculatively. Needed by the pull-OTA path, which must write its note
+// BEFORE calling into HTTPUpdate (a successful update reboots inside the library and never
+// returns) and therefore has to undo it on the paths that do return. Without this, a failed
+// update would leave "otapull" behind to be blamed for whatever caused the next reboot.
+void clearRebootNote();
+
+// The reason recorded before the reset that started this boot, or "" when there was none —
+// which is itself informative: it means an UNPLANNED reset (panic, brownout, power cut, or the
+// hardware watchdog), so cross-read it with health.resetReason.
+const char *lastReboot();
+
 // Size in bytes of the stored dump, or 0 when there is none to serve.
 size_t dumpSize();
 

@@ -6,6 +6,7 @@
 #include "core/library.h"
 #include "core/board.h"
 #include "core/net/ota.h"
+#include "core/crashlog.h"    // noteReboot() — the OTA stall-reboot below is a deliberate reset
 #include "core/settings.h"
 #include "core/webconfig.h"   // webConfigGen() — apply remote brightness changes from the web config
 #include <WiFi.h>
@@ -648,7 +649,7 @@ void uiTick() {
     // Stall safety: no progress for 20s (e.g. upload can't connect back) -> reboot into the
     // still-valid firmware.
     if (p != s_otaLastP) { s_otaLastP = p; s_otaStallMs = nowt; }
-    else if (nowt - s_otaStallMs > 20000) ESP.restart();
+    else if (nowt - s_otaStallMs > 20000) { crashlog::noteReboot("otastall"); ESP.restart(); }
 
     bool first = (lv_screen_active() != s_scrOta);
     if (first) { lv_screen_load(s_scrOta); backlightSet(100); }

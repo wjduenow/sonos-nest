@@ -15,6 +15,7 @@
 #include "ui/album_art.h"
 #endif
 #include "settings.h"
+#include "crashlog.h"             // noteReboot() — record WHY before any deliberate ESP.restart()
 #include "library.h"
 #include "net/wifi.h"
 #include "net/ota.h"
@@ -295,6 +296,7 @@ static void processPending() {
     // A device-name change: reboot so the DHCP hostname, mDNS and OTA name all come up fresh
     // from the new name. The web handler has already sent its HTTP response by now; the short
     // delay lets that TCP flush before the reset drops the link.
+    crashlog::noteReboot("devicename");
     LOG.println("[app] rebooting to apply new device name");
     delay(800);
     ESP.restart();
@@ -414,6 +416,9 @@ void appSupervisorTick() {
 
   // Name the stage before rebooting: this line is the whole point of the instrumentation, and it
   // is the thing that was missing when this was first investigated from outside the device.
+  // The stage goes into the note, not just the log line: "netstall:gena" and "netstall:updater"
+  // are different faults, and the LOG only reaches a reader who was already attached.
+  crashlog::noteReboot((String("netstall:") + appNetStage()).c_str());
   LOG.printf("[net] STALLED in stage '%s' for %lus — rebooting to recover\n",
              appNetStage(), (unsigned long)(stalled / 1000));
   LOG.flush();

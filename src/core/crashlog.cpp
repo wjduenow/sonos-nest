@@ -1,6 +1,7 @@
 #include "crashlog.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled
 
+#include <Preferences.h>          // the deliberate-reboot note; its own NVS namespace, see below
 #include <esp_core_dump.h>
 #include <esp_system.h>
 #include <esp_idf_version.h>
@@ -50,6 +51,15 @@ namespace {
 bool s_read = false;     // begin() has run
 bool s_have = false;     // ...and found a dump
 
+// The deliberate-reboot note. Its own NVS namespace rather than settings' "sonos": this is
+// diagnostic state with a different lifetime to user config, and it is written from board code
+// (net_link.cpp) that must not reach into settings.
+// A String, not a char[]: read once at boot and then never touched, so the allocation is one-off
+// and the internal heap this device is short of is not the constraint here.
+constexpr const char *kRebootNs  = "rboot";
+constexpr const char *kRebootKey = "why";
+String s_lastReboot;
+
 #if CRASHLOG_SUPPORTED
 esp_core_dump_summary_t s_sum;
 char s_panicReason[128] = {0};
@@ -97,6 +107,19 @@ const char *causeName(uint32_t c) {
 void begin() {
   if (s_read) return;
   s_read = true;
+
+  // Read-and-clear the deliberate-reboot note. Outside the CRASHLOG_SUPPORTED guard on purpose:
+  // this works on every unit, including boards with no coredump partition, and it is the ONLY
+  // post-mortem the two headless buttons can produce at all.
+  {
+    Preferences p;
+    if (p.begin(kRebootNs, false)) {           // read/write: we clear the key below
+      s_lastReboot = p.getString(kRebootKey, "");
+      if (s_lastReboot.length()) p.remove(kRebootKey);
+      p.end();
+    }
+  }
+
 #if CRASHLOG_SUPPORTED
   // image_check() validates the CRC before we trust any of it. A partition never written, or a
   // dump truncated by a reset mid-write, both land here — and printing garbage registers as if
@@ -109,6 +132,25 @@ void begin() {
     s_panicReason[0] = 0;
 #endif
 #endif
+}
+
+void noteReboot(const char *reason) {
+  if (!reason || !*reason) return;
+  Preferences p;
+  if (!p.begin(kRebootNs, false)) return;   // never let a diagnostic block the reboot it precedes
+  p.putString(kRebootKey, reason);          // Preferences commits on write — durable immediately
+  p.end();
+}
+
+void clearRebootNote() {
+  Preferences p;
+  if (!p.begin(kRebootNs, false)) return;
+  p.remove(kRebootKey);
+  p.end();
+}
+
+const char *lastReboot() {
+  return s_lastReboot.c_str();
 }
 
 bool have() {
@@ -157,6 +199,12 @@ void report(Print &out) {
 }
 
 void toJson(JsonObject health) {
+  // Emitted before the crash block and outside its guard: a deliberate reboot leaves no dump, so
+  // this must not be conditional on there being one. Absent means an UNPLANNED reset — read it
+  // together with resetReason, where 3 (ESP_RST_SW) plus no note is the interesting combination:
+  // something restarted the chip through a path that is still not instrumented.
+  if (s_lastReboot.length()) health["lastReboot"] = s_lastReboot;
+
 #if CRASHLOG_SUPPORTED
   if (!s_have) return;                 // absent == no stored crash, the healthy case
   JsonObject c = health["crash"].to<JsonObject>();

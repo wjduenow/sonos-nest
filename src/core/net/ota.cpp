@@ -6,6 +6,9 @@
 
 // Optional OTA password via include/secrets.h: #define OTA_PASSWORD "..."
 #include "logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
+#include "../crashlog.h" // noteReboot() — ArduinoOTA restarts the chip after onEnd returns
+                         // (both kept ABOVE the secrets.h block below: inside one they would only
+                         //  be defined on machines that happen to have the gitignored header)
 // NB above the secrets conditional on purpose: inside it, LOG would only be defined on
 // machines that happen to have include/secrets.h, which is gitignored.
 
@@ -58,7 +61,11 @@ void otaBegin() {
   ArduinoOTA.onStart([]() {
     s_active = true; s_progress = 0; s_progressMs = millis(); LOG.println("[ota] start");
   });
-  ArduinoOTA.onEnd([]()   { s_active = false; s_progress = -1; LOG.println("[ota] done"); });
+  // ArduinoOTA restarts the chip itself once onEnd returns, so this is the last code that runs
+  // before the reset — record it here or a push-flash looks like an unexplained ESP_RST_SW.
+  ArduinoOTA.onEnd([]()   { s_active = false; s_progress = -1;
+                            crashlog::noteReboot("otapush");
+                            LOG.println("[ota] done"); });
   ArduinoOTA.onProgress([](unsigned p, unsigned t) {
     s_progress = t ? (int)(p * 100 / t) : 0;
     s_progressMs = millis();          // proof of life for the stall guard in otaActive()

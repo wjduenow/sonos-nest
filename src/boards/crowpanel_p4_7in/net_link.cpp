@@ -30,9 +30,16 @@
 #include "core/net/logmirror.h"
 
 #include "core/board.h"
+#include "core/crashlog.h"        // noteReboot() — this reboot's reason cannot go over the wire
 #include "pins.h"
 
 bool netLinkRecover() {
+  // NVS FIRST, because the log below cannot be delivered. The mirror is a TCP service riding the
+  // very SDIO link this function exists to declare dead — so "let the log reach the wire" is true
+  // only of the UART, and this unit's rear port is power-only. Every one of these reboots was
+  // therefore indistinguishable from any other ESP_RST_SW. The note survives the reset and is
+  // read back once the C6 has been reset and the link works again.
+  crashlog::noteReboot("netlink");
   LOG.println("[netlink] link is dead and cannot be repaired in place — restarting");
   LOG.println("[netlink] (reboot resets the C6 via GPIO32 during esp_hosted init)");
   LOG.flush();
