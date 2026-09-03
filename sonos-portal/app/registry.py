@@ -187,6 +187,13 @@ class Registry:
             self._registered.pop(dev_id, None)
             self._seen.pop(dev_id, None)
             self._probe.pop(dev_id, None)
+            # An approval is an instruction addressed to a device, so it dies with the record.
+            # Leaving it behind did NOT orphan it -- devices re-register within a heartbeat, so it
+            # reattached to whatever came back, and "Remove" silently kept the one piece of state
+            # that can trigger a firmware write: is_approved() puts approved=true in the manifest
+            # response, and the updater treats that as its own arm of the apply condition
+            # (s_armed || approved || ...), so it flashes even with otaAuto=false.
+            self._approvals.pop(dev_id, None)
             if existed:
                 self._save_locked()
             return existed
@@ -197,6 +204,7 @@ class Registry:
         for i in dead:
             self._registered.pop(i, None)
             self._probe.pop(i, None)
+            self._approvals.pop(i, None)   # same reason as remove(): it dies with the record
         for i in [i for i, s in self._seen.items() if (now - s.get("last_seen", 0)) > EXPIRE_SECONDS]:
             self._seen.pop(i, None)
         if dead:
