@@ -160,6 +160,26 @@ class Registry:
         with self._lock:
             return self._approvals.get(dev_id) == version
 
+    def revoke(self, dev_id: str) -> str | None:
+        """Cancel a pending approval. Returns the version that was approved, or None if there
+        wasn't one.
+
+        WHY THIS HAS TO EXIST. An approval was otherwise only ever cleared by
+        _clear_approval_if_converged(), i.e. when the device reports running that exact version.
+        Any approval for a version a device never ends up running -- it was flashed by hand
+        instead, or the release was superseded -- was therefore UNCLEARABLE through the API, since
+        approve_device() takes no version argument and always approves whatever the mirror holds.
+        The only remedy was stopping the container and editing devices.json by hand, which is what
+        clearing the jukebox's stale v0.2.0 required on 2026-09-03. A stuck approval is not
+        cosmetic: it keeps pending_approval() non-None, which nudges that device to re-check
+        firmware on every single heartbeat, forever.
+        """
+        with self._lock:
+            v = self._approvals.pop(dev_id, None)
+            if v is not None:
+                self._save_locked()
+            return v
+
     def pending_approval(self, dev_id: str) -> str | None:
         """The version this device is approved to move to, or None. Drives the heartbeat 'recheck'
         nudge so a dashboard approval reaches the device within a beat, not on its ~6 h poll."""

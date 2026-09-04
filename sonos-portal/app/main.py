@@ -269,6 +269,21 @@ async def approve_device(dev_id: str):
     return {"ok": True, "approved": v}
 
 
+@app.delete("/api/devices/{dev_id}/approve")
+async def revoke_device(dev_id: str):
+    """Cancel a pending approval for one device.
+
+    Idempotent, and deliberately not a 404 when there is nothing to revoke: the caller's intent is
+    "this device must not be approved", and that is satisfied either way. Returns the version that
+    was cancelled so the dashboard can say what it just undid.
+
+    This only affects FUTURE manifest responses. It cannot recall an update a device has already
+    started applying -- by then the device is writing flash and will reboot into it.
+    """
+    v = registry.revoke(dev_id)
+    return {"ok": True, "revoked": v}
+
+
 @app.post("/api/devices/approve-all")
 async def approve_all():
     """Approve every registered device that's currently reporting an available update."""
