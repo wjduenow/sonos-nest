@@ -376,6 +376,7 @@ bool refresh() {
     if (!f) continue;
     const String slotPath = genrePath(crawled + (int)preserved.size(), true);
     int n = 0;
+    bool wrote = false;
     {
       Writer w(slotPath);
       char buf[512];
@@ -388,10 +389,20 @@ bool refresh() {
         w.line(l);            // already "title \t id \t artUrl" — copied verbatim, artwork included
         ++n;
       }
-      if (!w.close()) n = 0;
+      wrote = w.close();
     }
     fclose(f);
-    if (n == 0) { unlink(slotPath.c_str()); continue; }     // wholly superseded, or unwritable
+    // "Could not write it" and "had nothing to keep" are NOT the same outcome, and conflating them
+    // is permanent: this genre's stations are already in `seen`, so no later genre re-adds them,
+    // and publishing below rmTree's the .bak that still holds them. The crawled-genre path fifty
+    // lines up aborts on exactly this failure; so does this one.
+    if (!wrote) {
+      LOG.printf("[radio ] %-24s PRESERVE WRITE FAILED — keeping the existing cache\n",
+                 otitle.c_str());
+      unlink(slotPath.c_str());
+      s_busy = false; return false;
+    }
+    if (n == 0) { unlink(slotPath.c_str()); continue; }     // wholly superseded by the crawl
     amazon::Genre pg; pg.title = otitle; pg.id = oid;
     preserved.push_back(pg);
     keptStations += n;
@@ -442,11 +453,15 @@ bool refresh() {
   // live tree holds stations that NOTHING can enumerate again, so losing it to a failed rename
   // would be permanent. Kept until the new tree is in place, then dropped.
   const String bak = root() + ".bak";
-  rmTree(bak);
+  // Only a .bak that is definitely STALE may be dropped here. With no live tree, the .bak IS the
+  // cache — a swap interrupted between the two renames — and deleting it is precisely the loss
+  // that moving aside instead of deleting exists to prevent.
+  if (dirExists(root())) rmTree(bak);
   const bool hadLive = dirExists(root()) && rename(root().c_str(), bak.c_str()) == 0;
   if (rename(tmp.c_str(), root().c_str()) != 0) {
     LOG.println("[radio ] rename failed — restoring the previous cache");
-    if (hadLive) rename(bak.c_str(), root().c_str());
+    if (hadLive && rename(bak.c_str(), root().c_str()) != 0)
+      LOG.println("[radio ] restore failed too — the cache is in radio.bak, recovered next refresh");
     s_busy = false; return false;
   }
   rmTree(bak);
