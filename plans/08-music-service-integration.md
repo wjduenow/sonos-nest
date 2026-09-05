@@ -196,8 +196,8 @@ positive ones — several of them are questions that will otherwise be asked aga
 | Spotify stations / Daily Mix / Discover Weekly | ❌ | Spotify's own API removed the radio generator and filters Spotify-owned playlists below extended quota (unreachable: needs 250k MAU) |
 | **Amazon `prime/stations/`** | ❌ | **Legacy namespace** — absent from the current presentation map; nothing new is minted there |
 | **Amazon Prime Stations via DeviceLink** | ✅ | **PROVEN**: browse returns 26 genres x ~50 stations with server-minted ids. Never construct a `#chunk-`. Playback leg still untested. **⚠️ Amazon is `AppLink` as of 2026-09-04 — the link ceremony moved, see below** |
-| **DeviceLink services (15 of 106)** | ✅ | **Handshake + browse both PROVEN on Amazon.** One browser ceremony by the owner, then full catalogue access with no Sonos app or cloud |
-| **AppLink services (62 of 108)** | ✅ | **Superseded the row above — see the 2026-09-04 re-investigation.** Anonymous `getAppLink` yields a real regUrl + linkCode on Spotify, Amazon, Pandora, TuneIn (New), Plex, Audible. **Spotify search RUN-VERIFIED end to end** |
+| **DeviceLink services (15 of 106 — historical; 14 of 108 as of 2026-09-04)** | ✅ | **Handshake + browse both PROVEN on Amazon.** One browser ceremony by the owner, then full catalogue access with no Sonos app or cloud |
+| **AppLink services (62 of 108, 2026-09-04)** | ✅ | **Superseded the row above — see the 2026-09-04 re-investigation.** Anonymous `getAppLink` yields a real regUrl + linkCode on Spotify, Amazon, Pandora, TuneIn (New), Plex, Audible. **Spotify search RUN-VERIFIED end to end** |
 | **Spotify browse + search via SMAPI** | ✅ | **PROVEN on hardware's behalf from the LAN**: `search` returns native `spotify:track:` ids, ~800 B/result, 0.6–1.0 s. Playback leg untested |
 
 ---
@@ -237,7 +237,7 @@ the `Auth=` label; it is whether the service's own backend lets an unregistered 
 The full ceremony was completed with the owner present and the token kept
 (`~/.sonos-spotify-token.json`, chmod 600, **not** in the repo).
 
-```
+```text
 getAppLink            -> regUrl + linkCode           (owner approves in a browser)
 getDeviceAuthToken    -> authToken 390 B + privateKey 174 B
 getMetadata(root)     -> Popular Playlists · Charts · New Releases · Genres and Moods · Your Music
@@ -287,7 +287,7 @@ sid **284**, `Auth="AppLink"`, endpoint `https://music.googleapis.com/v1:sendReq
 method — `getMetadata`, `getAppLink`, `getDeviceLinkCode`, `getSessionId` — returns the same
 **HTTP 403** from Google Cloud Endpoints, before any SMAPI processing:
 
-```
+```text
 {"error":{"code":403,"status":"PERMISSION_DENIED",
  "message":"Method doesn't allow unregistered callers (callers without established identity).
             Please use API Key or other form of API consumer identity to call this API."}}
@@ -327,7 +327,7 @@ Not previously examined here; the earlier work covered only the *cloud* OpenAPI 
 serves the Control API locally over `https://<ip>:1443`, and it accepts the well-known key
 `123e4567-e89b-12d3-a456-426655440000` (the one Home Assistant uses):
 
-```
+```text
 GET https://<ip>:1443/api/v1/players/local/info      X-Sonos-Api-Key: <key>   -> 200 deviceInfo
 wss://<ip>:1443/websocket/api                        X-Sonos-Api-Key: <key>   -> connects
 ```
@@ -341,7 +341,7 @@ command `ERROR_UNSUPPORTED_COMMAND`, and the response header **echoes the resolv
 namespaces prefix-match (`"music"` → `musicServiceAccounts`), so a 26-way BFS enumerates them all.
 **Commands do not prefix-match**, so there is no equivalent oracle for command names. The 52:
 
-```
+```text
 alarms areas audioClip authorization catalog devices devicesExtended diagnostics
 effectiveSettings entitlements favorites groupVolume groups hardwareStatus hdmi history
 homeTheater households info ircontrol localContentLibrary management musicServiceAccounts
@@ -365,7 +365,7 @@ This household now splits **62 AppLink · 32 Anonymous · 14 DeviceLink** (was 5
 **Amazon Music is `Auth="AppLink"` now**, not DeviceLink as recorded above, and its endpoint has
 followed:
 
-```
+```text
 getDeviceLinkCode  -> 500  soap:Server.ServiceUnknownError  "Cannot parse null string"
                             (with the REAL household id — this is not a malformed-request artefact)
 getAppLink         -> 200  regUrl = https://www.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.5908e9…
@@ -415,7 +415,7 @@ From "the new token sees a flat tree" it was inferred that the device's crawl mu
 silently for weeks, leaving a fossil cache. **Wrong, and disproved on hardware.** Pressing *Refresh
 now* produced:
 
-```
+```text
 [radio ] crawling 26 genres
 [radio ]   Recently Played          16 stations
 [radio ]   Popular Genres & Artists 50 stations
