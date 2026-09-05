@@ -383,75 +383,89 @@ from the response. `getAppLink` never returns one. So:
 The old note that `linkDeviceId` "is per-request and required" was true of the DeviceLink flow. In
 the AppLink flow the client picks it, and the poll accepts it.
 
-### Follow-up, 2026-09-05 — Amazon flattened the station root (and one self-inflicted trap)
+### Follow-up, 2026-09-05 — Amazon's station tree is CREDENTIAL-DEPENDENT, and two wrong turns
 
-Found while testing the AppLink fix with a real token, and it matters more than the fix did.
+The headline first, because an earlier revision of this section said something else and was wrong:
+**two tokens for the SAME Amazon account, same Prime tier, see two different station trees.**
 
-> ⚠️ **`<total>` in a `getMetadata` response is NOT the size of the container — it echoes the count
-> you asked for, capped at 100.** `count=6 → total=6`, `count=60 → total=60`, `count=200 → total=100`,
-> `count=500 → total=100`. Asking for 6 and reading `total=6` produced a confident, wrong conclusion
-> that Amazon had gutted its catalogue to six stations. **Always browse with the count the firmware
-> uses** (`browse(kStationsRoot, 0, 60)`) before drawing any conclusion about a container's size.
-
-**What actually changed.** `catalog/stations/#prime_stations` used to return **26 genre containers**,
-each browsing to ~50 stations. It now returns a **flat list of up to 100 playable stations** —
-`itemType=program`, `displayType=stationHero`, `canEnumerate=false` — and every refinement id is
-gone:
-
-```
-catalog/stations/refinements/genres/#prime_stations  -> 500 "Invalid field to parse"
-catalog/stations/refinements/#prime_stations         -> 500 "Invalid field to parse"
-catalog/stations/genres/#prime_stations              -> 500 "Invalid field to parse"
-```
-
-Amazon's presentation map (version 582) is down to `rootBrowsePage`, `stationHero` and
-`stationsGrid` — a grid of stations, no container level. Account tier is **Prime, not Unlimited**,
-and it is the same account that produced the 26-genre crawl, so this is a change over time, not an
-entitlement difference.
-
-**A second id form appeared, and it is an alias.** Browse now returns `catalog:station:key:<KEY>`.
-The old `catalog/stations/<KEY>/#chunk-<uuid>` still resolves — `getExtendedMetadata` on this
-household's years-old "Classic R&B" favourite returns the station and `getMetadata` returns its
-tracks — and `catalog:station:key:A3E8KCX2260OJM` resolves to the *same* station. So the **KEY is
-the durable part**, exactly as the `#chunk-` analysis above argued, and nothing already cached is
-dead.
-
-**The consequence that actually bit: the device's cache is now RICHER than the live catalogue.**
-The jukebox's Settings page reads *"26 genres, 41 favorites cached"* — a fossil built before the
-flattening, holding ~1,045 stations. The live root offers 100. Those 945 extra ids still play but
-can never be enumerated again, so a plain cache swap would delete them permanently.
-
-**Why nobody noticed.** `radio_cache::refresh()`'s convergence rule publishes with gaps when a pass
-makes no progress, precisely so one dead genre cannot block the cache forever — it cannot tell that
-from the tree changing shape. With the flat root, `genres()` returned 100 "genres", every
-`stations()` call found zero collections, `fetched` landed on 0, and the crawl would have
-`rmTree`d a good cache and swapped in an empty index. It never did, only because the device's
-crawl was failing earlier than that. **The AppLink fix is what would have made it succeed.**
-
-**Fixed in `fix/amazon-applink`** (four commits, jukebox flashed and running `v0.4.2-6-gf34c5cc`):
-
-| commit | what |
+| credential | `catalog/stations/#prime_stations` returns |
 |---|---|
-| `439a56d` | link over `getAppLink`; DeviceLink is a server error now |
-| `6598a27` | never publish an empty index over a good cache — guards on `missing == genres.size()`, so a fully resumed pass still publishes |
-| `189c090` | `genres()` skips `program` rows and synthesises one implicit container for a flat root; the Radio page collapses its genre level when there is only one |
-| `f34c5cc` | publishing is a **merge**: crawled genres first, then every cached station the crawl did not return, kept under its original genre. Swap is crash-safe (aside to `.bak`, restore on failure) |
+| The jukebox's token, linked long ago under the DeviceLink flow | **26 genre containers**, ~1,045 stations — RUN-VERIFIED on hardware, see the crawl log below |
+| A token minted 2026-09-05 from a laptop via `getAppLink` | a **flat list of up to 100 playable stations**, `itemType=program`, `canEnumerate=false`, ids as `catalog:station:key:<KEY>`; **no containers at all** |
 
-**Other things the token established, worth not re-deriving:**
+On the new token every refinement id is gone (`catalog/stations/refinements/genres/#prime_stations`,
+`…/refinements/…`, `…/genres/…` all return `500 "Invalid field to parse"`) and Amazon's presentation
+map (version 582) is down to `rootBrowsePage` / `stationHero` / `stationsGrid`. On the device's token
+the full genre tree is alive and crawls cleanly. Why they differ is **not established** — grandfathering
+of older links, a per-registration entitlement, something else. Only the observation is solid.
+
+**Do not conclude anything about "what Amazon returns" from one credential.** That is the whole
+lesson of this section.
+
+#### Wrong turn 1 — `<total>` is not a container size
+
+> ⚠️ **`<total>` in a `getMetadata` response echoes the count you asked for, capped at 100.**
+> `count=6 → total=6`, `count=60 → 60`, `count=200 → 100`, `count=500 → 100`. Browsing with
+> `count=6` and reading `total=6` produced a confident claim that Amazon had gutted its catalogue to
+> six stations. **Always browse with the count the firmware uses** (`browse(kStationsRoot, 0, 60)`).
+
+#### Wrong turn 2 — the device was never broken
+
+From "the new token sees a flat tree" it was inferred that the device's crawl must have been failing
+silently for weeks, leaving a fossil cache. **Wrong, and disproved on hardware.** Pressing *Refresh
+now* produced:
+
+```
+[radio ] crawling 26 genres
+[radio ]   Recently Played          16 stations
+[radio ]   Popular Genres & Artists 50 stations
+...
+[radio ]   K-Pop                     1 stations
+[radio ] pass complete: 25 fetched, 1 still missing — resuming next run
+```
+
+25 of 26 genres fetched, one transient failure on Jazz, and the convergence rule correctly deferred
+publishing to the next pass. The cache was current, not a fossil, and nothing about the Radio page
+was broken. The user's *"I am still seeing all the same radio stations"* was the correct reading of
+the evidence and the inference chain built against it was not.
+
+**What was really wrong was one missing LVGL style**: the Settings *Refresh now* button had no
+`LV_STATE_PRESSED` variant, so a press produced no colour change and looked like a dead control
+while working perfectly.
+
+#### What still holds, and what the shipped code is actually for
+
+The measured facts survive; only their interpretation changed.
+
+- **The old and new id forms are aliases.** `catalog/stations/<KEY>/#chunk-<uuid>` from a years-old
+  favourite and `catalog:station:key:<KEY>` both resolve to the same station. **The KEY is the
+  durable part**, as the `#chunk-` analysis above argued.
+- **A re-link is a downgrade, and re-linking is now possible.** This is the concrete risk the code
+  addresses: `439a56d` makes linking work again, and a device that re-links gets the *new*
+  credential — which enumerates 100 stations where the old one enumerated ~1,045. Without
+  `f34c5cc`'s merging swap, one re-link plus one crawl would silently discard 945 station ids that
+  still play and can never be enumerated again.
+- **The empty-index guard (`6598a27`) is right regardless.** `refresh()` publishes with gaps when a
+  pass makes no progress — correct for a permanently dead genre, catastrophic when the tree changes
+  shape underneath it. It costs nothing and it is the difference between a stale cache and no cache.
+- **The flat-root reader (`189c090`) is defensive, not a migration.** On the device's credential it
+  never fires: `genres()` finds 26 real containers and the synthetic entry is skipped. It exists so
+  that a device on the new credential gets a working Radio page instead of 100 empty tiles.
+
+#### Other things the token established
 
 - **The AppLink ceremony works end to end on Amazon.** Approval → token in **33 s**; token 720 B,
-  key 524 B. `getAppLink` returns no `linkDeviceId`, the client picks its own, and the poll accepts
-  it.
+  key 524 B. `getAppLink` returns no `linkDeviceId`, so the client picks its own and the poll
+  accepts it.
 - **Link-code TTL differs per service and neither is documented.** Spotify's dies at **~5 minutes**
-  (and the web page rejects it while SOAP still says `NOT_LINKED_RETRY`). Amazon's was still live
+  (and the web page rejects it while SOAP still answers `NOT_LINKED_RETRY`). Amazon's was still live
   after **25 minutes** of polling, so `amazon.cpp`'s 420 s window is conservative.
-- **The token expires in well under an hour**, as `amazon.cpp` already documents, and the
-  replacement arrives inside the `Client.TokenRefreshRequired` fault. Any script poking at this by
-  hand needs that retry or it will look like the credential broke.
-- **Amazon exposes search, but not for stations.** Its map offers `catalog:tracks:search`,
-  `catalog:albums:search`, `catalog:artists:search`, `catalog:playlists:search`,
-  `podcast:shows:search`, `podcast:episodes:search` — a ready-made second source for the Search
-  page, with no station category.
+- **The access token expires in well under an hour**, and the replacement arrives inside the
+  `Client.TokenRefreshRequired` fault. Any script poking at this by hand needs that retry or the
+  credential will look broken.
+- **Amazon exposes search, but not for stations**: `catalog:tracks:search`, `catalog:albums:search`,
+  `catalog:artists:search`, `catalog:playlists:search`, `podcast:shows:search`,
+  `podcast:episodes:search`. A ready-made second source for the Search page.
 
 ### What this means for the product
 

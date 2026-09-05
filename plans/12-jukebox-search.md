@@ -245,12 +245,13 @@ each owns its own list, and switching is a re-render, not a filter over a blende
 "all your radio" list would mix two id spaces, two artwork hosts and two playback paths behind rows
 that look identical, and the first bug report would be "why did tapping this one do nothing".
 
-- **Amazon** — the existing cache, unchanged by this work. Note what it now contains: Amazon
-  flattened its station root (plans/08, 2026-09-05), so a crawl returns **100 live stations** in one
-  implicit container, and `radio_cache`'s merging swap keeps the **~945 stations from the
-  pre-flattening cache** under their original genres. So the grid is ~27 genres: `Stations` (live)
-  plus the fossils. Both play; only the live ones can be re-enumerated. This is *within* the Amazon
-  source — the archive is not a third segment (asked and answered: service-level toggle only).
+- **Amazon** — the existing cache, unchanged by this work: **26 genres, ~1,045 stations**, crawling
+  cleanly (verified on hardware 2026-09-05). What to know is that this depends on the *credential*,
+  not on Amazon: a token minted today enumerates a flat list of 100 stations and no genres at all
+  (plans/08). So **a re-link is a downgrade**, and `radio_cache`'s merging swap is what keeps the
+  other ~945 — they still play, they just cannot be enumerated by a new token. If that ever happens
+  the grid becomes ~27 genres (`Stations` live, plus the preserved ones), still *within* the Amazon
+  source: the archive is not a third segment (asked and answered — service-level toggle only).
 - **Spotify** — live browse, no crawl needed. `Charts` (10) · `Popular Playlists` (100) ·
   `Genres and Moods` (63 categories → playlists) · `Made For You` (DJ, daylist, On Repeat, Repeat
   Rewind — personalised to the linked account).
@@ -258,8 +259,7 @@ that look identical, and the first bug report would be "why did tapping this one
 > ⚠️ **Call them playlists, not stations.** Spotify's SMAPI tree has **no station or stream
 > itemType** — verified. Its algorithmic stations and mixes are gone at Spotify's end, not Sonos's
 > (plans/08). "Made For You" is the closest thing and it is still a playlist. A UI that promises
-> stations and delivers playlists is a bug report waiting to happen. With Amazon's browsable
-> catalogue down to 100, Spotify is now the larger half of this page, not the garnish.
+> stations and delivers playlists is a bug report waiting to happen.
 
 Persist the choice in NVS (`settingsRadioSource()`), default Amazon so nothing changes for an
 existing device. If a source is not linked, its segment renders disabled with a one-line "Link in
@@ -289,14 +289,22 @@ because §10's phases depend on it and because the order things were found in is
 | `189c090` | **Read the flat station root.** `genres()` skips `itemType=program` rows and, when none remain, returns one implicit container pointing at the root; `stations()` already filtered on `program`, so the crawl drops from 27 requests to 1. The Radio page collapses its genre level via `radioFlat()`. |
 | `f34c5cc` | **Merge instead of replace.** Crawled genres first, then every cached station the crawl did not return, under its original genre. Per-genre rather than one flat list because 1,000+ LVGL rows against a 512 KB pool is a UI freeze; membership by 32-bit FNV-1a hash because 1,000 Strings is ~40 KB where `heapLargest` is ~32 KB. The swap is now crash-safe — aside to `.bak`, restore on failure, recovered at the start of the next crawl. |
 
-**The dependency worth remembering:** the link fix is what makes a crawl *succeed* again, and a
-successful crawl against the flattened tree is what would have wiped the cache. Shipping `439a56d`
-without `6598a27` would have destroyed ~1,045 irreplaceable station ids. Any future "just fix the
-link" change to a service this crawl depends on should ask the same question first.
+**The dependency worth remembering:** `439a56d` makes linking work again, and a device that
+re-links gets a credential that enumerates 100 stations where the old one enumerates ~1,045
+(plans/08 — the tree is credential-dependent, and the first revision of this plan wrongly read it
+as Amazon changing for everyone). So the link fix is exactly what puts the cache at risk, and
+`f34c5cc` is what keeps it. Any future "just fix the link" change to a service this crawl depends
+on should ask the same question first.
 
-**Not verified on hardware:** the merge itself, which needs a real crawl on the device (re-link
-Amazon in Settings, then refresh). `6598a27` means a failed crawl keeps what is there, and
-`f34c5cc` means a failed swap restores it.
+**Verified on hardware 2026-09-05:** a Refresh now on the device crawled all 26 genres (25 fetched,
+one transient Jazz failure) and correctly deferred publishing to the next pass. **Still unverified:
+the merge**, which only does something once a crawl and the cache disagree — i.e. after a re-link.
+`6598a27` means a failed crawl keeps what is there, `f34c5cc` means a failed swap restores it.
+
+Shipped alongside, from the same report: `28ef2d5` — the Settings *Refresh now* button had no
+`LV_STATE_PRESSED` style and read as a dead control while working perfectly, and a refresh that
+cannot run yet (no storage, no Wi-Fi, no linked account) now says so instead of being held in
+silence.
 
 ---
 
