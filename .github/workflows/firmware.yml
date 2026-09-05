@@ -155,7 +155,23 @@ jobs:
           key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
-      - run: pip install platformio
+      # PIN PlatformIO CORE. Core resolves `tool-scons` itself, so an unpinned `pip install
+      # platformio` lets a Core release change a build tool under a platform this repo pins by URL.
+      # That is not hypothetical: PlatformIO 6.2.0 shipped 2026-09-05, moved tool-scons to
+      # ~4.41101.0, and every sonos-jukebox build began failing with
+      #   ModuleNotFoundError: No module named 'SCons.Tool.FortranCommon'
+      # while the four ESP32-S3 envs stayed green. scons-local 4.8.1 ships that module and 4.11
+      # does not, and only the jukebox builds through the ESP-IDF builder, which is the path that
+      # reaches it. The package cache does not protect against this — Core deletes the cached
+      # tool-scons and installs its own ("Tool Manager: Removing tool-scons @ 4.40801.0") — and
+      # neither does `platform_packages` in platformio.ini, which was tried: tool-scons belongs to
+      # Core, not to the platform, so the pin there is silently ignored.
+      #
+      # So this one pin cannot live in platformio.ini with the others; there is no in-tree
+      # expression of "which PlatformIO Core". 6.1.19 is what dev machines run and what CI ran
+      # while this was green. To move it: bump deliberately, and check the jukebox job specifically
+      # — it is the only env that exercises the ESP-IDF path.
+      - run: pip install "platformio==6.1.19"
 
       # NB: DELIBERATELY no include/secrets.h. Every include site is `#if __has_include`-guarded
       # and WIFI_SSID/WIFI_PASS are `#if defined`-guarded, so the build is clean without it — and
