@@ -268,6 +268,21 @@ bool refresh() {
   for (size_t g = 0; g < genres.size(); ++g)
     if (!fileHasContent(genrePath((int)g, true))) ++missing;
 
+  // A SHAPE CHANGE IS NOT A TRANSIENT FAILURE, and the rule below cannot tell them apart. If not
+  // one container yielded a station — this pass or any earlier one — the tree we are crawling is
+  // not the tree this code was written for, and publishing would rmTree a good cache and swap in an
+  // empty index. Observed for real: Amazon flattened its station root in 2026-09 from 26 genre
+  // containers to a flat list of 100 playable stations (itemType=program, canEnumerate=false), so
+  // genres() now returns stations, every stations() call finds zero collections, and the crawl
+  // "succeeds" with nothing. Keep what is on the card; a stale cache beats an empty one, and every
+  // id in it still resolves. NOT `fetched == 0` on its own: a fully resumed pass legitimately
+  // fetches nothing because every genre file is already there.
+  if ((size_t)missing == genres.size()) {
+    LOG.printf("[radio ] %u container(s), none yielded stations — keeping the existing cache "
+               "(browse tree changed?)\n", (unsigned)genres.size());
+    s_busy = false; return false;
+  }
+
   // Convergence rule. Still missing genres but we made progress this pass -> keep the temp tree and
   // finish next time. Missing and NO progress -> nothing more to gain by waiting, so publish with
   // the gaps rather than never publishing at all.
