@@ -115,11 +115,34 @@ static String field(const String &line, int n) {
   const int end = line.indexOf('\t', start);
   return (end < 0) ? line.substring(start) : line.substring(start, end);
 }
-// FNV-1a over a station id. Used only for "have I already got this one?" — see the merge in
-// refresh() for why a hash and not the id itself.
-static uint32_t idHash(const String &s) {
+// Reduce any Amazon station id to its durable STATION KEY, which is the only part that identifies
+// the station across crawls. THIS IS NOT COSMETIC. The three forms in circulation are
+//
+//   catalog/stations/<KEY>/#chunk-<uuid>     browse + favourites, older credential
+//   prime/stations/<KEY>/#chunk-<uuid>       legacy namespace, same key space
+//   catalog:station:key:<KEY>                browse, newer credential
+//
+// and the `#chunk-` is **minted fresh on every response** (amazon.h says so in capitals). Hashing
+// the whole id therefore makes every station look new on every crawl: the merge preserves the
+// entire previous cache, and the genre count grows by one crawl's worth per refresh — 26 -> 52 ->
+// 78, with the Radio page showing each station several times. Observed on hardware before this
+// existed. Keying on the last path/colon segment before the fragment also makes the prime/ and
+// catalog/ spellings of one station compare equal, which they are.
+static String stationKey(const String &id) {
+  int end = id.indexOf('#');
+  if (end < 0) end = (int)id.length();
+  while (end > 0 && (id[end - 1] == '/' || id[end - 1] == ':')) --end;
+  int start = end;
+  while (start > 0 && id[start - 1] != '/' && id[start - 1] != ':') --start;
+  return id.substring(start, end);
+}
+
+// FNV-1a over that key. Used only for "have I already got this one?" — see the merge in refresh()
+// for why a hash and not the string itself.
+static uint32_t idHash(const String &id) {
+  const String k = stationKey(id);
   uint32_t h = 2166136261u;
-  for (size_t i = 0; i < s.length(); ++i) { h ^= (uint8_t)s[i]; h *= 16777619u; }
+  for (size_t i = 0; i < k.length(); ++i) { h ^= (uint8_t)k[i]; h *= 16777619u; }
   return h;
 }
 // Tabs and newlines are the record separators, so they can never appear in a value.
