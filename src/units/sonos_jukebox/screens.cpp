@@ -1952,6 +1952,7 @@ static void buildSettings() {
   lv_obj_set_style_radius(save, JB_R_MD, 0);
   lv_obj_set_style_bg_opa(save, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(save, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_set_style_bg_opa(save, LV_OPA_80, LV_STATE_PRESSED);   // accent-filled: dim, don't recolour
   lv_obj_add_event_cb(save, saveNameCb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *sl = label(save, "Save", &lv_font_montserrat_22, JB_ACCENT_INK);
   lv_obj_center(sl);
@@ -2022,6 +2023,7 @@ static void buildSettings() {
   lv_obj_set_style_radius(rn, JB_R_MD, 0);
   lv_obj_set_style_bg_opa(rn, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(rn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_bg_color(rn, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
   lv_obj_add_event_cb(rn, refreshNowCb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *rnl = label(rn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
   lv_obj_center(rnl);
@@ -2196,6 +2198,7 @@ static void buildSettings() {
   lv_obj_set_style_radius(lc, JB_R_MD, 0);
   lv_obj_set_style_bg_opa(lc, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(lc, lv_color_hex(JB_SCREEN_ELEV_2), 0);
+  lv_obj_set_style_bg_color(lc, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
   lv_obj_add_event_cb(lc, linkCloseCb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *lcl = label(lc, "Close", &lv_font_montserrat_16, JB_TEXT);
   lv_obj_center(lcl);
@@ -3002,6 +3005,13 @@ void uiTick() {
     static String shownMeta;
     String m;
     if (radiocache::busy() || favcache::busy()) m = "Refreshing now...";
+    // A queued refresh that cannot run yet is the difference between "the button is dead" and
+    // "the button worked and the account is not linked". requestRefresh() holds the request until
+    // storage, Wi-Fi and the account are all there, and until this line existed it did so in
+    // total silence — pressing Refresh now on an unlinked device changed nothing on screen.
+    else if (radiocache::refreshPending())
+      m = amazon::linked() ? "Refresh queued..."
+                           : "Refresh queued — link Amazon Music below to run it.";
     else if (radiocache::ready())  m = String(radiocache::genreCount()) + " genres, " +
                                        String(favcache::count()) + " favorites cached.";
     else                           m = "No station cache yet.";

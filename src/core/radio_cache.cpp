@@ -166,6 +166,7 @@ bool     ready()     { if (s_genreCount < 0) loadHeader(); return s_genreCount >
 uint32_t fetchedAt() { if (s_genreCount < 0) loadHeader(); return s_fetchedAt; }
 bool     busy()      { return s_busy; }
 void     requestRefresh() { s_wantRefresh = true; }
+bool     refreshPending() { return s_wantRefresh; }
 
 // --- the crawl --------------------------------------------------------------------------------------
 //
