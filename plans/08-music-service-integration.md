@@ -433,6 +433,65 @@ the evidence and the inference chain built against it was not.
 `LV_STATE_PRESSED` variant, so a press produced no colour change and looked like a dead control
 while working perfectly.
 
+#### The credential theory, TESTED — same account, same id, opposite results
+
+"Two tokens for one account see different trees" is a weak claim, so it was tested with ids the
+**old** credential minted: two genre containers lifted out of this household's own Amazon
+favourites (`parentID` in their `<r:resMD>`), which the device's crawl enumerates successfully
+every time.
+
+| id (sourced from the device's own favourites) | new token |
+|---|---|
+| `catalog/stations/refinements/genres/b9bd5b28-…/#prime_stations` | **`Invalid field to parse: Failed to initiate provide…`** |
+| `prime/stations/refinements/genres/320cc97e-…/#prime_stations` | **`Invalid field to parse: Error constructing MRN…`** |
+| `catalog/stations/refinements/genres/#prime_stations` | same fault |
+| `catalog/stations/recent/#recently_played_stations` | **200 — 60 stations** |
+| `catalog/stations/<KEY>/#chunk-<uuid>` (a real favourite) | 200 — resolves, with its tracks |
+
+So the new credential **is the same account** — `recent` returns this household's actual history
+(The Traveling Wilburys, Love Songs, Grateful Dead, Train) — and it can resolve any individual
+station by either id form. What it cannot do is browse the genre refinements **at all**: a hard
+fault on the exact ids the device walks without trouble. `Failed to initiate provider` reads like a
+backend routing failure, i.e. that surface is not wired up for this token's presentation, rather
+than the containers having been deleted.
+
+**Consequence for the design: hardcoding the genre ids would not rescue a re-linked device.** The
+tree is unreachable for that credential however it is addressed, so the merging swap really is the
+only thing standing between a re-link and the loss of ~945 station ids.
+
+**Silver lining, and a candidate fallback:** `catalog/stations/recent/#recently_played_stations`
+answers on the new credential with **60 of the household's own stations** — arguably better content
+for a Radio page than the generic flat 100. Worth considering as the first container `genres()`
+offers when the refinements are unreachable.
+
+#### What was ruled out, so it is not re-tested
+
+The obvious explanation was that the new link was under-specified. It was not:
+
+- **Household id — sent, and identical.** Also a trap worth keeping: **the WSDL says the household
+  id belongs in `<credentials><deviceId>` and gives `getAppLink` only
+  `hardware`/`osVersion`/`sonosAppName`/`callbackPath`. Amazon ignores that and reads `householdId`
+  from the request BODY.** Sending it the WSDL-correct way is a hard
+  `400 "householdId must not be blank or null!"`. `core/amazon.cpp` already does the "wrong" thing,
+  which is the only thing that works — do not "fix" it.
+- **OAuth scope and client id — identical.** Both links produce
+  `scope=amazon_music:access`, the same `amzn1.application-oa2-client.5908e9…`, and the same
+  `smapi-na.amazonmusic.com/lwa` redirect.
+- **Credentials header shape — identical.** The device sends `deviceProvider` +
+  `loginToken{token,key,householdId}` and so does the test client; neither sends `deviceCert`, and
+  the device gets the full tree without one, so the player-certificate capability is not the
+  differentiator either.
+
+**Two hypotheses survive and cannot be separated from outside.** (1) The `linkDeviceId`: DeviceLink
+had *Amazon* mint it, so the old token carries an Amazon-issued device identity, while `getAppLink`
+mints none and the client supplies a string — and since `getDeviceLinkCode` is dead, **no new link
+can ever carry an Amazon-minted id**. (2) A rollout keyed to link vintage. Both predict the same
+operational fact, which is the only part that matters here: **any re-link is a downgrade.**
+
+**Nothing about this is documented.** Sonos documents the SMAPI *protocol*
+(`docs.sonos.com/docs/smapi`, plus the WSDL in `docs/sonos-music-api/`); no vendor documents a
+service's content tree or the conditions under which it varies by credential.
+
 #### What still holds, and what the shipped code is actually for
 
 The measured facts survive; only their interpretation changed.

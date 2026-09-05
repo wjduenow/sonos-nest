@@ -138,7 +138,13 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > credential gets a working page instead of 100 empty tiles. Two traps: **`<total>` echoes the
   > count you asked for, capped at 100** — browse with the firmware's count (60) or you will
   > "discover" a catalogue the size of your own parameter, as happened; and **never generalise from
-  > one credential** to "what Amazon returns". Full evidence: `plans/08` (2026-09-05).
+  > one credential** to "what Amazon returns" — PROVEN by browsing a genre id out of this
+  > household's own favourites with both tokens: the device walks it, the new token gets
+  > `Invalid field to parse: Failed to initiate provider`. So hardcoding genre ids would not rescue
+  > a re-linked device. **And `getAppLink`/`getDeviceLinkCode` want `householdId` in the request
+  > BODY, not in `<credentials><deviceId>` where the WSDL puts it** — the WSDL-correct form is a
+  > hard `400 "householdId must not be blank or null!"`, so do not "fix" `amazon.cpp` to match the
+  > schema. Full evidence: `plans/08` (2026-09-05).
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
