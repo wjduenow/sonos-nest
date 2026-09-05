@@ -195,8 +195,346 @@ positive ones — several of them are questions that will otherwise be asked aga
 | **Spotify: track / album / playlist by id** | ✅ | Transparent wrapper; URI validity **proven read-only** via the `/getaa` oracle. Needs a helper for the Spotify API |
 | Spotify stations / Daily Mix / Discover Weekly | ❌ | Spotify's own API removed the radio generator and filters Spotify-owned playlists below extended quota (unreachable: needs 250k MAU) |
 | **Amazon `prime/stations/`** | ❌ | **Legacy namespace** — absent from the current presentation map; nothing new is minted there |
-| **Amazon Prime Stations via DeviceLink** | ✅ | **PROVEN**: browse returns 26 genres x ~50 stations with server-minted ids. Never construct a `#chunk-`. Playback leg still untested |
-| **DeviceLink services (15 of 106)** | ✅ | **Handshake + browse both PROVEN on Amazon.** One browser ceremony by the owner, then full catalogue access with no Sonos app or cloud |
+| **Amazon Prime Stations via DeviceLink** | ✅ | **PROVEN**: browse returns 26 genres x ~50 stations with server-minted ids. Never construct a `#chunk-`. Playback leg still untested. **⚠️ Amazon is `AppLink` as of 2026-09-04 — the link ceremony moved, see below** |
+| **DeviceLink services (15 of 106 — historical; 14 of 108 as of 2026-09-04)** | ✅ | **Handshake + browse both PROVEN on Amazon.** One browser ceremony by the owner, then full catalogue access with no Sonos app or cloud |
+| **AppLink services (62 of 108, 2026-09-04)** | ✅ | **Superseded the row above — see the 2026-09-04 re-investigation.** Anonymous `getAppLink` yields a real regUrl + linkCode on Spotify, Amazon, Pandora, TuneIn (New), Plex, Audible. **Spotify search RUN-VERIFIED end to end** |
+| **Spotify browse + search via SMAPI** | ✅ | **PROVEN on hardware's behalf from the LAN**: `search` returns native `spotify:track:` ids, ~800 B/result, 0.6–1.0 s. Playback leg untested |
+
+---
+
+## Re-investigation, 2026-09-04 — **AppLink is OPEN, and that changes the answer**
+
+Everything in this section was run first-hand against this household (13 players, firmware
+**86.8-78270** on a Play:1 and **96.1-79270** on an Arc), not read about. It corrects two claims
+above and closes three doors with evidence they never had.
+
+### The headline correction: "for AppLink services no" was never tested
+
+That sentence was inferred from YouTube Music's failure and generalised to all 62 AppLink
+services. It is wrong. An **anonymous** `getAppLink` — no token, no household of ours, no Sonos
+app — returns a live registration URL and link code:
+
+| sid | service | anonymous `getAppLink` |
+|---|---|---|
+| **12** | **Spotify** | 200 → `https://spotify-v5.ws.sonos.com/deviceLink/home?linkCode=…` |
+| 201 | Amazon Music | 200 → Login-with-Amazon URL |
+| 236 | Pandora | 200 → `pandora.com/sonosactivation?activation_code=…` |
+| 333 | TuneIn (New) | 200 → `tunein.com/authorize?…` |
+| 212 | Plex | 200 → `app.plex.tv/auth#?clientID=sonos-…` |
+| 239 | Audible | 200 → `amazon.com/us/code?cbl-code=…` |
+| 296 | Pandora CloudCover | 200 → `tune.cloudcovermusic.com/#/sonos/login?…` |
+| **284** | **YouTube Music** | **403** — Google API-key gateway (below) |
+| 160 | SoundCloud | 500 `Client.NOT_AUTHORIZED` |
+| 204 | Apple Music | 500 |
+
+`getDeviceAuthToken` then answers `NOT_LINKED_RETRY` on all of them — the poll leg is live too.
+**AppLink and DeviceLink are the same ceremony from a client's point of view**: ask for a code,
+the owner approves it in a browser once, poll for the token. The distinction that matters is not
+the `Auth=` label; it is whether the service's own backend lets an unregistered caller in.
+
+### Spotify: linked, browsed and searched — RUN-VERIFIED end to end
+
+The full ceremony was completed with the owner present and the token kept
+(`~/.sonos-spotify-token.json`, chmod 600, **not** in the repo).
+
+```text
+getAppLink            -> regUrl + linkCode           (owner approves in a browser)
+getDeviceAuthToken    -> authToken 390 B + privateKey 174 B
+getMetadata(root)     -> Popular Playlists · Charts · New Releases · Genres and Moods · Your Music
+search(id=track,   term="bohemian rhapsody") -> spotify:track:6vLaKD0HUJ5UtIADG61Fa9  "Bohemian Rhapsody - Remastered"  Queen
+search(id=artist)  -> spotify:artist:1dfeR4HaWDbWqFHLkxsg1d  Queen
+search(id=album)   -> spotify:album:2e6lW14FdkQeDCetGcF6tQ   Bohemian Rhapsody
+search(id=playlist)-> spotify:playlist:1koyIdOfW4lxtr46r7Dwa8
+getMetadata(yourmusic_root -> playlists) -> the owner's real playlists (Favorites, karaoke, Sleep, …)
+```
+
+Category ids come from the service's presentation map (`<PresentationMap type="Search">`):
+`artists→artist · albums→album · tracks→track · playlists→playlist · all→all`. **Read them at
+runtime, don't hardcode** — YouTube Music's map maps the same five ids to `ARTISTS/ALBUMS/SONGS/
+PLAYLISTS/ALL` instead, so the mapping is per service.
+
+**Sizes and latency, measured** — the numbers that decide whether this is affordable on-device:
+
+| request | bytes | round trip |
+|---|---|---|
+| `search count=4` | 3,404 | 887 ms |
+| `search count=8` | 6,383 | 612 ms |
+| `search count=20` | 15,383 | 992 ms |
+
+≈**800 B per result**, 0.6–1.0 s over TLS. Trivial for the jukebox (32 MB PSRAM, ~29.6 MB free)
+and it is a **user-initiated** action, not a poll.
+
+> ⚠️ **The link code has a hard 5-minute TTL**, and it dies silently *in the browser*: the SOAP
+> side keeps answering `NOT_LINKED_RETRY` while the web page says "The link code you entered is not
+> valid." Measured: valid 09:29:20, `Invalid linkCode` at 09:34:10. Any UI that shows a QR or URL
+> must show a countdown and re-mint on expiry, not leave a dead code on screen.
+
+> ⚠️ **The search account and the playback account are decoupled, and that is a feature.** Our
+> token only *finds ids*. The speaker plays them with the account already linked on the players
+> (`sn=`), exactly as the household's existing `x-sonos-spotify:` favourites do. So a search UI
+> does not depend on this token staying valid for playback — only for browsing.
+
+> ⚠️ **Spotify has no station or stream `itemType`.** Its tree is playlists all the way down:
+> `Charts` (10), `Popular Playlists` (100), `Genres and Moods` (63 categories → playlists), and
+> `Made For You` (DJ, daylist, On Repeat, Repeat Rewind — personalised, tied to the linked
+> account). That is consistent with the finding above that Spotify's *own* API dropped the radio
+> generator: the closest thing to a station here is a curated playlist. Anything calling itself a
+> "Spotify station" in our UI is a playlist, and should be built and labelled as one.
+
+### YouTube Music: the wall is Google's API-key gateway, not Sonos policy
+
+sid **284**, `Auth="AppLink"`, endpoint `https://music.googleapis.com/v1:sendRequest`. Every
+method — `getMetadata`, `getAppLink`, `getDeviceLinkCode`, `getSessionId` — returns the same
+**HTTP 403** from Google Cloud Endpoints, before any SMAPI processing:
+
+```text
+{"error":{"code":403,"status":"PERMISSION_DENIED",
+ "message":"Method doesn't allow unregistered callers (callers without established identity).
+            Please use API Key or other form of API consumer identity to call this API."}}
+```
+
+The key ships in YTM's Sonos manifest (`cf.ws.sonos.com/p/m/a3fd2ecc-…`) as `apiKey.cr` and
+`apiKey.zp` — two ~440 B base64 blobs, controller and zoneplayer variants, both beginning
+`iGSZyg…`. They are wrapped to a key held by Sonos's app and firmware; a third party cannot
+decrypt them. Independent corroboration: [steventamm/SonosController], a native macOS Sonos
+controller, documents the identical block for YouTube Music, Amazon and SoundCloud.
+
+> ⚠️ **Correction to the obvious inference: "ships an encrypted apiKey" is NOT the discriminator.**
+> **All 108** service manifests in this household carry an `apiKey` object — TuneIn and SomaFM
+> included, and those answer `getMetadata` anonymously all day. The manifest is delivered to every
+> client identically; what differs is whether the *service backend* enforces it. Do not use
+> manifest contents to predict which services are reachable — probe the endpoint.
+
+**Not pursued, deliberately:** extracting the controller key from Sonos firmware or the app to
+decrypt `apiKey.cr`. It is circumvention of Google's access control, it would break on any key
+rotation, and the resulting client would still need a YouTube Music account token.
+
+### Three doors re-tested and closed
+
+- **The player will not proxy SMAPI.** Earlier this was tested against *service-root* forms. It is
+  now tested against a **real container id taken from a live favourite** —
+  `Browse("1006004cALkSOiFAONyGoCF1zjZUFf9E-…")`, with and without `?sid=284` — and against
+  `SA_RINCON72711_X_#Svc72711-0-Token`. **UPnP 701** for all of them.
+- **`customsd.htm` is gone.** **403** on both the Play:1 (86.8) and the Arc (96.1). Sonos disabled
+  it on S2; bonob's own users now expose their bridge to the public internet to survive. So
+  "run our own SMAPI service" still costs a public HTTPS:443 endpoint.
+- **The cloud Control API still has no browse** — unchanged, and the local one does not either
+  (next section).
+
+### New territory: the player's LOCAL Control API on :1443, and its 52 namespaces
+
+Not previously examined here; the earlier work covered only the *cloud* OpenAPI spec. Every player
+serves the Control API locally over `https://<ip>:1443`, and it accepts the well-known key
+`123e4567-e89b-12d3-a456-426655440000` (the one Home Assistant uses):
+
+```text
+GET https://<ip>:1443/api/v1/players/local/info      X-Sonos-Api-Key: <key>   -> 200 deviceInfo
+wss://<ip>:1443/websocket/api                        X-Sonos-Api-Key: <key>   -> connects
+```
+
+> ⚠️ **Do not offer the documented `v1.api.sonos.com` subprotocol — it is rejected with a bare
+> HTTP 400.** Connect with *no* subprotocol and it works. That 400 looks exactly like "this
+> firmware dropped the websocket API" and cost an hour of chasing the wrong thing.
+
+**The enumeration oracle:** an unknown namespace answers `ERROR_UNSUPPORTED_NAMESPACE`, an unknown
+command `ERROR_UNSUPPORTED_COMMAND`, and the response header **echoes the resolved namespace** —
+namespaces prefix-match (`"music"` → `musicServiceAccounts`), so a 26-way BFS enumerates them all.
+**Commands do not prefix-match**, so there is no equivalent oracle for command names. The 52:
+
+```text
+alarms areas audioClip authorization catalog devices devicesExtended diagnostics
+effectiveSettings entitlements favorites groupVolume groups hardwareStatus hdmi history
+homeTheater households info ircontrol localContentLibrary management musicServiceAccounts
+networkTest pinewood platformInternal playback playbackExtended playbackMetadata playbackSession
+playerVolume playlists positioning power roomDetection settings sleepTimer smartplay soundSwap
+svc systemReporting systemTime time timers topology trueplay trueroom virtualLineIn
+virtualRemoteControl voice zones
+```
+
+versus the 12 namespaces the cloud spec documents. There **is** a content model in here —
+`history/getHistory` returns `contentPagedResources` / `contentResource` / `universalMusicObjectId`
+/ `contentMetadataBlob`, and `favorites`, `playlists`, `localContentLibrary` and `entitlements` all
+answer. **No browse or search command was found**: `catalog` rejects `browse`, `search`,
+`getMetadata`, `getItems`, `getChildren`, `getCatalogs` and eleven more. Its real command names are
+unknown and, without a prefix oracle, guessing is the only route. **This is the one genuinely
+unexplored lead left in this document.**
+
+### Amazon moved DeviceLink → AppLink — and `core/amazon.cpp`'s link ceremony is BROKEN
+
+This household now splits **62 AppLink · 32 Anonymous · 14 DeviceLink** (was 59 / 32 / 15).
+**Amazon Music is `Auth="AppLink"` now**, not DeviceLink as recorded above, and its endpoint has
+followed:
+
+```text
+getDeviceLinkCode  -> 500  soap:Server.ServiceUnknownError  "Cannot parse null string"
+                            (with the REAL household id — this is not a malformed-request artefact)
+getAppLink         -> 200  regUrl = https://www.amazon.com/ap/oa?client_id=amzn1.application-oa2-client.5908e9…
+getDeviceAuthToken -> 200  Client.NOT_LINKED_RETRY   (with a linkDeviceId WE choose)
+```
+
+`core/amazon.cpp:linkBegin()` calls `getDeviceLinkCode` and **bails if `linkDeviceId` is missing**
+from the response. `getAppLink` never returns one. So:
+
+- **An existing Amazon token keeps working** — browse, the crawl and the Radio page are unaffected.
+- **Any NEW link fails**, including a re-link after `unlink()` or a token that cannot be refreshed.
+- **The fix** is `getDeviceLinkCode` → `getAppLink` plus a self-chosen, persisted `linkDeviceId`.
+  Proven up to the approval step; the redemption leg needs one ceremony with the owner.
+
+The old note that `linkDeviceId` "is per-request and required" was true of the DeviceLink flow. In
+the AppLink flow the client picks it, and the poll accepts it.
+
+### Follow-up, 2026-09-05 — Amazon's station tree is CREDENTIAL-DEPENDENT, and two wrong turns
+
+The headline first, because an earlier revision of this section said something else and was wrong:
+**two tokens for the SAME Amazon account, same Prime tier, see two different station trees.**
+
+| credential | `catalog/stations/#prime_stations` returns |
+|---|---|
+| The jukebox's token, linked long ago under the DeviceLink flow | **26 genre containers**, ~1,045 stations — RUN-VERIFIED on hardware, see the crawl log below |
+| A token minted 2026-09-05 from a laptop via `getAppLink` | a **flat list of up to 100 playable stations**, `itemType=program`, `canEnumerate=false`, ids as `catalog:station:key:<KEY>`; **no containers at all** |
+
+On the new token every refinement id is gone (`catalog/stations/refinements/genres/#prime_stations`,
+`…/refinements/…`, `…/genres/…` all return `500 "Invalid field to parse"`) and Amazon's presentation
+map (version 582) is down to `rootBrowsePage` / `stationHero` / `stationsGrid`. On the device's token
+the full genre tree is alive and crawls cleanly. Why they differ is **not established** — grandfathering
+of older links, a per-registration entitlement, something else. Only the observation is solid.
+
+**Do not conclude anything about "what Amazon returns" from one credential.** That is the whole
+lesson of this section.
+
+#### Wrong turn 1 — `<total>` is not a container size
+
+> ⚠️ **`<total>` in a `getMetadata` response echoes the count you asked for, capped at 100.**
+> `count=6 → total=6`, `count=60 → 60`, `count=200 → 100`, `count=500 → 100`. Browsing with
+> `count=6` and reading `total=6` produced a confident claim that Amazon had gutted its catalogue to
+> six stations. **Always browse with the count the firmware uses** (`browse(kStationsRoot, 0, 60)`).
+
+#### Wrong turn 2 — the device was never broken
+
+From "the new token sees a flat tree" it was inferred that the device's crawl must have been failing
+silently for weeks, leaving a fossil cache. **Wrong, and disproved on hardware.** Pressing *Refresh
+now* produced:
+
+```text
+[radio ] crawling 26 genres
+[radio ]   Recently Played          16 stations
+[radio ]   Popular Genres & Artists 50 stations
+...
+[radio ]   K-Pop                     1 stations
+[radio ] pass complete: 25 fetched, 1 still missing — resuming next run
+```
+
+25 of 26 genres fetched, one transient failure on Jazz, and the convergence rule correctly deferred
+publishing to the next pass. The cache was current, not a fossil, and nothing about the Radio page
+was broken. The user's *"I am still seeing all the same radio stations"* was the correct reading of
+the evidence and the inference chain built against it was not.
+
+**What was really wrong was one missing LVGL style**: the Settings *Refresh now* button had no
+`LV_STATE_PRESSED` variant, so a press produced no colour change and looked like a dead control
+while working perfectly.
+
+#### The credential theory, TESTED — same account, same id, opposite results
+
+"Two tokens for one account see different trees" is a weak claim, so it was tested with ids the
+**old** credential minted: two genre containers lifted out of this household's own Amazon
+favourites (`parentID` in their `<r:resMD>`), which the device's crawl enumerates successfully
+every time.
+
+| id (sourced from the device's own favourites) | new token |
+|---|---|
+| `catalog/stations/refinements/genres/b9bd5b28-…/#prime_stations` | **`Invalid field to parse: Failed to initiate provide…`** |
+| `prime/stations/refinements/genres/320cc97e-…/#prime_stations` | **`Invalid field to parse: Error constructing MRN…`** |
+| `catalog/stations/refinements/genres/#prime_stations` | same fault |
+| `catalog/stations/recent/#recently_played_stations` | **200 — 60 stations** |
+| `catalog/stations/<KEY>/#chunk-<uuid>` (a real favourite) | 200 — resolves, with its tracks |
+
+So the new credential **is the same account** — `recent` returns this household's actual history
+(The Traveling Wilburys, Love Songs, Grateful Dead, Train) — and it can resolve any individual
+station by either id form. What it cannot do is browse the genre refinements **at all**: a hard
+fault on the exact ids the device walks without trouble. `Failed to initiate provider` reads like a
+backend routing failure, i.e. that surface is not wired up for this token's presentation, rather
+than the containers having been deleted.
+
+**Consequence for the design: hardcoding the genre ids would not rescue a re-linked device.** The
+tree is unreachable for that credential however it is addressed, so the merging swap really is the
+only thing standing between a re-link and the loss of ~945 station ids.
+
+**Silver lining, and a candidate fallback:** `catalog/stations/recent/#recently_played_stations`
+answers on the new credential with **60 of the household's own stations** — arguably better content
+for a Radio page than the generic flat 100. Worth considering as the first container `genres()`
+offers when the refinements are unreachable.
+
+#### What was ruled out, so it is not re-tested
+
+The obvious explanation was that the new link was under-specified. It was not:
+
+- **Household id — sent, and identical.** Also a trap worth keeping: **the WSDL says the household
+  id belongs in `<credentials><deviceId>` and gives `getAppLink` only
+  `hardware`/`osVersion`/`sonosAppName`/`callbackPath`. Amazon ignores that and reads `householdId`
+  from the request BODY.** Sending it the WSDL-correct way is a hard
+  `400 "householdId must not be blank or null!"`. `core/amazon.cpp` already does the "wrong" thing,
+  which is the only thing that works — do not "fix" it.
+- **OAuth scope and client id — identical.** Both links produce
+  `scope=amazon_music:access`, the same `amzn1.application-oa2-client.5908e9…`, and the same
+  `smapi-na.amazonmusic.com/lwa` redirect.
+- **Credentials header shape — identical.** The device sends `deviceProvider` +
+  `loginToken{token,key,householdId}` and so does the test client; neither sends `deviceCert`, and
+  the device gets the full tree without one, so the player-certificate capability is not the
+  differentiator either.
+
+**Two hypotheses survive and cannot be separated from outside.** (1) The `linkDeviceId`: DeviceLink
+had *Amazon* mint it, so the old token carries an Amazon-issued device identity, while `getAppLink`
+mints none and the client supplies a string — and since `getDeviceLinkCode` is dead, **no new link
+can ever carry an Amazon-minted id**. (2) A rollout keyed to link vintage. Both predict the same
+operational fact, which is the only part that matters here: **any re-link is a downgrade.**
+
+**Nothing about this is documented.** Sonos documents the SMAPI *protocol*
+(`docs.sonos.com/docs/smapi`, plus the WSDL in `docs/sonos-music-api/`); no vendor documents a
+service's content tree or the conditions under which it varies by credential.
+
+#### What still holds, and what the shipped code is actually for
+
+The measured facts survive; only their interpretation changed.
+
+- **The old and new id forms are aliases.** `catalog/stations/<KEY>/#chunk-<uuid>` from a years-old
+  favourite and `catalog:station:key:<KEY>` both resolve to the same station. **The KEY is the
+  durable part**, as the `#chunk-` analysis above argued.
+- **A re-link is a downgrade, and re-linking is now possible.** This is the concrete risk the code
+  addresses: `439a56d` makes linking work again, and a device that re-links gets the *new*
+  credential — which enumerates 100 stations where the old one enumerated ~1,045. Without
+  `f34c5cc`'s merging swap, one re-link plus one crawl would silently discard 945 station ids that
+  still play and can never be enumerated again.
+- **The empty-index guard (`6598a27`) is right regardless.** `refresh()` publishes with gaps when a
+  pass makes no progress — correct for a permanently dead genre, catastrophic when the tree changes
+  shape underneath it. It costs nothing and it is the difference between a stale cache and no cache.
+- **The flat-root reader (`189c090`) is defensive, not a migration.** On the device's credential it
+  never fires: `genres()` finds 26 real containers and the synthetic entry is skipped. It exists so
+  that a device on the new credential gets a working Radio page instead of 100 empty tiles.
+
+#### Other things the token established
+
+- **The AppLink ceremony works end to end on Amazon.** Approval → token in **33 s**; token 720 B,
+  key 524 B. `getAppLink` returns no `linkDeviceId`, so the client picks its own and the poll
+  accepts it.
+- **Link-code TTL differs per service and neither is documented.** Spotify's dies at **~5 minutes**
+  (and the web page rejects it while SOAP still answers `NOT_LINKED_RETRY`). Amazon's was still live
+  after **25 minutes** of polling, so `amazon.cpp`'s 420 s window is conservative.
+- **The access token expires in well under an hour**, and the replacement arrives inside the
+  `Client.TokenRefreshRequired` fault. Any script poking at this by hand needs that retry or the
+  credential will look broken.
+- **Amazon exposes search, but not for stations**: `catalog:tracks:search`, `catalog:albums:search`,
+  `catalog:artists:search`, `catalog:playlists:search`, `podcast:shows:search`,
+  `podcast:episodes:search`. A ready-made second source for the Search page.
+
+### What this means for the product
+
+Search on the jukebox is achievable **now**, over Spotify (and Amazon), entirely on-device with one
+browser ceremony — no Pi, no cloud, no Sonos app. YouTube Music stays out of reach by the same
+route it always was, and the only way to it remains `ytmusicapi` + `yt-dlp` on the portal Pi, with
+the costs already recorded above. Design and task breakdown: **`plans/12-jukebox-search.md`**.
+
+[steventamm/SonosController]: https://github.com/steventamm/SonosController
+
 
 ---
 
@@ -755,6 +1093,12 @@ broken.
 > **15 of this household's 106 services are DeviceLink** and the same handshake applies to all of
 > them. This is the general answer to "can a standalone controller browse a real music service": for
 > AppLink services no, for DeviceLink services **yes, with one browser ceremony by the owner**.
+>
+> ⚠️ **SUPERSEDED 2026-09-04 — see the re-investigation section near the top of Part 2.** "For
+> AppLink services no" was inferred from YouTube Music and never tested. AppLink services accept
+> the same anonymous `getAppLink` ceremony (Spotify, Amazon, Pandora, TuneIn New, Plex, Audible all
+> answer), and **Amazon itself has since moved from DeviceLink to AppLink** — which breaks
+> `core/amazon.cpp`'s `getDeviceLinkCode` call for any new link.
 >
 > ### Still untested
 >

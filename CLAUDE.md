@@ -126,6 +126,25 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
   > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
   > instead of 27 connect/handshake/close cycles.
+  > ⚠️ **Amazon's station tree is CREDENTIAL-DEPENDENT — a RE-LINK IS A DOWNGRADE, which is why
+  > publishing is a MERGE. Do not "simplify" it back to a swap.** Same account, same Prime tier, two
+  > tokens: the jukebox's long-standing one enumerates **26 genres / ~1,045 stations** (verified on
+  > hardware), while one minted in 2026-09 via `getAppLink` returns a **flat list of 100 stations**
+  > (`itemType=program`, `canEnumerate=false`) and 500s every `refinements/genres` id. So re-linking
+  > this device would shrink its catalogue by ~945 ids that still PLAY but can never be enumerated
+  > again — `refresh()` therefore merges the crawl into the existing cache rather than replacing it,
+  > and the swap moves the old tree aside to `.bak` instead of deleting it first. `genres()` also
+  > skips `itemType=program` rows and synthesises one implicit container, so a device on the new
+  > credential gets a working page instead of 100 empty tiles. Two traps: **`<total>` echoes the
+  > count you asked for, capped at 100** — browse with the firmware's count (60) or you will
+  > "discover" a catalogue the size of your own parameter, as happened; and **never generalise from
+  > one credential** to "what Amazon returns" — PROVEN by browsing a genre id out of this
+  > household's own favourites with both tokens: the device walks it, the new token gets
+  > `Invalid field to parse: Failed to initiate provider`. So hardcoding genre ids would not rescue
+  > a re-linked device. **And `getAppLink`/`getDeviceLinkCode` want `householdId` in the request
+  > BODY, not in `<credentials><deviceId>` where the WSDL puts it** — the WSDL-correct form is a
+  > hard `400 "householdId must not be blank or null!"`, so do not "fix" `amazon.cpp` to match the
+  > schema. Full evidence: `plans/08` (2026-09-05).
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
