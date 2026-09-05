@@ -1527,7 +1527,15 @@ static void radioPaintArt() {
   }
 }
 
+// Amazon flattened its station root, so amazon::genres() now hands back one implicit container
+// (see core/amazon.cpp). One tile that opens the only list there is is a level of navigation that
+// exists purely to be tapped through, so collapse it: Radio opens straight on the stations and the
+// Back button stays hidden. Two levels return by themselves if a service ever serves containers
+// again — this keys on what is in the cache, not on a flag.
+static bool radioFlat() { return radiocache::genreCount() == 1; }
+
 static void radioShowGenres() {
+  if (radioFlat()) { radioShowStations(0); return; }
   radioClear();
   s_radioLevel = 0; s_radioGenre = -1;
   lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
@@ -1659,8 +1667,14 @@ static void radioShowStations(int genreIdx) {
   s_radioGenreId = gid; s_radioGenreName = gname;
   radiocache::stations(genreIdx, s_radioStations);
 
-  lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
-  lv_label_set_text(s_radioTitle, gname.c_str());
+  // Collapsed: there is nothing to go back TO, and the page is still "Radio", not "Stations".
+  if (radioFlat()) {
+    lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_radioTitle, "Radio");
+  } else {
+    lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_radioTitle, gname.c_str());
+  }
   lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_CENTER);
 
   for (size_t i = 0; i < s_radioStations.size(); i++)

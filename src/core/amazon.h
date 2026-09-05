@@ -20,9 +20,14 @@
 namespace amazon {
 
 // A browsable container (a genre, "Recently Played", "Popular Genres & Artists"...).
+//
+// Amazon flattened the station root in 2026-09: it now returns the stations themselves rather than
+// containers, so genres() synthesises a SINGLE entry pointing back at the root. Callers do not need
+// to care — a one-entry list is a valid list — but a UI with a container level should collapse it
+// when there is only one (the jukebox Radio page does).
 struct Genre {
   String title;
-  String id;      // SMAPI object id, e.g. "catalog/stations/refinements/genres/<uuid>/#prime_stations"
+  String id;      // SMAPI object id; historically "catalog/stations/refinements/genres/<uuid>/#prime_stations"
 };
 
 // One playable station. `id` is the SMAPI object id and carries a server-minted "#chunk-<uuid>".

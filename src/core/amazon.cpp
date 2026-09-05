@@ -443,23 +443,38 @@ static String browse(const String &objectId, int index, int count) {
   return request("getMetadata", body);
 }
 
+// The station root has held two different shapes, and this has to read both. Until 2026-09 it was
+// 26 genre CONTAINERS, each browsing to ~50 stations; it is now a FLAT list of up to 100 playable
+// stations (itemType=program, canEnumerate=false) and every refinements/genres id faults. Taking a
+// program row as a genre is what produced 100 "genres" that each browse to nothing — see the guard
+// at the end of radio_cache.cpp:refresh() for what that cost.
 bool genres(std::vector<Genre> &out) {
   if (!linked()) return false;
-  const String r = browse(kStationsRoot, 0, 60);
+  const String r = browse(kStationsRoot, 0, 100);   // server caps at 100; asking for more is free
   std::vector<String> blocks;
   eachCollection(r, blocks);
+  int programs = 0;
   for (const String &b : blocks) {
+    if (tagValue(b, "itemType") == "program") { ++programs; continue; }   // a station, not a level
     Genre g;
     g.title = unescapeXml(tagValue(b, "title"));
     g.id    = unescapeXml(tagValue(b, "id"));
     if (g.title.length() && g.id.length()) out.push_back(g);
+  }
+  // Flat root: hand back ONE implicit container so the cache, the crawl and the UI all keep their
+  // shape. stations() filters on itemType=program, so browsing kStationsRoot through it returns
+  // exactly the rows skipped above. If Amazon ever restores real containers, the loop above finds
+  // them and this never fires — no flag, no setting, no migration.
+  if (out.empty() && programs) {
+    Genre g; g.title = "Stations"; g.id = kStationsRoot;
+    out.push_back(g);
   }
   return !out.empty();
 }
 
 bool stations(const String &genreId, std::vector<Station> &out) {
   if (!linked()) return false;
-  const String r = browse(genreId, 0, 50);   // genres cap at 50; no paging needed
+  const String r = browse(genreId, 0, 100);  // a genre caps at ~50, the flat root at 100; no paging
   std::vector<String> blocks;
   eachCollection(r, blocks);
   for (const String &b : blocks) {
