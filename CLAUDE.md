@@ -126,6 +126,19 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
   > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
   > instead of 27 connect/handshake/close cycles.
+  > ⚠️ **Amazon FLATTENED the station root (2026-09), the crawl is now ONE request, and publishing
+  > is a MERGE — do not "simplify" it back to a swap.** `catalog/stations/#prime_stations` used to
+  > hold 26 genre containers and now holds up to **100 playable stations** directly
+  > (`itemType=program`, `canEnumerate=false`); every `refinements/genres` id 500s. `genres()`
+  > skips program rows and synthesises one implicit container, so the cache keeps its shape. Three
+  > traps. **`<total>` echoes the count you asked for, capped at 100** — browse with the firmware's
+  > count (60) or you will "discover" a catalogue the size of your own parameter, as happened.
+  > **The device's cache is RICHER than the live tree** (~1,045 fossil stations vs 100): those ids
+  > still play but can never be enumerated again, so `refresh()` merges the crawl into the existing
+  > cache instead of replacing it, and the swap moves the old tree aside to `.bak` rather than
+  > deleting it first. **And `refresh()` refuses to publish when no container yielded anything** —
+  > without that guard the first successful crawl after the AppLink link fix would have wiped all
+  > 1,045. Full evidence: `plans/08` (2026-09-05); design: `plans/12`.
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP

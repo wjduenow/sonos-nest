@@ -11,8 +11,9 @@ document assumes it.
    a real music service, tap one to play it. Sixth entry on the nav rail.
 2. **A source choice on the Radio page** — Amazon Prime Stations (what ships today) *or* Spotify's
    curated playlists, picked with a segmented control.
-3. **A fix for a live bug**: Amazon moved from `DeviceLink` to `AppLink`, so
-   `core/amazon.cpp:linkBegin()` cannot create a new link any more.
+3. ~~**A fix for a live bug**: Amazon moved from `DeviceLink` to `AppLink`, so
+   `core/amazon.cpp:linkBegin()` cannot create a new link any more.~~ **SHIPPED** — along with
+   three more that testing it uncovered; see §5, now a record rather than a plan.
 4. **A docs pass** — README and `docs/` are marketing/onboarding material and are already behind
    (they don't mention the jukebox at all). Shipping the screens without updating them is not
    "done"; §9 makes that an explicit gate.
@@ -232,26 +233,43 @@ a real sample captured from a Sonos-app-created favourite of each type.
 
 ## 4. Screen — Radio, with two sources
 
-Today `PAGE_RADIO` is Amazon Prime Stations out of `radiocache` (genres grid → station carousel →
-A-Z strip → search). Add a source segmented control above it:
+Today `PAGE_RADIO` is Amazon stations out of `radiocache` (genres grid → station carousel → A-Z
+strip → search). Add a source segmented control above it:
 
 ```
-  [ Amazon Stations | Spotify ]
+  [ Amazon | Spotify ]
 ```
 
-- **Amazon** — unchanged. Cached crawl, instant, survives a dead link.
-- **Spotify** — live browse. Its lists are short enough not to need a crawl:
-  `Charts` (10) · `Popular Playlists` (100) · `Genres and Moods` (63 categories → playlists) ·
-  `Made For You` (DJ, daylist, On Repeat, Repeat Rewind — personalised to the linked account).
+**The toggle is between SERVICES, and the two never intermingle.** One source is showing at a time,
+each owns its own list, and switching is a re-render, not a filter over a blended index. A merged
+"all your radio" list would mix two id spaces, two artwork hosts and two playback paths behind rows
+that look identical, and the first bug report would be "why did tapping this one do nothing".
+
+- **Amazon** — the existing cache, unchanged by this work. Note what it now contains: Amazon
+  flattened its station root (plans/08, 2026-09-05), so a crawl returns **100 live stations** in one
+  implicit container, and `radio_cache`'s merging swap keeps the **~945 stations from the
+  pre-flattening cache** under their original genres. So the grid is ~27 genres: `Stations` (live)
+  plus the fossils. Both play; only the live ones can be re-enumerated. This is *within* the Amazon
+  source — the archive is not a third segment (asked and answered: service-level toggle only).
+- **Spotify** — live browse, no crawl needed. `Charts` (10) · `Popular Playlists` (100) ·
+  `Genres and Moods` (63 categories → playlists) · `Made For You` (DJ, daylist, On Repeat, Repeat
+  Rewind — personalised to the linked account).
 
 > ⚠️ **Call them playlists, not stations.** Spotify's SMAPI tree has **no station or stream
 > itemType** — verified. Its algorithmic stations and mixes are gone at Spotify's end, not Sonos's
 > (plans/08). "Made For You" is the closest thing and it is still a playlist. A UI that promises
-> stations and delivers playlists is a bug report waiting to happen.
+> stations and delivers playlists is a bug report waiting to happen. With Amazon's browsable
+> catalogue down to 100, Spotify is now the larger half of this page, not the garnish.
 
 Persist the choice in NVS (`settingsRadioSource()`), default Amazon so nothing changes for an
 existing device. If a source is not linked, its segment renders disabled with a one-line "Link in
 Settings" hint rather than disappearing — a missing control is a support question.
+
+> ⚠️ **`radioFlat()` already exists and interacts with this.** It collapses the genre level when the
+> cache holds exactly one container. On a device with the fossil archive that is false (~27
+> genres); on a fresh device it is true, so Amazon opens straight onto 100 stations with no Back
+> button. The Spotify source needs the same treatment decided explicitly — its top level is four
+> real containers, so it does *not* collapse.
 
 Whether Spotify's lists get a `radio_cache`-style disk cache is a **decision to make after
 measuring**: 63 categories × one browse each is a crawl-shaped cost, but the top three lists are
@@ -259,22 +277,26 @@ one call each and the whole feature may be fine live. Start live, cache only if 
 
 ---
 
-## 5. Fix: Amazon's link ceremony is broken
+## 5. SHIPPED — Amazon's link ceremony, and the three bugs behind it
 
-`core/amazon.cpp:linkBegin()` calls `getDeviceLinkCode` and bails when `linkDeviceId` is absent
-from the response. Amazon's endpoint now answers that method with
-`500 soap:Server.ServiceUnknownError "Cannot parse null string"` — **with the real household id**,
-so it is not a malformed-request artefact. `getAppLink` answers 200 with a Login-with-Amazon URL,
-and returns **no `linkDeviceId`**; `getDeviceAuthToken` accepts one we choose and answers
-`NOT_LINKED_RETRY`.
+Branch `fix/amazon-applink`, flashed to the jukebox and running as `v0.4.2-6-gf34c5cc`. Kept here
+because §10's phases depend on it and because the order things were found in is the useful part.
 
-- Existing tokens are **unaffected** — browse, crawl and the Radio page keep working.
-- Any **new** link fails: a fresh device, a re-link after `unlink()`, or recovery from a token that
-  cannot be refreshed.
-- Fix: `getDeviceLinkCode` → `getAppLink`; generate a stable `linkDeviceId` once (device id or a
-  UUID), persist it in NVS, send it on every poll. This lands naturally in `core/smapi.cpp`'s link
-  state machine (§2.1) since Spotify needs the identical flow.
-- **Verified only up to approval.** The redemption leg needs one real ceremony with the owner.
+| commit | what |
+|---|---|
+| `439a56d` | **Link over `getAppLink`.** `getDeviceLinkCode` now answers `500 Server.ServiceUnknownError "Cannot parse null string"` with a valid household id. `getAppLink` mints no `linkDeviceId`, so the client picks its own (`wifiHostname()`) and sends it on every poll. Verified end to end with the owner: approval → token in 33 s. |
+| `6598a27` | **Never publish an empty index over a good cache.** `refresh()`'s convergence rule publishes with gaps when a pass makes no progress — right for a dead genre, catastrophic for a changed tree. Guards on `missing == genres.size()` so a fully resumed pass (which legitimately fetches nothing) still publishes. |
+| `189c090` | **Read the flat station root.** `genres()` skips `itemType=program` rows and, when none remain, returns one implicit container pointing at the root; `stations()` already filtered on `program`, so the crawl drops from 27 requests to 1. The Radio page collapses its genre level via `radioFlat()`. |
+| `f34c5cc` | **Merge instead of replace.** Crawled genres first, then every cached station the crawl did not return, under its original genre. Per-genre rather than one flat list because 1,000+ LVGL rows against a 512 KB pool is a UI freeze; membership by 32-bit FNV-1a hash because 1,000 Strings is ~40 KB where `heapLargest` is ~32 KB. The swap is now crash-safe — aside to `.bak`, restore on failure, recovered at the start of the next crawl. |
+
+**The dependency worth remembering:** the link fix is what makes a crawl *succeed* again, and a
+successful crawl against the flattened tree is what would have wiped the cache. Shipping `439a56d`
+without `6598a27` would have destroyed ~1,045 irreplaceable station ids. Any future "just fix the
+link" change to a service this crawl depends on should ask the same question first.
+
+**Not verified on hardware:** the merge itself, which needs a real crawl on the device (re-link
+Amazon in Settings, then refresh). `6598a27` means a failed crawl keeps what is there, and
+`f34c5cc` means a failed swap restores it.
 
 ---
 
@@ -356,8 +378,10 @@ The screens are not done until these are, in the same PR as the feature:
 1. Measure the flash delta of two new core files on `sleep-button`; decide `core/services/` or not.
 2. `core/smapi.{h,cpp}` — lift transport + XML helpers + the AppLink link state machine out of
    `core/amazon.cpp`. `amazon` keeps its public API and its crawl.
-3. Fix Amazon's ceremony onto `getAppLink` (§5). Re-link with the owner. **Radio page must still
-   work unchanged** — that is the regression test.
+3. ~~Fix Amazon's ceremony onto `getAppLink` (§5). Re-link with the owner.~~ **DONE**, plus the
+   empty-index guard, the flat-root read and the merging swap — §5. One thing is still owed:
+   **run a real crawl on the device** (re-link Amazon in Settings, refresh) and confirm the merge
+   publishes ~27 genres rather than 1, i.e. that the ~945 fossils survived.
 4. `core/spotify.{h,cpp}` + NVS token + presentation-map category ids (§2.3).
 5. `settingsSetSpotifyAuth()` / `settingsRadioSource()` in `core/settings.cpp`.
 
@@ -380,8 +404,14 @@ The screens are not done until these are, in the same PR as the feature:
 
 ## 11. Open questions
 
-- **`refreshAuthToken` lifetime** for Spotify and Amazon. Unknown for both. Until one is observed
-  expiring, the re-link path is the only recovery and must be reachable from the UI.
+- **`refreshAuthToken` lifetime.** Partly answered: Amazon's access token expires in **well under
+  an hour** and the replacement arrives inside the `Client.TokenRefreshRequired` fault, which
+  `amazon.cpp:request()` already handles. What is still unknown is how long the *refresh* right
+  lasts before a re-link is required — for either service. The re-link path must stay reachable
+  from the UI.
+- **Does the merge actually preserve the fossils on hardware?** Reasoned through and built, never
+  run against a real card (§5). It is the one step that can still lose the ~945 stations, and the
+  crash-safe swap is the net under it.
 - **Container URI prefixes** for Spotify albums/playlists — derivable only from a captured sample
   per type (§3.4).
 - **Whether Spotify's Radio lists need a disk cache** — measure before building one (§4).

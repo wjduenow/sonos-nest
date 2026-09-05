@@ -383,6 +383,76 @@ from the response. `getAppLink` never returns one. So:
 The old note that `linkDeviceId` "is per-request and required" was true of the DeviceLink flow. In
 the AppLink flow the client picks it, and the poll accepts it.
 
+### Follow-up, 2026-09-05 — Amazon flattened the station root (and one self-inflicted trap)
+
+Found while testing the AppLink fix with a real token, and it matters more than the fix did.
+
+> ⚠️ **`<total>` in a `getMetadata` response is NOT the size of the container — it echoes the count
+> you asked for, capped at 100.** `count=6 → total=6`, `count=60 → total=60`, `count=200 → total=100`,
+> `count=500 → total=100`. Asking for 6 and reading `total=6` produced a confident, wrong conclusion
+> that Amazon had gutted its catalogue to six stations. **Always browse with the count the firmware
+> uses** (`browse(kStationsRoot, 0, 60)`) before drawing any conclusion about a container's size.
+
+**What actually changed.** `catalog/stations/#prime_stations` used to return **26 genre containers**,
+each browsing to ~50 stations. It now returns a **flat list of up to 100 playable stations** —
+`itemType=program`, `displayType=stationHero`, `canEnumerate=false` — and every refinement id is
+gone:
+
+```
+catalog/stations/refinements/genres/#prime_stations  -> 500 "Invalid field to parse"
+catalog/stations/refinements/#prime_stations         -> 500 "Invalid field to parse"
+catalog/stations/genres/#prime_stations              -> 500 "Invalid field to parse"
+```
+
+Amazon's presentation map (version 582) is down to `rootBrowsePage`, `stationHero` and
+`stationsGrid` — a grid of stations, no container level. Account tier is **Prime, not Unlimited**,
+and it is the same account that produced the 26-genre crawl, so this is a change over time, not an
+entitlement difference.
+
+**A second id form appeared, and it is an alias.** Browse now returns `catalog:station:key:<KEY>`.
+The old `catalog/stations/<KEY>/#chunk-<uuid>` still resolves — `getExtendedMetadata` on this
+household's years-old "Classic R&B" favourite returns the station and `getMetadata` returns its
+tracks — and `catalog:station:key:A3E8KCX2260OJM` resolves to the *same* station. So the **KEY is
+the durable part**, exactly as the `#chunk-` analysis above argued, and nothing already cached is
+dead.
+
+**The consequence that actually bit: the device's cache is now RICHER than the live catalogue.**
+The jukebox's Settings page reads *"26 genres, 41 favorites cached"* — a fossil built before the
+flattening, holding ~1,045 stations. The live root offers 100. Those 945 extra ids still play but
+can never be enumerated again, so a plain cache swap would delete them permanently.
+
+**Why nobody noticed.** `radio_cache::refresh()`'s convergence rule publishes with gaps when a pass
+makes no progress, precisely so one dead genre cannot block the cache forever — it cannot tell that
+from the tree changing shape. With the flat root, `genres()` returned 100 "genres", every
+`stations()` call found zero collections, `fetched` landed on 0, and the crawl would have
+`rmTree`d a good cache and swapped in an empty index. It never did, only because the device's
+crawl was failing earlier than that. **The AppLink fix is what would have made it succeed.**
+
+**Fixed in `fix/amazon-applink`** (four commits, jukebox flashed and running `v0.4.2-6-gf34c5cc`):
+
+| commit | what |
+|---|---|
+| `439a56d` | link over `getAppLink`; DeviceLink is a server error now |
+| `6598a27` | never publish an empty index over a good cache — guards on `missing == genres.size()`, so a fully resumed pass still publishes |
+| `189c090` | `genres()` skips `program` rows and synthesises one implicit container for a flat root; the Radio page collapses its genre level when there is only one |
+| `f34c5cc` | publishing is a **merge**: crawled genres first, then every cached station the crawl did not return, kept under its original genre. Swap is crash-safe (aside to `.bak`, restore on failure) |
+
+**Other things the token established, worth not re-deriving:**
+
+- **The AppLink ceremony works end to end on Amazon.** Approval → token in **33 s**; token 720 B,
+  key 524 B. `getAppLink` returns no `linkDeviceId`, the client picks its own, and the poll accepts
+  it.
+- **Link-code TTL differs per service and neither is documented.** Spotify's dies at **~5 minutes**
+  (and the web page rejects it while SOAP still says `NOT_LINKED_RETRY`). Amazon's was still live
+  after **25 minutes** of polling, so `amazon.cpp`'s 420 s window is conservative.
+- **The token expires in well under an hour**, as `amazon.cpp` already documents, and the
+  replacement arrives inside the `Client.TokenRefreshRequired` fault. Any script poking at this by
+  hand needs that retry or it will look like the credential broke.
+- **Amazon exposes search, but not for stations.** Its map offers `catalog:tracks:search`,
+  `catalog:albums:search`, `catalog:artists:search`, `catalog:playlists:search`,
+  `podcast:shows:search`, `podcast:episodes:search` — a ready-made second source for the Search
+  page, with no station category.
+
 ### What this means for the product
 
 Search on the jukebox is achievable **now**, over Spotify (and Amazon), entirely on-device with one
