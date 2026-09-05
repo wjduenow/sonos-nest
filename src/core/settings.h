@@ -90,7 +90,7 @@ void    settingsSetFavAutoRefresh(bool on);
 uint8_t settingsFavRefreshHour();            // 0-23 local
 void    settingsSetFavRefreshHour(uint8_t hour);
 
-// --- Amazon Music (SMAPI DeviceLink) ------------------------------------------------------------
+// --- Amazon Music (SMAPI AppLink; DeviceLink until 2026-09 — see amazon.h) ------------------------------------------------------------
 // Our OWN account credentials, not the household's — Sonos never discloses those (plans/08). The
 // token expires in under an hour and is refreshed in-band by core/amazon.cpp, so these are written
 // far more often than most settings; both are ~600 chars.

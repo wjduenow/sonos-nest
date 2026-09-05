@@ -57,6 +57,12 @@ static String root(bool tmp = false) {
   if (!r) return "";
   return String(r) + (tmp ? kTmpSub : kSub);
 }
+static bool dirExists(const String &p) {
+  DIR *d = opendir(p.c_str());
+  if (!d) return false;
+  closedir(d);
+  return true;
+}
 static String genrePath(int idx, bool tmp = false) {
   char n[16]; snprintf(n, sizeof n, "/g%02d.tsv", idx);
   return root(tmp) + n;
@@ -109,6 +115,36 @@ static String field(const String &line, int n) {
   const int end = line.indexOf('\t', start);
   return (end < 0) ? line.substring(start) : line.substring(start, end);
 }
+// Reduce any Amazon station id to its durable STATION KEY, which is the only part that identifies
+// the station across crawls. THIS IS NOT COSMETIC. The three forms in circulation are
+//
+//   catalog/stations/<KEY>/#chunk-<uuid>     browse + favourites, older credential
+//   prime/stations/<KEY>/#chunk-<uuid>       legacy namespace, same key space
+//   catalog:station:key:<KEY>                browse, newer credential
+//
+// and the `#chunk-` is **minted fresh on every response** (amazon.h says so in capitals). Hashing
+// the whole id therefore makes every station look new on every crawl: the merge preserves the
+// entire previous cache, and the genre count grows by one crawl's worth per refresh — 26 -> 52 ->
+// 78, with the Radio page showing each station several times. Observed on hardware before this
+// existed. Keying on the last path/colon segment before the fragment also makes the prime/ and
+// catalog/ spellings of one station compare equal, which they are.
+static String stationKey(const String &id) {
+  int end = id.indexOf('#');
+  if (end < 0) end = (int)id.length();
+  while (end > 0 && (id[end - 1] == '/' || id[end - 1] == ':')) --end;
+  int start = end;
+  while (start > 0 && id[start - 1] != '/' && id[start - 1] != ':') --start;
+  return id.substring(start, end);
+}
+
+// FNV-1a over that key. Used only for "have I already got this one?" — see the merge in refresh()
+// for why a hash and not the string itself.
+static uint32_t idHash(const String &id) {
+  const String k = stationKey(id);
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < k.length(); ++i) { h ^= (uint8_t)k[i]; h *= 16777619u; }
+  return h;
+}
 // Tabs and newlines are the record separators, so they can never appear in a value.
 static String clean(String s) { s.replace('\t', ' '); s.replace('\n', ' '); s.replace('\r', ' '); return s; }
 
@@ -153,6 +189,7 @@ bool     ready()     { if (s_genreCount < 0) loadHeader(); return s_genreCount >
 uint32_t fetchedAt() { if (s_genreCount < 0) loadHeader(); return s_fetchedAt; }
 bool     busy()      { return s_busy; }
 void     requestRefresh() { s_wantRefresh = true; }
+bool     refreshPending() { return s_wantRefresh; }
 
 // --- the crawl --------------------------------------------------------------------------------------
 //
@@ -197,6 +234,15 @@ static bool writeManifest(const String &path, const std::vector<amazon::Genre> &
 
 bool refresh() {
   if (root().isEmpty()) { LOG.println("[radio ] no storage — cache unavailable"); return false; }
+  // Power loss between the two renames of a previous swap leaves the cache aside under .bak and
+  // nothing at the live path. Put it back before doing anything else, or the crawl below would
+  // merge against an empty cache and the .bak would be deleted on the way out.
+  if (!dirExists(root()) && dirExists(root() + ".bak")) {
+    if (rename((root() + ".bak").c_str(), root().c_str()) == 0) {
+      s_genreCount = -1;
+      LOG.println("[radio ] recovered the cache from an interrupted swap");
+    }
+  }
   if (!amazon::linked()) { LOG.println("[radio ] Amazon not linked — cannot crawl"); return false; }
   if (s_busy) return false;
   s_busy = true;
@@ -268,6 +314,21 @@ bool refresh() {
   for (size_t g = 0; g < genres.size(); ++g)
     if (!fileHasContent(genrePath((int)g, true))) ++missing;
 
+  // A SHAPE CHANGE IS NOT A TRANSIENT FAILURE, and the rule below cannot tell them apart. If not
+  // one container yielded a station — this pass or any earlier one — the tree we are crawling is
+  // not the tree this code was written for, and publishing would rmTree a good cache and swap in an
+  // empty index. Observed for real: Amazon flattened its station root in 2026-09 from 26 genre
+  // containers to a flat list of 100 playable stations (itemType=program, canEnumerate=false), so
+  // genres() now returns stations, every stations() call finds zero collections, and the crawl
+  // "succeeds" with nothing. Keep what is on the card; a stale cache beats an empty one, and every
+  // id in it still resolves. NOT `fetched == 0` on its own: a fully resumed pass legitimately
+  // fetches nothing because every genre file is already there.
+  if ((size_t)missing == genres.size()) {
+    LOG.printf("[radio ] %u container(s), none yielded stations — keeping the existing cache "
+               "(browse tree changed?)\n", (unsigned)genres.size());
+    s_busy = false; return false;
+  }
+
   // Convergence rule. Still missing genres but we made progress this pass -> keep the temp tree and
   // finish next time. Missing and NO progress -> nothing more to gain by waiting, so publish with
   // the gaps rather than never publishing at all.
@@ -277,6 +338,80 @@ bool refresh() {
     s_busy = false; return false;
   }
   if (missing) LOG.printf("[radio ] publishing with %d genre(s) unavailable\n", missing);
+
+  // --- preserve stations that have LEFT the tree --------------------------------------------------
+  // Amazon's flattening shrank the browsable catalogue from ~1,045 stations to 100, and the ids it
+  // stopped listing still PLAY — they are unreachable, not dead (verified against this household's
+  // years-old favourites). A plain swap deletes them permanently, because nothing can ever
+  // enumerate them again. So publishing is a MERGE: the crawled genres first, then whatever the
+  // live cache holds that this crawl did not return, kept under the genre it was filed in.
+  //
+  // Keeping that genre structure is a MEMORY limit, not sentiment. Merged into one flat list,
+  // 1,000+ stations become 1,000+ LVGL rows at ~1 KB each against a 512 KB pool — and pool
+  // exhaustion on this board is a UI freeze, not a dropped frame (CLAUDE.md). Per-genre lists stay
+  // at ~50 rows, which is what the page was built for.
+  //
+  // Membership is tested by 32-bit FNV-1a hash rather than by holding the ids: 1,000 Strings is
+  // ~40 KB of internal heap on a board whose largest free block is ~32 KB, and a collision costs
+  // one dropped station, never a corrupt cache.
+  std::vector<uint32_t> seen;
+  for (size_t g = 0; g < genres.size(); ++g) {
+    FILE *f = fopen(genrePath((int)g, true).c_str(), "rb");
+    if (!f) continue;
+    char buf[512];
+    while (fgets(buf, sizeof buf, f)) {
+      String l(buf); l.trim();
+      if (!l.isEmpty()) seen.push_back(idHash(field(l, 1)));
+    }
+    fclose(f);
+  }
+
+  const int crawled = (int)genres.size();
+  std::vector<amazon::Genre> preserved;
+  int keptStations = 0;
+  for (int o = 0, oldN = genreCount(); o < oldN; ++o) {     // the LIVE cache; untouched until the swap
+    String otitle, oid;
+    if (!genre(o, otitle, oid)) continue;
+    FILE *f = fopen(genrePath(o).c_str(), "rb");
+    if (!f) continue;
+    const String slotPath = genrePath(crawled + (int)preserved.size(), true);
+    int n = 0;
+    bool wrote = false;
+    {
+      Writer w(slotPath);
+      char buf[512];
+      while (fgets(buf, sizeof buf, f)) {
+        String l(buf); l.trim();
+        if (l.isEmpty()) continue;
+        const uint32_t h = idHash(field(l, 1));
+        if (std::find(seen.begin(), seen.end(), h) != seen.end()) continue;
+        seen.push_back(h);
+        w.line(l);            // already "title \t id \t artUrl" — copied verbatim, artwork included
+        ++n;
+      }
+      wrote = w.close();
+    }
+    fclose(f);
+    // "Could not write it" and "had nothing to keep" are NOT the same outcome, and conflating them
+    // is permanent: this genre's stations are already in `seen`, so no later genre re-adds them,
+    // and publishing below rmTree's the .bak that still holds them. The crawled-genre path fifty
+    // lines up aborts on exactly this failure; so does this one.
+    if (!wrote) {
+      LOG.printf("[radio ] %-24s PRESERVE WRITE FAILED — keeping the existing cache\n",
+                 otitle.c_str());
+      unlink(slotPath.c_str());
+      s_busy = false; return false;
+    }
+    if (n == 0) { unlink(slotPath.c_str()); continue; }     // wholly superseded by the crawl
+    amazon::Genre pg; pg.title = otitle; pg.id = oid;
+    preserved.push_back(pg);
+    keptStations += n;
+  }
+  if (keptStations) {
+    LOG.printf("[radio ] preserved %d station(s) in %u genre(s) no longer in the tree\n",
+               keptStations, (unsigned)preserved.size());
+    genres.insert(genres.end(), preserved.begin(), preserved.end());
+  }
 
   // Build the index and the flat search file from what is on the card. Done here, not during the
   // fetch, so a crawl spread over several passes still produces one consistent pair.
@@ -311,11 +446,25 @@ bool refresh() {
   }
   // Swap last. Until this point the live cache is untouched, so a crawl that dies partway leaves
   // the previous index intact rather than a half-written one.
-  rmTree(root());
+  //
+  // The live tree is moved ASIDE, not deleted. It used to be rmTree'd first, and the failure path
+  // below said so out loud — "cache left in the temp tree" means the device now has no cache at
+  // all. That was survivable when a re-crawl could rebuild everything; since the merge above, the
+  // live tree holds stations that NOTHING can enumerate again, so losing it to a failed rename
+  // would be permanent. Kept until the new tree is in place, then dropped.
+  const String bak = root() + ".bak";
+  // Only a .bak that is definitely STALE may be dropped here. With no live tree, the .bak IS the
+  // cache — a swap interrupted between the two renames — and deleting it is precisely the loss
+  // that moving aside instead of deleting exists to prevent.
+  if (dirExists(root())) rmTree(bak);
+  const bool hadLive = dirExists(root()) && rename(root().c_str(), bak.c_str()) == 0;
   if (rename(tmp.c_str(), root().c_str()) != 0) {
-    LOG.println("[radio ] rename failed — cache left in the temp tree");
+    LOG.println("[radio ] rename failed — restoring the previous cache");
+    if (hadLive && rename(bak.c_str(), root().c_str()) != 0)
+      LOG.println("[radio ] restore failed too — the cache is in radio.bak, recovered next refresh");
     s_busy = false; return false;
   }
+  rmTree(bak);
   // Only now is the resume state safe to discard: dropping it before the swap would mean a failed
   // rename lost the whole part-built tree and the next pass started from genre 0 again.
   unlink((root() + "/genres.tsv").c_str());

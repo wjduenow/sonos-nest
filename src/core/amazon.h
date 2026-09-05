@@ -4,9 +4,12 @@
 // catalogue: the local ContentDirectory returns UPnP 701 for every third-party container, and the
 // household's own OAuth token is stored on the players but is write-only. So a controller that
 // wants to BROWSE a service has to become its own registered account. Amazon Music is
-// `Auth="DeviceLink"`, which — unlike YouTube Music's AppLink — any client may initiate: we ask for
-// a link code, the owner approves it in a browser once, and we keep our own token. Full evidence,
-// and the list of routes that do NOT work, is in plans/08-music-service-integration.md.
+// `Auth="AppLink"` (it was DeviceLink until 2026-09; getDeviceLinkCode is now a server error), and
+// any client may initiate that: we ask for a link code, the owner approves it in a browser once,
+// and we keep our own token. The Auth= label turns out not to be the thing that decides whether a
+// third party can link — AppLink and DeviceLink are the same ceremony from here, and what actually
+// blocks a service is its own backend (YouTube Music sits behind a Google API-key gateway). Full
+// evidence, and the list of routes that do NOT work, is in plans/08-music-service-integration.md.
 //
 // Everything here is BLOCKING HTTPS. Call it from the crawler task or netTask, never from uiTask.
 #pragma once
@@ -17,9 +20,14 @@
 namespace amazon {
 
 // A browsable container (a genre, "Recently Played", "Popular Genres & Artists"...).
+//
+// Amazon flattened the station root in 2026-09: it now returns the stations themselves rather than
+// containers, so genres() synthesises a SINGLE entry pointing back at the root. Callers do not need
+// to care — a one-entry list is a valid list — but a UI with a container level should collapse it
+// when there is only one (the jukebox Radio page does).
 struct Genre {
   String title;
-  String id;      // SMAPI object id, e.g. "catalog/stations/refinements/genres/<uuid>/#prime_stations"
+  String id;      // SMAPI object id; historically "catalog/stations/refinements/genres/<uuid>/#prime_stations"
 };
 
 // One playable station. `id` is the SMAPI object id and carries a server-minted "#chunk-<uuid>".

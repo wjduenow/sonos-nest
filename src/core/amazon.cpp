@@ -16,6 +16,12 @@
 //  3. The token expires in WELL UNDER AN HOUR. Any long crawl will hit this mid-run, which is why
 //     the retry is inside request() rather than left to callers.
 //  4. Station ids carry a server-minted "#chunk-<uuid>" that must be stored verbatim. See amazon.h.
+//  5. THE LINK CEREMONY IS AppLink, NOT DeviceLink — Amazon moved, and the old call is now an
+//     ERROR rather than a deprecation. getDeviceLinkCode answers 500 Server.ServiceUnknownError
+//     "Cannot parse null string" even with a valid household id; getAppLink answers 200 with the
+//     Login-with-Amazon URL. Same ceremony otherwise, one difference: getAppLink does NOT mint a
+//     linkDeviceId, so we pick our own. Run-verified 2026-09-04; existing tokens were unaffected,
+//     which is why this broke silently — only NEW links failed.
 #include "amazon.h"
 
 #include <WiFiClientSecure.h>
@@ -23,6 +29,7 @@
 #include "settings.h"
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
+#include "net/wifi.h"     // wifiHostname — the only per-device name we have, used as our linkDeviceId
 #include "net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "heap_watch.h"   // heapwatch::note — attribute the heap low-water
 
@@ -313,20 +320,38 @@ void adopt() {
 bool linked() { return settingsAmazonToken().length() > 0; }
 void unlink()  { settingsSetAmazonAuth("", ""); s_linkCode = ""; s_linkDeviceId = ""; }
 
+// The ceremony is unauthenticated by definition — this is how we GET credentials. Both legs send
+// the same empty-token header; an omitted <s:Header> is a 500 (WCF parse fault), so it is required
+// even though it carries nothing.
+static String anonCreds() {
+  return String("<credentials xmlns=\"") + kNs +
+         "\"><deviceProvider>Sonos</deviceProvider></credentials>";
+}
+
+// Our own device identity for the ceremony, NOT Amazon's. DeviceLink used to mint a linkDeviceId
+// and require it back; AppLink does not, so the client picks one and sends it on every poll. The
+// hostname is the only per-device name this firmware has (the user sets it, and the portal keys on
+// it too), and it is stable across reboots — which is what matters if a re-link ever has to present
+// the same identity.
+static String linkDeviceId() {
+  const String h = wifiHostname();
+  return h.length() ? h : String("sonos-nest");
+}
+
+// See item 5 in the file header: Amazon moved DeviceLink -> AppLink and getDeviceLinkCode is now a
+// server error, so this asks for an app link instead. Everything downstream is unchanged.
 bool linkBegin(String &regUrlOut) {
   const String hh = settingsHouseholdId();
-  String body = String("<getDeviceLinkCode xmlns=\"") + kNs + "\"><householdId>" +
-                escapeXml(hh) + "</householdId></getDeviceLinkCode>";
-  String r = post("getDeviceLinkCode",
-                  String("<credentials xmlns=\"") + kNs +
-                  "\"><deviceProvider>Sonos</deviceProvider></credentials>", body);
+  String body = String("<getAppLink xmlns=\"") + kNs + "\"><householdId>" +
+                escapeXml(hh) + "</householdId></getAppLink>";
+  String r = post("getAppLink", anonCreds(), body);
   regUrlOut      = unescapeXml(tagValue(r, "regUrl"));
   s_linkCode     = unescapeXml(tagValue(r, "linkCode"));
-  s_linkDeviceId = unescapeXml(tagValue(r, "linkDeviceId"));
-  // linkDeviceId is per-request AND required to redeem the code. Losing it makes a completed
-  // authorisation unredeemable and forces the owner to approve a second time — which happened.
-  if (regUrlOut.length() == 0 || s_linkCode.length() == 0 || s_linkDeviceId.length() == 0) {
-    LOG.println("[amazon] link begin failed (missing regUrl/linkCode/linkDeviceId)");
+  s_linkDeviceId = linkDeviceId();
+  if (regUrlOut.length() == 0 || s_linkCode.length() == 0) {
+    const String fault = unescapeXml(tagValue(r, "faultstring"));
+    LOG.printf("[amazon] link begin failed (%s)\n",
+               fault.length() ? fault.c_str() : "no regUrl/linkCode in the response");
     return false;
   }
   return true;
@@ -338,9 +363,7 @@ bool linkPoll() {
                 escapeXml(settingsHouseholdId()) + "</householdId><linkCode>" +
                 escapeXml(s_linkCode) + "</linkCode><linkDeviceId>" +
                 escapeXml(s_linkDeviceId) + "</linkDeviceId></getDeviceAuthToken>";
-  String r = post("getDeviceAuthToken",
-                  String("<credentials xmlns=\"") + kNs +
-                  "\"><deviceProvider>Sonos</deviceProvider></credentials>", body);
+  String r = post("getDeviceAuthToken", anonCreds(), body);
   const String tok = unescapeXml(tagValue(r, "authToken"));
   if (tok.length() == 0) return false;      // NOT_LINKED_RETRY while the owner is still approving
   settingsSetAmazonAuth(tok, unescapeXml(tagValue(r, "privateKey")));
@@ -420,23 +443,38 @@ static String browse(const String &objectId, int index, int count) {
   return request("getMetadata", body);
 }
 
+// The station root has held two different shapes, and this has to read both. Until 2026-09 it was
+// 26 genre CONTAINERS, each browsing to ~50 stations; it is now a FLAT list of up to 100 playable
+// stations (itemType=program, canEnumerate=false) and every refinements/genres id faults. Taking a
+// program row as a genre is what produced 100 "genres" that each browse to nothing — see the guard
+// at the end of radio_cache.cpp:refresh() for what that cost.
 bool genres(std::vector<Genre> &out) {
   if (!linked()) return false;
-  const String r = browse(kStationsRoot, 0, 60);
+  const String r = browse(kStationsRoot, 0, 100);   // server caps at 100; asking for more is free
   std::vector<String> blocks;
   eachCollection(r, blocks);
+  int programs = 0;
   for (const String &b : blocks) {
+    if (tagValue(b, "itemType") == "program") { ++programs; continue; }   // a station, not a level
     Genre g;
     g.title = unescapeXml(tagValue(b, "title"));
     g.id    = unescapeXml(tagValue(b, "id"));
     if (g.title.length() && g.id.length()) out.push_back(g);
+  }
+  // Flat root: hand back ONE implicit container so the cache, the crawl and the UI all keep their
+  // shape. stations() filters on itemType=program, so browsing kStationsRoot through it returns
+  // exactly the rows skipped above. If Amazon ever restores real containers, the loop above finds
+  // them and this never fires — no flag, no setting, no migration.
+  if (out.empty() && programs) {
+    Genre g; g.title = "Stations"; g.id = kStationsRoot;
+    out.push_back(g);
   }
   return !out.empty();
 }
 
 bool stations(const String &genreId, std::vector<Station> &out) {
   if (!linked()) return false;
-  const String r = browse(genreId, 0, 50);   // genres cap at 50; no paging needed
+  const String r = browse(genreId, 0, 100);  // a genre caps at ~50, the flat root at 100; no paging
   std::vector<String> blocks;
   eachCollection(r, blocks);
   for (const String &b : blocks) {

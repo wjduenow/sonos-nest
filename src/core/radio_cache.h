@@ -29,6 +29,9 @@ struct Hit {       // a search result: which genre, and where in it
 bool     ready();          // a usable index exists on disk
 uint32_t fetchedAt();      // unix seconds of the last successful crawl, 0 if never
 bool     busy();           // a crawl is running right now
+bool     refreshPending(); // requestRefresh() was called and the crawl has not picked it up yet
+                           // (it waits for storage, Wi-Fi and a linked account — all three can
+                           //  arrive later, so a request is held, not dropped)
 
 // --- the crawl ----------------------------------------------------------------------------------
 // Blocking, ~30-60 s, paced deliberately (see the .cpp). Call from the cache task, never the UI.
