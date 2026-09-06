@@ -56,6 +56,8 @@ void settingsSetSpotifyAuth(const String &token, const String &key) {
   s_prefs.putString("sptok", token);
   s_prefs.putString("spkey", key);
 }
+uint8_t settingsRadioSource()               { return s_prefs.getUChar("radiosrc", 0); }
+void    settingsSetRadioSource(uint8_t src) { s_prefs.putUChar("radiosrc", src); }
 uint8_t settingsSpotifySerial()             { return s_prefs.getUChar("spsn", 0); }
 void    settingsSetSpotifySerial(uint8_t sn) { s_prefs.putUChar("spsn", sn); }
 String  settingsHouseholdId()           { return s_prefs.getString("hhid", ""); }

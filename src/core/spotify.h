@@ -28,7 +28,10 @@ namespace spotify {
 
 // One row of a browse or a search result.
 struct Item {
-  enum class Kind : uint8_t { Track, Artist, Album, Playlist, Container };
+  // Station is `itemType=program` — Spotify's artist radio (`spotify:artistRadio:<id>`), the same
+  // item type Amazon's Prime Stations use. It does not appear at the root, only under an artist,
+  // which is why an earlier reading of the tree concluded Spotify had no stations at all.
+  enum class Kind : uint8_t { Track, Artist, Album, Playlist, Station, Container };
 
   String title;
   String subtitle;    // artist, or a playlist's owner. May be empty.
@@ -91,6 +94,15 @@ void        searchStart(const String &term, Category cat);
 SearchState searchState();
 uint32_t    searchGen();                       // bumps once per completed search
 bool        searchResults(std::vector<Item> &out);   // snapshot of the last Done result
+
+// Browse, asynchronously, on the same worker and by the same rules. Kept as a SEPARATE slot from
+// search rather than a shared "last result": the Search page and the Radio page are different
+// pages with different lists, and one overwriting the other's results the moment you switch is a
+// bug that only shows up when someone uses both.
+void        browseStart(const String &id);
+SearchState browseState();
+uint32_t    browseGen();
+bool        browseResults(std::vector<Item> &out);
 
 // Drop the pooled TLS session once a burst is done — see smapi.h on why only one should be open.
 void endSession();

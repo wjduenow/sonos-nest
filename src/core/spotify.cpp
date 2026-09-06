@@ -227,6 +227,7 @@ static void eachItem(const String &xml, std::vector<Item> &out, int max) {
     else if (it.id.startsWith("spotify:artist:"))   it.kind = Item::Kind::Artist;
     else if (it.id.startsWith("spotify:album:"))    it.kind = Item::Kind::Album;
     else if (it.id.startsWith("spotify:playlist:")) it.kind = Item::Kind::Playlist;
+    else if (it.id.startsWith("spotify:artistRadio:")) it.kind = Item::Kind::Station;
     else                                            it.kind = Item::Kind::Container;
     if (it.title.length() && it.id.length()) out.push_back(it);
   }
@@ -278,6 +279,11 @@ static String             s_pendingTerm;
 static Category           s_pendingCat = Category::All;
 static volatile bool      s_pendingHas = false;
 static std::vector<Item>  s_results;
+static String             s_pendingBrowse;
+static volatile bool      s_browsePendingHas = false;
+static volatile SearchState s_browseState = SearchState::Idle;
+static volatile uint32_t  s_browseGen = 0;
+static std::vector<Item>  s_browseResults;
 
 SearchState searchState() { return s_searchState; }
 uint32_t    searchGen()   { return s_searchGen; }
@@ -290,8 +296,36 @@ bool searchResults(std::vector<Item> &out) {
   return true;
 }
 
+SearchState browseState() { return s_browseState; }
+uint32_t    browseGen()   { return s_browseGen; }
+
+bool browseResults(std::vector<Item> &out) {
+  if (!s_searchMx) return false;
+  xSemaphoreTake(s_searchMx, portMAX_DELAY);
+  out = s_browseResults;
+  xSemaphoreGive(s_searchMx);
+  return true;
+}
+
 static void searchTask(void *) {
   for (;;) {
+    if (s_browsePendingHas) {
+      xSemaphoreTake(s_searchMx, portMAX_DELAY);
+      const String id = s_pendingBrowse;
+      s_browsePendingHas = false;
+      xSemaphoreGive(s_searchMx);
+
+      s_browseState = SearchState::Running;
+      std::vector<Item> found;
+      const bool ok = browse(id, found, 0, 60);
+      xSemaphoreTake(s_searchMx, portMAX_DELAY);
+      s_browseResults = found;
+      xSemaphoreGive(s_searchMx);
+      s_browseGen++;
+      s_browseState = ok ? SearchState::Done : SearchState::Failed;
+      endSession();
+      continue;
+    }
     if (!s_pendingHas) { vTaskDelay(pdMS_TO_TICKS(60)); continue; }
 
     xSemaphoreTake(s_searchMx, portMAX_DELAY);
@@ -317,6 +351,17 @@ static void searchTask(void *) {
   }
 }
 
+void browseStart(const String &id) {
+  if (!s_searchMx) s_searchMx = xSemaphoreCreateMutex();
+  if (!s_searchMx) return;
+  xSemaphoreTake(s_searchMx, portMAX_DELAY);
+  s_pendingBrowse    = id;
+  s_browsePendingHas = true;
+  xSemaphoreGive(s_searchMx);
+  s_browseState = SearchState::Running;
+  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", 6144, nullptr, 1, &s_searchTask, 0);
+}
+
 void searchStart(const String &term, Category cat) {
   if (!s_searchMx) s_searchMx = xSemaphoreCreateMutex();
   if (!s_searchMx) return;
@@ -334,16 +379,27 @@ void searchStart(const String &term, Category cat) {
 // --- playback ------------------------------------------------------------------------------------
 
 String playUri(const Item &it) {
-  // Only the track form has a verified shape — it is the one this household's existing favourite
-  // (FV:2/64) uses. Containers need an x-rincon-cpcontainer 8-hex prefix that cannot be derived
-  // from anything readable; see spotify.h.
-  if (it.kind != Item::Kind::Track) return "";
-  return "x-sonos-spotify:" + urlEncode(it.id) + "?sid=" + String(kSid) +
-         "&flags=8224&sn=" + String(settingsSpotifySerial());
+  // Tracks use the form this household's existing favourite (FV:2/64) proves. Stations
+  // (itemType=program, i.e. artist radio) take the x-sonosapi-radio: form that Amazon's stations
+  // use — same item type, same scheme, and amazon::playUri is the working reference for it.
+  // UNVERIFIED for Spotify: nothing here has played one yet.
+  //
+  // Containers still return "": album/artist/playlist need an x-rincon-cpcontainer 8-hex prefix
+  // that cannot be derived from anything readable. They do not need one — they BROWSE into tracks
+  // (an album yields its tracks, an artist yields Queen Radio + Top Tracks + albums), which is a
+  // drill-down rather than a construction and needs no guessing.
+  if (it.kind == Item::Kind::Track)
+    return "x-sonos-spotify:" + urlEncode(it.id) + "?sid=" + String(kSid) +
+           "&flags=8224&sn=" + String(settingsSpotifySerial());
+  if (it.kind == Item::Kind::Station)
+    return "x-sonosapi-radio:" + urlEncode(it.id) + "?sid=" + String(kSid) +
+           "&flags=8300&sn=" + String(settingsSpotifySerial());
+  return "";
 }
 
 String playMeta(const Item &it) {
-  if (it.kind != Item::Kind::Track) return "";
+  if (it.kind != Item::Kind::Track && it.kind != Item::Kind::Station) return "";
+  const bool station = (it.kind == Item::Kind::Station);
   return String("<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
                 "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" "
                 "xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" "
@@ -351,7 +407,8 @@ String playMeta(const Item &it) {
                 "<item id=\"00032020") + urlEncode(it.id) +
          "\" parentID=\"-1\" restricted=\"true\">"
          "<dc:title>" + escapeXml(it.title) + "</dc:title>"
-         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+         "<upnp:class>" + (station ? "object.item.audioItem.audioBroadcast"
+                                   : "object.item.audioItem.musicTrack") + "</upnp:class>"
          "<desc id=\"cdudn\" nameSpace=\"urn:schemas-rinconnetworks-com:metadata-1-0/\">" +
          kDesc + "</desc></item></DIDL-Lite>";
 }

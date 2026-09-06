@@ -1465,10 +1465,25 @@ static uint32_t s_artGen = 0;                   // last artcache generation we p
 static lv_obj_t *s_azStrip = nullptr;           // A-Z jump strip (level 2 only)
 static lv_obj_t *s_searchBtn = nullptr, *s_searchTa = nullptr, *s_radioKb = nullptr;
 static std::vector<radiocache::Hit> s_searchHits;
+
+// SOURCE TOGGLE. Amazon stations or Spotify — one at a time, never blended. A merged "all your
+// radio" list would mix two id spaces, two artwork hosts and two playback paths behind rows that
+// look identical, and the first bug report would be "why did tapping this one do nothing".
+// Persisted, defaulting to Amazon so an existing device is unchanged.
+static lv_obj_t *s_srcBtn[2] = {nullptr};
+static uint8_t   s_radioSrc = 0;                    // 0 = Amazon, 1 = Spotify
+static std::vector<spotify::Item> s_spItems;
+static uint32_t  s_spShownGen = 0;
+static String    s_spTitle;                          // container we descended into, "" at the root
 static String   s_searchPending;                // last text seen, debounced in uiTick
 static uint32_t s_searchAt = 0;
 
 static void radioShowGenres();
+static void radioShowSpotify(const String &id, const String &title);
+static void radioSrcPaint();
+static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
+                          lv_event_cb_t cb);
+static void radioPaintArt();
 static void radioShowStations(int genreIdx);
 static void radioPaintArt();
 static void radioShowSearch();
@@ -1495,7 +1510,8 @@ static void radioGenreCb(lv_event_t *e) {
 }
 static void radioBackCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
-  radioShowGenres();
+  if (s_radioSrc == 1) radioShowSpotify("root", "");
+  else                 radioShowGenres();
 }
 
 // Detents: fire when the CENTRED ROW CHANGES, never on scroll events — those arrive far more often
@@ -1571,7 +1587,92 @@ static void radioPaintArt() {
 // again — this keys on what is in the cache, not on a flag.
 static bool radioFlat() { return radiocache::genreCount() == 1; }
 
+// Play a Spotify row, or descend into it. Tracks and stations (artist radio) have a URI we can
+// construct; albums, artists and playlists do NOT — and do not need one, because they browse into
+// tracks. So a container is a drill-down, not a dead end, and nothing here has to guess an
+// x-rincon-cpcontainer prefix.
+static void radioSpotCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= (int)s_spItems.size()) return;
+  const spotify::Item &it = s_spItems[i];
+  const String uri = spotify::playUri(it);
+  if (uri.length()) {
+    uiSoundPlay(UiSound::Confirm);
+    stateLock();
+    g_pending.playUri  = uri;
+    g_pending.playMeta = spotify::playMeta(it);
+    stateUnlock();
+    return;
+  }
+  uiSoundPlay(UiSound::Tick);
+  radioShowSpotify(it.id, it.title);
+}
+
+static void radioShowSpotify(const String &id, const String &title) {
+  radioClear();
+  s_radioLevel = (id == "root") ? 0 : 1;
+  s_spTitle    = title;
+  s_spItems.clear();
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
+  radioLayout(false, false);
+  if (s_radioLevel == 0) lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  else                   lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_radioTitle, title.length() ? title.c_str() : "Radio");
+  lv_obj_remove_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_NONE);
+
+  if (!spotify::linked()) {
+    lv_label_set_text(s_radioStatus, "Link Spotify in Settings to browse it here.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_label_set_text(s_radioStatus, "Loading...");
+  lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  s_spShownGen = spotify::browseGen();
+  spotify::browseStart(id);
+}
+
+// Repaint when the worker finishes. Rows reuse radioRow(), so artwork, the scroll detents and the
+// pool discipline are the Amazon page's, already proven.
+static void radioSpotPaint() {
+  radioClear();
+  spotify::browseResults(s_spItems);
+  if (s_spItems.empty()) {
+    lv_label_set_text(s_radioStatus, "Nothing here.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  for (size_t i = 0; i < s_spItems.size(); i++)
+    radioRow(i, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb);
+  radioPaintArt();
+}
+
+static void radioSrcCb(lv_event_t *e) {
+  const int src = (int)(intptr_t)lv_event_get_user_data(e);
+  if (src == s_radioSrc) return;
+  uiSoundPlay(UiSound::Tick);
+  s_radioSrc = (uint8_t)src;
+  settingsSetRadioSource(s_radioSrc);
+  radioSrcPaint();
+  if (s_radioSrc == 1) radioShowSpotify("root", "");
+  else                 radioShowGenres();
+}
+
+static void radioSrcPaint() {
+  for (int i = 0; i < 2; i++) {
+    if (!s_srcBtn[i]) continue;
+    const bool on = (i == s_radioSrc);
+    lv_obj_set_style_bg_color(s_srcBtn[i], lv_color_hex(on ? JB_ACCENT : JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_srcBtn[i], 0),
+                                lv_color_hex(on ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
+  }
+}
+
 static void radioShowGenres() {
+  if (s_radioSrc == 1) { radioShowSpotify("root", ""); return; }
   if (radioFlat()) { radioShowStations(0); return; }
   radioClear();
   s_radioLevel = 0; s_radioGenre = -1;
@@ -1792,6 +1893,25 @@ static void buildRadio() {
 
   s_radioTitle = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
   lv_obj_align(s_radioTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
+
+  // Source segmented control, top right — out of the way of the title and the back button.
+  {
+    const char *name[2] = {"Amazon", "Spotify"};
+    const lv_coord_t w = 140, x0 = SCREEN_W - RAIL_W - PAD_X * 2 - (w * 2 + 8);
+    for (int i = 0; i < 2; i++) {
+      s_srcBtn[i] = lv_button_create(pg);
+      lv_obj_remove_style_all(s_srcBtn[i]);
+      lv_obj_set_size(s_srcBtn[i], w, 44);
+      lv_obj_align(s_srcBtn[i], LV_ALIGN_TOP_LEFT, x0 + i * (w + 8), PAD_TOP + 48);
+      lv_obj_set_style_radius(s_srcBtn[i], LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_bg_opa(s_srcBtn[i], LV_OPA_COVER, 0);
+      lv_obj_add_event_cb(s_srcBtn[i], radioSrcCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+      lv_obj_t *l = label(s_srcBtn[i], name[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+      lv_obj_center(l);
+    }
+    s_radioSrc = settingsRadioSource() ? 1 : 0;
+    radioSrcPaint();
+  }
 
   s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
@@ -3408,11 +3528,27 @@ void uiTick() {
       radioPaintArt();
     }
 
-    // Populate once the cache exists, and repopulate after a refresh replaces it.
-    const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;
-    if (gen && gen != s_radioShownGen && !radiocache::busy()) {
-      s_radioShownGen = gen;
-      radioShowGenres();
+    if (s_radioSrc == 1) {
+      // Spotify is browsed live, so the page fills in when the worker answers rather than when a
+      // cache appears. Entering the page with nothing loaded kicks the first browse.
+      const uint32_t bg = spotify::browseGen();
+      if (bg != s_spShownGen) {
+        s_spShownGen = bg;
+        radioSpotPaint();
+      } else if (s_spItems.empty() && spotify::browseState() == spotify::SearchState::Idle) {
+        radioShowSpotify("root", "");
+      } else if (spotify::browseState() == spotify::SearchState::Failed && s_spItems.empty()) {
+        lv_label_set_text(s_radioStatus, spotify::linked() ? "Could not reach Spotify."
+                                                           : "Link Spotify in Settings.");
+        lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+      }
+    } else {
+      // Amazon: populate once the cache exists, and repopulate after a refresh replaces it.
+      const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;
+      if (gen && gen != s_radioShownGen && !radiocache::busy()) {
+        s_radioShownGen = gen;
+        radioShowGenres();
+      }
     }
   }
 

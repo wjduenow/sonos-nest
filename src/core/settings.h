@@ -109,6 +109,11 @@ void    settingsSetAmazonSerial(uint8_t sn);
 String  settingsSpotifyToken();
 String  settingsSpotifyKey();
 void    settingsSetSpotifyAuth(const String &token, const String &key);
+// Which source the Radio page shows: 0 = Amazon stations (the default, so an existing device is
+// unchanged), 1 = Spotify. A SERVICE-level choice — the two are never intermingled in one list.
+uint8_t settingsRadioSource();
+void    settingsSetRadioSource(uint8_t src);
+
 uint8_t settingsSpotifySerial();
 void    settingsSetSpotifySerial(uint8_t sn);
 // The Sonos household id, used as the correlation key when linking.
