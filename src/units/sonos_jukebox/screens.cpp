@@ -1488,7 +1488,7 @@ static uint32_t s_searchAt = 0;
 
 static void radioShowGenres();
 static String artKey(const String &id, const String &url);
-static void radioShowSpotify(const String &id, const String &title);
+static void radioShowSpotify(String id, String title);
 static void radioSrcPaint();
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
                           lv_event_cb_t cb);
@@ -1635,7 +1635,12 @@ static bool radioFlat() { return radiocache::genreCount() == 1; }
 static void radioSpotCb(lv_event_t *e) {
   const int i = (int)(intptr_t)lv_event_get_user_data(e);
   if (i < 0 || i >= (int)s_spItems.size()) return;
-  const spotify::Item &it = s_spItems[i];
+  // A COPY, not a reference: radioShowSpotify() clears s_spItems before it uses the id, so a
+  // reference into the vector dangles and the id reaches the SOAP body as an empty string. That is
+  // what "flashes text then goes blank" was — the request went out with no id and Spotify answered
+  // "Action not found." The search page's equivalent already copies, which is why drilling down
+  // worked there and not here.
+  const spotify::Item it = s_spItems[i];
   const String uri = spotify::playUri(it);
   if (uri.length()) {
     uiSoundPlay(UiSound::Confirm);
@@ -1649,7 +1654,9 @@ static void radioSpotCb(lv_event_t *e) {
   radioShowSpotify(it.id, it.title);
 }
 
-static void radioShowSpotify(const String &id, const String &title) {
+// BY VALUE, deliberately. This clears s_spItems, which is where callers get these strings from —
+// taking them by reference means the arguments can be destroyed halfway through the function.
+static void radioShowSpotify(String id, String title) {
   radioClear();
   s_radioLevel = (id == "root") ? 0 : 1;
   s_spTitle    = title;

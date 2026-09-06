@@ -58,13 +58,16 @@ String loginCreds(const String &token, const String &key, const String &househol
 
 // c_str() that can never be NULL.
 //
-// ⚠️ NOT PARANOIA. Arduino's String calls invalidate() when an allocation fails, which sets its
-// buffer to nullptr — so on a board that can run out of internal heap, `s.c_str()` for a String
-// that failed to grow returns NULL, and passing that to a %s is a load from address 0 inside ROM
-// strlen. That is not hypothetical: a LOG.printf added to diagnose an empty browse response turned
-// the out-of-memory it was diagnosing into a reboot. Any %s of a String that came from the network
-// goes through this.
-inline const char *cstr(const String &s) { return s.c_str() ? s.c_str() : "(oom)"; }
+// ⚠️ NOT PARANOIA, AND IT HAS EARNED ITS KEEP TWICE. A String reads back with a NULL buffer in two
+// situations: Arduino calls invalidate() when an allocation fails, and a String read through a
+// dangling reference can look the same. Passing either to a %s is a load from address 0 inside ROM
+// strlen.
+//
+// Both happened here. A LOG.printf added to diagnose an empty browse turned the out-of-memory it
+// was diagnosing into a reboot; and later "(null)" in that same log line is what identified a
+// use-after-free in the Radio page, where the container id had been freed before the request was
+// built. Any %s of a String that came from the network goes through this.
+inline const char *cstr(const String &s) { return s.c_str() ? s.c_str() : "(null)"; }
 
 // --- one service endpoint ------------------------------------------------------------------------
 
