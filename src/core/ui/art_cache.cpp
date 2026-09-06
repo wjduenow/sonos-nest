@@ -139,10 +139,25 @@ static String thumbUrl(const String &url, int px) {
     if (slash > 0) return url.substring(0, slash) + "/mqdefault.jpg";   // 320x180, ~10 KB
   }
   if (url.indexOf("i.scdn.co/image/") >= 0) {
-    // Spotify encodes the size in the id prefix: b273 = 640, e02 = 300, 851 = 64.
-    String u = url; u.replace("ab67616d0000b273", "ab67616d00001e02");
+    // Spotify encodes the rendition in the id prefix, and there are TWO families. Album and track
+    // covers: b273 = 640 (52 KB), 1e02 = 300 (18 KB), 4851 = 64 (1.6 KB). ARTIST portraits are a
+    // different prefix entirely: e5eb = 640 (134 KB), 5174 = 320 (46 KB), f178 = 160 (15 KB).
+    //
+    // Only the album family was rewritten here, which silently lost the art on every artist AND on
+    // every Spotify STATION — artist radio carries the artist portrait — because 134 KB is over
+    // kJpegMax and the fetch is dropped before anything is decoded. Sizes measured 2026-09-06.
+    String u = url;
+    u.replace("ab67616d0000b273", "ab67616d00001e02");   // album / track  640 -> 300
+    u.replace("ab6761610000e5eb", "ab6761610000f178");   // artist / radio 640 -> 160
     return u;
   }
+  if (url.indexOf("mosaic.scdn.co/640/") >= 0) {
+    // Playlist mosaics: the size is a path segment. 640 = 76 KB, 300 = 22 KB, 160 = 7 KB.
+    String u = url; u.replace("/640/", "/160/");
+    return u;
+  }
+  // pickasso.spotifycdn.com and seed-mix-image.spotifycdn.com (the other playlist art hosts) have
+  // no size knob and already answer at 15-45 KB, so they pass through under the cap.
   return url;
 }
 
