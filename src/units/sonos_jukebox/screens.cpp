@@ -52,6 +52,7 @@ LV_FONT_DECLARE(lv_font_clock_120);
 #define ICON_HEART "\xEE\x83\xB2"   // U+E0F2
 #define ICON_RADIO "\xEE\x85\x82"   // U+E142
 #define ICON_SPEAKER "\xEE\x85\xA6" // U+E166
+#define ICON_SEARCH "\xEE\x85\x91"  // U+E151
 
 // --- Geometry, from the design's device shell -------------------------------------------------
 // Rail widened from the design's 66 px and its 48 px items scaled 1.5x to 72 px. A DELIBERATE
@@ -103,8 +104,8 @@ static lv_obj_t *s_provisioning = nullptr;
 // the LV_MEM_SIZE pool.
 // PAGE_FAVORITES is the Sonos favourites list (FV:2) — it was called "Radio" until it acquired a
 // neighbour that actually is radio. PAGE_RADIO is Amazon Prime Stations, browsed from the SD cache.
-enum Page { PAGE_NOW = 0, PAGE_FAVORITES = 1, PAGE_RADIO = 2, PAGE_ROOMS = 3, PAGE_SETTINGS = 4,
-            PAGE_COUNT = 5 };
+enum Page { PAGE_NOW = 0, PAGE_FAVORITES = 1, PAGE_RADIO = 2, PAGE_SEARCH = 3, PAGE_ROOMS = 4,
+            PAGE_SETTINGS = 5, PAGE_COUNT = 6 };
 static lv_obj_t *s_page[PAGE_COUNT]     = {nullptr};
 static lv_obj_t *s_railBtn[PAGE_COUNT]  = {nullptr};
 static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr};
@@ -342,14 +343,14 @@ static void buildRail(lv_obj_t *scr) {
   lv_obj_t *line = panel(scr, 1, SCREEN_H, JB_SCREEN_LINE, 0);
   lv_obj_align(line, LV_ALIGN_TOP_LEFT, RAIL_W, 0);
 
-  // Now / Favorites / Radio / Rooms / Settings. Favorites and Radio use the real Lucide glyphs;
+  // Now / Favorites / Radio / Search / Rooms / Settings. Favorites and Radio use the real Lucide glyphs;
   // the rest stay on LVGL's built-in symbols, which already match well enough that subsetting more
   // of Lucide would be flash spent for no gain.
-  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO,
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO, ICON_SEARCH,
                                    ICON_SPEAKER, LV_SYMBOL_SETTINGS};
   const lv_font_t *iconFonts[PAGE_COUNT] = {&lv_font_montserrat_28, &lv_font_lucide_28,
                                             &lv_font_lucide_28, &lv_font_lucide_28,
-                                            &lv_font_montserrat_28};
+                                            &lv_font_lucide_28, &lv_font_montserrat_28};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
@@ -1953,6 +1954,182 @@ static lv_obj_t *ssDropdown(lv_obj_t *parent, const char *opts, uint16_t sel,
   return d;
 }
 
+
+// --- Search (Spotify) ----------------------------------------------------------------------------
+// The one page on this device that reaches a music service live rather than out of a cache. Every
+// call it makes is blocking HTTPS, so nothing here calls spotify:: except through the async wrapper
+// (spotify.h): searchStart() hands the query to a worker, and this page watches searchGen().
+static lv_obj_t *s_srchTa = nullptr, *s_srchKb = nullptr, *s_srchList = nullptr;
+static lv_obj_t *s_srchStatus = nullptr;
+static lv_obj_t *s_srchChip[5] = {nullptr};
+static std::vector<spotify::Item> s_srchItems;
+static std::vector<lv_obj_t *>    s_srchTiles;   // parallel to s_srchItems, for artwork
+static spotify::Category s_srchCat = spotify::Category::All;
+static uint32_t s_srchShownGen = 0;
+// Its OWN artcache generation, not the Radio page's s_artGen: that one is consumed (and reset) by
+// the Radio block in uiTick, so sharing it would mean whichever page ticked first swallowed the
+// change and the other never repainted its tiles.
+static uint32_t s_srchArtGen = 0;
+
+static const char *kSrchChipName[5] = {"All", "Tracks", "Artists", "Albums", "Playlists"};
+static const spotify::Category kSrchChipCat[5] = {
+    spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
+    spotify::Category::Albums, spotify::Category::Playlists};
+
+static void srchRunIfReady() {
+  const String q(lv_textarea_get_text(s_srchTa));
+  if (q.length() < 2) return;                 // one letter is not a query, it is a keystroke
+  spotify::searchStart(q, s_srchCat);
+  lv_label_set_text(s_srchStatus, "Searching...");
+  lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void srchChipPaint() {
+  for (int i = 0; i < 5; i++) {
+    const bool on = (kSrchChipCat[i] == s_srchCat);
+    lv_obj_set_style_bg_color(s_srchChip[i],
+                              lv_color_hex(on ? JB_ACCENT : JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_srchChip[i], 0),
+                                lv_color_hex(on ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
+  }
+}
+
+static void srchChipCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= 5 || kSrchChipCat[i] == s_srchCat) return;
+  uiSoundPlay(UiSound::Tick);
+  s_srchCat = kSrchChipCat[i];
+  srchChipPaint();
+  srchRunIfReady();          // re-ask in the new category rather than making them retype
+}
+
+// Play a result. Only tracks have a URI we can construct — see spotify.h — so the others say so
+// instead of sending the speaker something that would come back as a UPnP 402.
+static void srchRowCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= (int)s_srchItems.size()) return;
+  const String uri = spotify::playUri(s_srchItems[i]);
+  if (uri.isEmpty()) {
+    uiSoundPlay(UiSound::Tick);
+    lv_label_set_text(s_srchStatus, "Only tracks can be played from here yet.");
+    lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  uiSoundPlay(UiSound::Confirm);
+  stateLock();
+  g_pending.playUri  = uri;
+  g_pending.playMeta = spotify::playMeta(s_srchItems[i]);
+  stateUnlock();
+}
+
+static void srchPaintArt() {
+  if (s_srchTiles.empty()) return;
+  for (size_t i = 0; i < s_srchTiles.size() && i < s_srchItems.size(); i++) {
+    if (s_srchItems[i].artUrl.isEmpty()) continue;
+    const lv_image_dsc_t *d = artcache::get(artcache::keyOf(s_srchItems[i].id),
+                                            s_srchItems[i].artUrl);
+    if (d) lv_image_set_src(s_srchTiles[i], d);
+  }
+}
+
+static void srchPaint() {
+  // ⚠️ Clear the tile vector BEFORE lv_obj_clean(): removing children changes the scroll extent and
+  // fires LV_EVENT_SCROLL synchronously, so a callback can walk this vector mid-clean. That exact
+  // shape crashed the Radio page after five hours of uptime (CLAUDE.md).
+  s_srchTiles.clear();
+  lv_obj_clean(s_srchList);
+  spotify::searchResults(s_srchItems);
+
+  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 88;
+  for (size_t i = 0; i < s_srchItems.size(); i++) {
+    const spotify::Item &it = s_srchItems[i];
+    lv_obj_t *row = lv_button_create(s_srchList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 8)));
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+    lv_obj_t *tile = panel(row, 64, 64, JB_SCREEN_ELEV_2, JB_R_MD);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_t *img = lv_image_create(tile);
+    lv_obj_set_size(img, 64, 64);
+    lv_obj_center(img);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    s_srchTiles.push_back(img);
+
+    lv_obj_t *t = label(row, it.title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(t, w - 110);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 92, -11);
+
+    const char *kindName = "";
+    switch (it.kind) {
+      case spotify::Item::Kind::Track:    kindName = "Track";    break;
+      case spotify::Item::Kind::Artist:   kindName = "Artist";   break;
+      case spotify::Item::Kind::Album:    kindName = "Album";    break;
+      case spotify::Item::Kind::Playlist: kindName = "Playlist"; break;
+      default:                            kindName = "";         break;
+    }
+    String sub = it.subtitle;
+    // ASCII separator on purpose: the built-in Montserrat has no middle-dot glyph (issue #21).
+    if (sub.length() && kindName[0]) sub = String(kindName) + " " JB_DASH " " + sub;
+    else if (kindName[0])            sub = kindName;
+    lv_obj_t *sl = label(row, sub.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(sl, w - 110);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 92, 15);
+  }
+  srchPaintArt();
+}
+
+static void srchTaCb(lv_event_t *) { srchRunIfReady(); }
+
+static void buildSearch() {
+  lv_obj_t *pg = s_page[PAGE_SEARCH];
+
+  lv_obj_t *h = label(pg, "Search", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 40);
+
+  s_srchTa = lv_textarea_create(pg);
+  lv_textarea_set_one_line(s_srchTa, true);
+  lv_textarea_set_placeholder_text(s_srchTa, "Artist, song or album");
+  lv_obj_set_size(s_srchTa, SCREEN_W - RAIL_W - PAD_X * 2, 58);
+  lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 84);
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);   // the keyboard's tick
+
+  for (int i = 0; i < 5; i++) {
+    s_srchChip[i] = lv_button_create(pg);
+    lv_obj_remove_style_all(s_srchChip[i]);
+    lv_obj_set_size(s_srchChip[i], 128, 44);
+    lv_obj_align(s_srchChip[i], LV_ALIGN_TOP_LEFT, i * 136, PAD_TOP + 154);
+    lv_obj_set_style_radius(s_srchChip[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_srchChip[i], LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(s_srchChip[i], srchChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_t *cl = label(s_srchChip[i], kSrchChipName[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_center(cl);
+  }
+  srchChipPaint();
+
+  s_srchList = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_srchList);
+  lv_obj_set_size(s_srchList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 214) - PAD_BOT);
+  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 214);
+
+  s_srchStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_obj_align(s_srchStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 224);
+
+  // The keyboard sits over the results while it is up; the list is still there underneath, which is
+  // the point — a new query replaces the rows without the page ever going blank.
+  s_srchKb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_srchKb, SCREEN_W - RAIL_W - PAD_X * 2, 250);
+  lv_obj_align(s_srchKb, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_keyboard_set_textarea(s_srchKb, s_srchTa);
+}
+
 static void buildSettings() {
   lv_obj_t *pg = s_page[PAGE_SETTINGS];
   // SCROLLABLE. panel() clears the flag, and this page was already ~570 px of content on a 600 px
@@ -2703,6 +2880,7 @@ void uiInit() {
   buildTransport();
   buildFavourites();
   buildRadio();
+  buildSearch();
   buildRooms();
   buildSettings();
   buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
@@ -3013,6 +3191,30 @@ void uiTick() {
       // CHEAP refresh: new readings only. Text, colours and bar widths — no object churn.
       s_roomsStatusGen = roomstatus::gen();
       refreshRooms();
+    }
+  }
+
+  if (s_cur == PAGE_SEARCH) {
+    const uint32_t gen = spotify::searchGen();
+    if (gen != s_srchShownGen) {
+      s_srchShownGen = gen;
+      srchPaint();
+      const size_t n = s_srchItems.size();
+      if (n) lv_obj_add_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+      else {
+        lv_label_set_text(s_srchStatus, "Nothing found.");
+        lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+      }
+    } else if (spotify::searchState() == spotify::SearchState::Failed && s_srchItems.empty()) {
+      lv_label_set_text(s_srchStatus,
+                        spotify::linked() ? "Search failed. Check the network."
+                                          : "Link Spotify in Settings to search.");
+      lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Artwork arrives after the rows, exactly as the Radio tiles do.
+    if (artcache::generation() != s_srchArtGen) {
+      s_srchArtGen = artcache::generation();
+      srchPaintArt();
     }
   }
 

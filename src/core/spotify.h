@@ -77,6 +77,21 @@ bool browse(const String &id, std::vector<Item> &out, int index = 0, int count =
 // Search one category. `count` is a request, not a promise.
 bool search(const String &term, Category cat, std::vector<Item> &out, int count = 8);
 
+// --- search, asynchronously ----------------------------------------------------------------------
+// What a UI uses. search() above blocks for 0.6-1.0 s, which is a third of a second past the point
+// where a touch UI feels broken and well past the point where uiTask must not be sitting still.
+// searchStart() hands the query to a worker and returns immediately; the UI polls searchState() and
+// reads the snapshot once it says Done.
+//
+// ⚠️ Do not blank the previous results while a new query runs. That is the same mistake as the
+// Rooms page's old invalidate-then-refill (plans/07): an empty list under a spinner reads as "the
+// tap did nothing", which is precisely the impression a search box cannot afford.
+enum class SearchState : uint8_t { Idle, Running, Done, Failed };
+void        searchStart(const String &term, Category cat);
+SearchState searchState();
+uint32_t    searchGen();                       // bumps once per completed search
+bool        searchResults(std::vector<Item> &out);   // snapshot of the last Done result
+
 // Drop the pooled TLS session once a burst is done — see smapi.h on why only one should be open.
 void endSession();
 

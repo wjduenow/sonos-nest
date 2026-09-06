@@ -265,6 +265,72 @@ bool search(const String &term, Category cat, std::vector<Item> &out, int count)
   return !out.empty();
 }
 
+// --- search, asynchronously ----------------------------------------------------------------------
+// One worker, one pending query. A second searchStart() while one is running REPLACES the pending
+// term rather than queueing: the user typing another letter means the in-flight query is already
+// stale, and a queue would make the UI walk through every intermediate result before showing the
+// one that was asked for last.
+static SemaphoreHandle_t  s_searchMx = nullptr;
+static TaskHandle_t       s_searchTask = nullptr;
+static volatile SearchState s_searchState = SearchState::Idle;
+static volatile uint32_t  s_searchGen = 0;
+static String             s_pendingTerm;
+static Category           s_pendingCat = Category::All;
+static volatile bool      s_pendingHas = false;
+static std::vector<Item>  s_results;
+
+SearchState searchState() { return s_searchState; }
+uint32_t    searchGen()   { return s_searchGen; }
+
+bool searchResults(std::vector<Item> &out) {
+  if (!s_searchMx) return false;
+  xSemaphoreTake(s_searchMx, portMAX_DELAY);
+  out = s_results;
+  xSemaphoreGive(s_searchMx);
+  return true;
+}
+
+static void searchTask(void *) {
+  for (;;) {
+    if (!s_pendingHas) { vTaskDelay(pdMS_TO_TICKS(60)); continue; }
+
+    xSemaphoreTake(s_searchMx, portMAX_DELAY);
+    const String term = s_pendingTerm;
+    const Category cat = s_pendingCat;
+    s_pendingHas = false;
+    xSemaphoreGive(s_searchMx);
+
+    s_searchState = SearchState::Running;
+    std::vector<Item> found;
+    const bool ok = search(term, cat, found, 8);
+
+    // A newer query arrived while this one was in flight: drop this result on the floor rather than
+    // showing it for the moment before the newer one lands.
+    if (s_pendingHas) continue;
+
+    xSemaphoreTake(s_searchMx, portMAX_DELAY);
+    s_results = found;
+    xSemaphoreGive(s_searchMx);
+    s_searchGen++;
+    s_searchState = ok ? SearchState::Done : SearchState::Failed;
+    endSession();     // one user-initiated burst; do not hold the socket (smapi.h)
+  }
+}
+
+void searchStart(const String &term, Category cat) {
+  if (!s_searchMx) s_searchMx = xSemaphoreCreateMutex();
+  if (!s_searchMx) return;
+  xSemaphoreTake(s_searchMx, portMAX_DELAY);
+  s_pendingTerm = term;
+  s_pendingCat  = cat;
+  s_pendingHas  = true;
+  xSemaphoreGive(s_searchMx);
+  s_searchState = SearchState::Running;
+  // Core 0 with the network, like the link task. Lazily created: a device that never searches
+  // never spawns it.
+  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", 6144, nullptr, 1, &s_searchTask, 0);
+}
+
 // --- playback ------------------------------------------------------------------------------------
 
 String playUri(const Item &it) {
