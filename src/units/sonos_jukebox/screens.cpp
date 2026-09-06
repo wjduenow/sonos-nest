@@ -335,7 +335,6 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
 // the pages they switch to.
 static void showPage(int page);
 static void railCb(lv_event_t *e);
-static void srchOnEnter();
 
 static void buildRail(lv_obj_t *scr) {
   lv_obj_t *rail = panel(scr, RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
@@ -491,7 +490,6 @@ static void showPage(int page) {
                                   lv_color_hex(i == page ? JB_ACCENT : JB_TEXT_DIM), 0);
     }
   }
-  if (page == PAGE_SEARCH) srchOnEnter();
 }
 
 static void railCb(lv_event_t *e) {
@@ -1961,6 +1959,22 @@ static lv_obj_t *ssDropdown(lv_obj_t *parent, const char *opts, uint16_t sel,
 // The one page on this device that reaches a music service live rather than out of a cache. Every
 // call it makes is blocking HTTPS, so nothing here calls spotify:: except through the async wrapper
 // (spotify.h): searchStart() hands the query to a worker, and this page watches searchGen().
+// TWO-PANE, because this screen is landscape and the alternative wastes it. A full-width keyboard
+// is 880 px of a 600 px-tall screen spent on something that needs ~500, with the results stacked
+// underneath where only one fits. Side by side, the keyboard is permanent, the results are
+// permanent, and there is no mode to enter or dismiss gesture to discover — which on a
+// wall-mounted panel matters more than the row width it costs.
+//
+// The numbers: content is 880 x 600 (1024 less the 96 px rail and two 30 px gutters). Left column
+// 484 for field + chips + keyboard; right column 380 for results, 516 px tall = five rows of 96.
+// Split keyboards on phones exist for THUMB REACH, which is not the constraint here — this is
+// touched with an index finger by someone standing at a wall — so the split is about area, not
+// ergonomics, and the keyboard keeps its full single-block layout.
+static const lv_coord_t SRCH_LEFT_W  = 484;
+static const lv_coord_t SRCH_RIGHT_X = 500;
+static const lv_coord_t SRCH_RIGHT_W = SCREEN_W - RAIL_W - PAD_X * 2 - SRCH_RIGHT_X;   // 380
+static const lv_coord_t SRCH_TOP     = PAD_TOP + 44;
+
 static lv_obj_t *s_srchTa = nullptr, *s_srchKb = nullptr, *s_srchList = nullptr;
 static lv_obj_t *s_srchStatus = nullptr;
 static lv_obj_t *s_srchChip[5] = {nullptr};
@@ -1977,22 +1991,6 @@ static const char *kSrchChipName[5] = {"All", "Tracks", "Artists", "Albums", "Pl
 static const spotify::Category kSrchChipCat[5] = {
     spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
     spotify::Category::Albums, spotify::Category::Playlists};
-
-// The keyboard is 250 px of a 600 px screen, so while it is up the results are a single row. It is
-// therefore MODAL, not permanent: it appears when the field is tapped and goes away the moment the
-// query is submitted, which is exactly when the results become the thing worth looking at.
-static void srchKbShow(bool on) {
-  if (!s_srchKb) return;
-  if (on) lv_obj_remove_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
-  else    lv_obj_add_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
-}
-
-// Arriving with nothing typed means you came here to type, so the keyboard is up. With results
-// already on screen it stays down — those are what you came back for.
-static void srchOnEnter() {
-  if (!s_srchTa) return;
-  srchKbShow(strlen(lv_textarea_get_text(s_srchTa)) == 0);
-}
 
 static void srchRunIfReady() {
   const String q(lv_textarea_get_text(s_srchTa));
@@ -2058,7 +2056,7 @@ static void srchPaint() {
   lv_obj_clean(s_srchList);
   spotify::searchResults(s_srchItems);
 
-  const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 88;
+  const lv_coord_t w = SRCH_RIGHT_W, h = 88;
   for (size_t i = 0; i < s_srchItems.size(); i++) {
     const spotify::Item &it = s_srchItems[i];
     lv_obj_t *row = lv_button_create(s_srchList);
@@ -2072,7 +2070,7 @@ static void srchPaint() {
     lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
     lv_obj_t *tile = panel(row, 64, 64, JB_SCREEN_ELEV_2, JB_R_MD);
-    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_t *img = lv_image_create(tile);
     lv_obj_set_size(img, 64, 64);
     lv_obj_center(img);
@@ -2081,8 +2079,8 @@ static void srchPaint() {
 
     lv_obj_t *t = label(row, it.title.c_str(), &lv_font_montserrat_22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(t, w - 110);
-    lv_obj_align(t, LV_ALIGN_LEFT_MID, 92, -11);
+    lv_obj_set_width(t, w - 88);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
 
     const char *kindName = "";
     switch (it.kind) {
@@ -2098,41 +2096,41 @@ static void srchPaint() {
     else if (kindName[0])            sub = kindName;
     lv_obj_t *sl = label(row, sub.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(sl, w - 110);
-    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 92, 15);
+    lv_obj_set_width(sl, w - 88);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80, 15);
   }
   srchPaintArt();
 }
 
-// LV_EVENT_READY is the keyboard's tick, LV_EVENT_CANCEL its X — the two ways a user says "done
-// typing". Both put the keyboard away; only the tick runs the query.
+// The keyboard's tick runs the query. Its X has nowhere to close to now, so it CLEARS instead —
+// which is what an X on a search field means anyway. (A custom keymap could drop that key and the
+// mode switches outright; see the compact-layout note in plans/12.)
 static void srchTaCb(lv_event_t *e) {
-  const lv_event_code_t code = lv_event_get_code(e);
-  if (code == LV_EVENT_READY) srchRunIfReady();
-  srchKbShow(false);
+  if (lv_event_get_code(e) == LV_EVENT_READY) { srchRunIfReady(); return; }
+  lv_textarea_set_text(s_srchTa, "");
+  lv_label_set_text(s_srchStatus, "");
+  lv_obj_add_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
 }
-static void srchTaFocusCb(lv_event_t *) { srchKbShow(true); }
 
 static void buildSearch() {
   lv_obj_t *pg = s_page[PAGE_SEARCH];
 
-  lv_obj_t *h = label(pg, "Search", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 40);
-
+  // LEFT COLUMN — field, chips, keyboard. No page header: the accent-lit rail glyph says which page
+  // this is and the placeholder says what to type, and 44 px of header is a whole result row.
   s_srchTa = lv_textarea_create(pg);
   lv_textarea_set_one_line(s_srchTa, true);
   lv_textarea_set_placeholder_text(s_srchTa, "Artist, song or album");
-  lv_obj_set_size(s_srchTa, SCREEN_W - RAIL_W - PAD_X * 2, 58);
-  lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 84);
-  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);    // keyboard tick
-  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_CANCEL, nullptr);   // keyboard X
-  lv_obj_add_event_cb(s_srchTa, srchTaFocusCb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_set_size(s_srchTa, SRCH_LEFT_W, 56);
+  lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP);
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);    // keyboard tick -> search
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_CANCEL, nullptr);   // keyboard X    -> clear
 
+  // Five chips across 484: 92 wide on a 96 pitch. "Playlists" is the long one and fits at 16 px.
   for (int i = 0; i < 5; i++) {
     s_srchChip[i] = lv_button_create(pg);
     lv_obj_remove_style_all(s_srchChip[i]);
-    lv_obj_set_size(s_srchChip[i], 128, 44);
-    lv_obj_align(s_srchChip[i], LV_ALIGN_TOP_LEFT, i * 136, PAD_TOP + 154);
+    lv_obj_set_size(s_srchChip[i], 92, 40);
+    lv_obj_align(s_srchChip[i], LV_ALIGN_TOP_LEFT, i * 96, SRCH_TOP + 68);
     lv_obj_set_style_radius(s_srchChip[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_srchChip[i], LV_OPA_COVER, 0);
     lv_obj_add_event_cb(s_srchChip[i], srchChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
@@ -2141,21 +2139,23 @@ static void buildSearch() {
   }
   srchChipPaint();
 
+  // The keyboard takes the rest of the left column — ~396 px for four rows, so the keys are large,
+  // which is the right trade for a panel you touch standing up.
+  s_srchKb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_srchKb, SRCH_LEFT_W, SCREEN_H - (SRCH_TOP + 120) - PAD_BOT);
+  lv_obj_align(s_srchKb, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP + 120);
+  lv_keyboard_set_textarea(s_srchKb, s_srchTa);
+
+  // RIGHT COLUMN — results, full height, five rows visible and scrollable past that.
   s_srchList = lv_obj_create(pg);
   lv_obj_remove_style_all(s_srchList);
-  lv_obj_set_size(s_srchList, SCREEN_W - RAIL_W - PAD_X * 2, SCREEN_H - (PAD_TOP + 214) - PAD_BOT);
-  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 214);
+  lv_obj_set_size(s_srchList, SRCH_RIGHT_W, SCREEN_H - SRCH_TOP - PAD_BOT);
+  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP);
 
-  s_srchStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
-  lv_obj_align(s_srchStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 224);
-
-  // The keyboard sits over the results while it is up; the list is still there underneath, which is
-  // the point — a new query replaces the rows without the page ever going blank.
-  s_srchKb = lv_keyboard_create(pg);
-  lv_obj_set_size(s_srchKb, SCREEN_W - RAIL_W - PAD_X * 2, 250);
-  lv_obj_align(s_srchKb, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-  lv_keyboard_set_textarea(s_srchKb, s_srchTa);
-  lv_obj_add_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
+  s_srchStatus = label(pg, "Type a query.", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_label_set_long_mode(s_srchStatus, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_srchStatus, SRCH_RIGHT_W);
+  lv_obj_align(s_srchStatus, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 8);
 }
 
 static void buildSettings() {
