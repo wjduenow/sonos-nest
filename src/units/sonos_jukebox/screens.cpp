@@ -2113,6 +2113,11 @@ static bool     s_srchTyped   = false;
 // change and the other never repainted its tiles.
 static uint32_t s_srchArtGen = 0;
 
+// Set while showing the contents of a container rather than search results. Only for the status
+// line — the rows themselves are the same list either way.
+static String   s_srchInside;
+static uint32_t s_srchBrowseGen = 0;
+
 // A KEYMAP FOR SEARCHING, not for writing. The stock layout spends a row-and-a-bit on things a
 // query never contains — $ % ^ & * and the mode machinery to reach them — and carries an X that,
 // now the keyboard is permanent, has nowhere to close to. This drops all of it: 26 letters, a
@@ -2156,6 +2161,8 @@ static const spotify::Category kSrchChipCat[5] = {
     spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
     spotify::Category::Albums, spotify::Category::Playlists};
 
+static void srchPaintRows();
+
 static void srchRun(unsigned minLen) {
   const String q(lv_textarea_get_text(s_srchTa));
   s_srchTyped = false;                        // whatever is on screen now answers this text
@@ -2188,21 +2195,29 @@ static void srchChipCb(lv_event_t *e) {
 
 // Play a result. Only tracks have a URI we can construct — see spotify.h — so the others say so
 // instead of sending the speaker something that would come back as a UPnP 402.
+// Tracks and stations play; everything else DESCENDS. An album browses to its tracks, an artist to
+// its top tracks, its radio and its albums — so a container is a drill-down, not the dead end this
+// used to report. Descending reuses the search worker's browse slot and repaints the same list, so
+// the page needs no second mode: the query stays in the box, and the next search replaces the rows.
 static void srchRowCb(lv_event_t *e) {
   const int i = (int)(intptr_t)lv_event_get_user_data(e);
   if (i < 0 || i >= (int)s_srchItems.size()) return;
-  const String uri = spotify::playUri(s_srchItems[i]);
-  if (uri.isEmpty()) {
-    uiSoundPlay(UiSound::Tick);
-    lv_label_set_text(s_srchStatus, "Only tracks can be played from here yet.");
-    lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+  const spotify::Item it = s_srchItems[i];
+  const String uri = spotify::playUri(it);
+  if (uri.length()) {
+    uiSoundPlay(UiSound::Confirm);
+    stateLock();
+    g_pending.playUri  = uri;
+    g_pending.playMeta = spotify::playMeta(it);
+    stateUnlock();
     return;
   }
-  uiSoundPlay(UiSound::Confirm);
-  stateLock();
-  g_pending.playUri  = uri;
-  g_pending.playMeta = spotify::playMeta(s_srchItems[i]);
-  stateUnlock();
+  uiSoundPlay(UiSound::Tick);
+  s_srchInside = it.title;
+  s_srchBrowseGen = spotify::browseGen();
+  spotify::browseStart(it.id);
+  lv_label_set_text_fmt(s_srchStatus, "Opening %s...", it.title.c_str());
+  lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void srchPaintArt() {
@@ -2215,13 +2230,13 @@ static void srchPaintArt() {
   }
 }
 
-static void srchPaint() {
+// Draws whatever is in s_srchItems, whoever put it there — a search or a drill-down.
+static void srchPaintRows() {
   // ⚠️ Clear the tile vector BEFORE lv_obj_clean(): removing children changes the scroll extent and
   // fires LV_EVENT_SCROLL synchronously, so a callback can walk this vector mid-clean. That exact
   // shape crashed the Radio page after five hours of uptime (CLAUDE.md).
   s_srchTiles.clear();
   lv_obj_clean(s_srchList);
-  spotify::searchResults(s_srchItems);
 
   const lv_coord_t w = SRCH_RIGHT_W, h = 88;
   for (size_t i = 0; i < s_srchItems.size(); i++) {
@@ -2267,6 +2282,12 @@ static void srchPaint() {
     lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80, 15);
   }
   srchPaintArt();
+}
+
+static void srchPaint() {
+  spotify::searchResults(s_srchItems);
+  s_srchInside = "";          // these rows answer the query again, not a container
+  srchPaintRows();
 }
 
 // The keyboard's tick runs the query. Its X has nowhere to close to now, so it CLEARS instead —
@@ -3397,6 +3418,17 @@ void uiTick() {
 
   if (s_cur == PAGE_SEARCH) {
     if (s_srchTyped && (millis() - s_srchTypedMs) >= 400) srchRun(3);
+
+    // A drill-down lands in the BROWSE slot, not the search slot, and paints the same rows.
+    const uint32_t bgen = spotify::browseGen();
+    if (bgen != s_srchBrowseGen && s_srchInside.length()) {
+      s_srchBrowseGen = bgen;
+      spotify::browseResults(s_srchItems);
+      srchPaintRows();
+      if (s_srchItems.empty()) lv_label_set_text_fmt(s_srchStatus, "%s is empty.", s_srchInside.c_str());
+      else                     lv_label_set_text(s_srchStatus, s_srchInside.c_str());
+      lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+    }
 
     const uint32_t gen = spotify::searchGen();
     if (gen != s_srchShownGen) {

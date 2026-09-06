@@ -238,7 +238,16 @@ bool browse(const String &id, std::vector<Item> &out, int index, int count) {
   const String body = String("<getMetadata xmlns=\"") + kNs + "\"><id>" + escapeXml(id) +
                       "</id><index>" + String(index) + "</index><count>" + String(count) +
                       "</count></getMetadata>";
-  eachItem(request("getMetadata", body), out, count);
+  const String r = request("getMetadata", body);
+  eachItem(r, out, count);
+  // An empty result is reported to the UI as a flat failure, which on a device with no serial port
+  // is indistinguishable from a dead network. Say which it was: a transport failure returns "", a
+  // rejected request returns a fault, and a genuinely empty container returns neither.
+  if (out.empty()) {
+    const String fault = unescapeXml(tagValue(r, "faultstring"));
+    LOG.printf("[spotify] browse %s -> %u B, no items%s%s\n", id.c_str(), (unsigned)r.length(),
+               fault.length() ? ", fault: " : "", fault.length() ? fault.c_str() : "");
+  }
   return !out.empty();
 }
 
