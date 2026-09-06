@@ -335,6 +335,7 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
 // the pages they switch to.
 static void showPage(int page);
 static void railCb(lv_event_t *e);
+static void radioOnEnter();
 
 static void buildRail(lv_obj_t *scr) {
   lv_obj_t *rail = panel(scr, RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
@@ -490,6 +491,7 @@ static void showPage(int page) {
                                   lv_color_hex(i == page ? JB_ACCENT : JB_TEXT_DIM), 0);
     }
   }
+  if (page == PAGE_RADIO) radioOnEnter();
 }
 
 static void railCb(lv_event_t *e) {
@@ -1474,6 +1476,12 @@ static lv_obj_t *s_srcBtn[2] = {nullptr};
 static uint8_t   s_radioSrc = 0;                    // 0 = Amazon, 1 = Spotify
 static std::vector<spotify::Item> s_spItems;
 static uint32_t  s_spShownGen = 0;
+// Set while THIS page is waiting for a browse it started. The search page uses the same browse
+// slot, so "has a browse finished?" is not the same question as "has MY browse finished?" — a
+// drill-down from Search left the slot in Done, the Radio page read that as its own root browse
+// arriving, and painted the artist's 50 rows into a list it had never laid out. Hence a flag
+// rather than inspecting browseState().
+static bool s_spAwaiting = false;
 static String    s_spTitle;                          // container we descended into, "" at the root
 static String   s_searchPending;                // last text seen, debounced in uiTick
 static uint32_t s_searchAt = 0;
@@ -1664,6 +1672,7 @@ static void radioShowSpotify(const String &id, const String &title) {
   lv_label_set_text(s_radioStatus, "Loading...");
   lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
   s_spShownGen = spotify::browseGen();
+  s_spAwaiting = true;
   spotify::browseStart(id);
 }
 
@@ -1681,6 +1690,18 @@ static void radioSpotPaint() {
   for (size_t i = 0; i < s_spItems.size(); i++)
     radioRow(i, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb);
   radioPaintArt();
+}
+
+// Arriving on the page must show SOMETHING for the active source. Neither branch was covered: the
+// Spotify side only ever started a browse from the source toggle, and the Amazon side only
+// repainted when the cache generation changed — so a page whose list had been cleared (by a stale
+// paint, or by switching sources) stayed empty until something else happened to change.
+static void radioOnEnter() {
+  if (s_radioSrc == 1) {
+    if (s_spItems.empty() && !s_spAwaiting) radioShowSpotify("root", "");
+  } else if (s_radioList && lv_obj_get_child_count(s_radioList) == 0) {
+    radioShowGenres();
+  }
 }
 
 static void radioSrcCb(lv_event_t *e) {
@@ -1930,7 +1951,9 @@ static void buildRadio() {
   // Source segmented control, top right — out of the way of the title and the back button.
   {
     const char *name[2] = {"Amazon", "Spotify"};
-    const lv_coord_t w = 140, x0 = SCREEN_W - RAIL_W - PAD_X * 2 - (w * 2 + 8);
+    // 64 px of clearance on the right: s_searchBtn is TOP_RIGHT-aligned and 56 px wide, and without
+    // this the Spotify pill sits underneath it.
+    const lv_coord_t w = 140, x0 = SCREEN_W - RAIL_W - PAD_X * 2 - 64 - (w * 2 + 8);
     for (int i = 0; i < 2; i++) {
       s_srcBtn[i] = lv_button_create(pg);
       lv_obj_remove_style_all(s_srcBtn[i]);
@@ -3597,12 +3620,12 @@ void uiTick() {
       // Spotify is browsed live, so the page fills in when the worker answers rather than when a
       // cache appears. Entering the page with nothing loaded kicks the first browse.
       const uint32_t bg = spotify::browseGen();
-      if (bg != s_spShownGen) {
+      if (s_spAwaiting && bg != s_spShownGen) {
         s_spShownGen = bg;
+        s_spAwaiting = false;
         radioSpotPaint();
-      } else if (s_spItems.empty() && spotify::browseState() == spotify::SearchState::Idle) {
-        radioShowSpotify("root", "");
-      } else if (spotify::browseState() == spotify::SearchState::Failed && s_spItems.empty()) {
+      } else if (s_spAwaiting && spotify::browseState() == spotify::SearchState::Failed) {
+        s_spAwaiting = false;
         lv_label_set_text(s_radioStatus, spotify::linked() ? "Could not reach Spotify."
                                                            : "Link Spotify in Settings.");
         lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
