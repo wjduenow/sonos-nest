@@ -127,6 +127,10 @@ String keyOfUrl(const String &url) {
 // 72 px tile — an Amazon cover is up to 6.7 MB and often PNG, which TJpg cannot decode at all — so
 // fetching full size would be both slow on a fragile link and useless. Unknown hosts fall through
 // unchanged and are simply downloaded as-is.
+// The mosaic path segment for a given tile size, kept out of thumbUrl() so the string is not
+// built twice.
+static const char *tile640(int px) { return px <= 96 ? "/60/" : "/300/"; }
+
 static String thumbUrl(const String &url, int px) {
   if (url.indexOf("media-amazon.com") >= 0 || url.indexOf("ssl-images-amazon.com") >= 0)
     return amazon::artThumbUrl(url, px > 96 ? 160 : 128);   // also transcodes PNG -> baseline JPEG
@@ -142,18 +146,31 @@ static String thumbUrl(const String &url, int px) {
     // Spotify encodes the rendition in the id prefix, and there are TWO families. Album and track
     // covers: b273 = 640 (52 KB), 1e02 = 300 (18 KB), 4851 = 64 (1.6 KB). ARTIST portraits are a
     // different prefix entirely: e5eb = 640 (134 KB), 5174 = 320 (46 KB), f178 = 160 (15 KB).
+    // Sizes measured against live URLs 2026-09-06.
     //
-    // Only the album family was rewritten here, which silently lost the art on every artist AND on
-    // every Spotify STATION — artist radio carries the artist portrait — because 134 KB is over
-    // kJpegMax and the fetch is dropped before anything is decoded. Sizes measured 2026-09-06.
+    // Only the album family was rewritten here at first, which silently lost the art on every
+    // artist AND every Spotify STATION — artist radio carries the artist portrait — because 134 KB
+    // is over kJpegMax and the fetch is dropped before anything is decoded.
+    //
+    // TILES TAKE THE SMALLEST RENDITION THAT EXISTS. A 72 px tile fed by a 300 px cover spends
+    // 18 KB and a TLS round trip per row to throw away 94% of the pixels, and a list is 50 rows
+    // over the ESP-Hosted link — which is what "art loads very slowly" was. 64 px upscaled to 72
+    // is marginally soft; 11x less data per row is not marginal. Now Playing and the screensaver
+    // are unaffected and deliberately so: album_art.cpp never comes through here, it decodes
+    // whatever the speaker reports up to ART_MAX_PX.
+    const bool tile = (px <= 96);
     String u = url;
-    u.replace("ab67616d0000b273", "ab67616d00001e02");   // album / track  640 -> 300
-    u.replace("ab6761610000e5eb", "ab6761610000f178");   // artist / radio 640 -> 160
+    u.replace("ab67616d0000b273", tile ? "ab67616d00004851" : "ab67616d00001e02");  // album 640 ->
+    u.replace("ab67616d00001e02", tile ? "ab67616d00004851" : "ab67616d00001e02");  // ...or 300 ->
+    u.replace("ab6761610000e5eb", tile ? "ab6761610000f178" : "ab67616100005174");  // artist/radio
     return u;
   }
-  if (url.indexOf("mosaic.scdn.co/640/") >= 0) {
-    // Playlist mosaics: the size is a path segment. 640 = 76 KB, 300 = 22 KB, 160 = 7 KB.
-    String u = url; u.replace("/640/", "/160/");
+  if (url.indexOf("mosaic.scdn.co/") >= 0) {
+    // Playlist mosaics put the size in a path segment: 640 = 76 KB, 300 = 22 KB, 160 = 7 KB,
+    // 60 = 2 KB. Matched on the host rather than on "/640/" so a mosaic served at another size is
+    // still normalised. Note the path also CONTAINS ab67616d… cover ids — hence a separate branch,
+    // because the album rewrite above would corrupt them.
+    String u = url; u.replace("/640/", tile640(px));
     return u;
   }
   // pickasso.spotifycdn.com and seed-mix-image.spotifycdn.com (the other playlist art hosts) have
