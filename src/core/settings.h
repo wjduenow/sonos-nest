@@ -101,6 +101,16 @@ void    settingsSetAmazonAuth(const String &token, const String &key);
 // to send the right one, and it is readable from any existing Amazon favourite's res URI.
 uint8_t settingsAmazonSerial();
 void    settingsSetAmazonSerial(uint8_t sn);
+
+// --- Spotify (SMAPI AppLink) ---------------------------------------------------------------------
+// The token this device links for itself, used ONLY to browse and search. Playback uses the
+// household's own Spotify account on the speaker, whose serial is `spsn` — read from an existing
+// x-sonos-spotify favourite the same way the Amazon one is. See plans/08.
+String  settingsSpotifyToken();
+String  settingsSpotifyKey();
+void    settingsSetSpotifyAuth(const String &token, const String &key);
+uint8_t settingsSpotifySerial();
+void    settingsSetSpotifySerial(uint8_t sn);
 // The Sonos household id, used as the correlation key when linking.
 String  settingsHouseholdId();
 void    settingsSetHouseholdId(const String &id);

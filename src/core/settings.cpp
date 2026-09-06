@@ -46,6 +46,18 @@ void settingsSetAmazonAuth(const String &token, const String &key) {
 }
 uint8_t settingsAmazonSerial()          { return s_prefs.getUChar("amzsn", 0); }
 void    settingsSetAmazonSerial(uint8_t sn) { s_prefs.putUChar("amzsn", sn); }
+
+// Spotify SMAPI credentials, from the same AppLink ceremony (plans/08). Separate keys, separate
+// account: this token only BROWSES. Playback goes through the speaker, which uses the Spotify
+// account linked in the Sonos app — so the two need not be the same account and usually are not.
+String settingsSpotifyToken() { return s_prefs.getString("sptok", ""); }
+String settingsSpotifyKey()   { return s_prefs.getString("spkey", ""); }
+void settingsSetSpotifyAuth(const String &token, const String &key) {
+  s_prefs.putString("sptok", token);
+  s_prefs.putString("spkey", key);
+}
+uint8_t settingsSpotifySerial()             { return s_prefs.getUChar("spsn", 0); }
+void    settingsSetSpotifySerial(uint8_t sn) { s_prefs.putUChar("spsn", sn); }
 String  settingsHouseholdId()           { return s_prefs.getString("hhid", ""); }
 void    settingsSetHouseholdId(const String &id) {
   if (settingsHouseholdId() != id) s_prefs.putString("hhid", id);
