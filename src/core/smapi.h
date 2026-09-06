@@ -56,6 +56,16 @@ String anonCreds();
 // The authenticated header: an account token this device owns, obtained from the link ceremony.
 String loginCreds(const String &token, const String &key, const String &householdId);
 
+// c_str() that can never be NULL.
+//
+// ⚠️ NOT PARANOIA. Arduino's String calls invalidate() when an allocation fails, which sets its
+// buffer to nullptr — so on a board that can run out of internal heap, `s.c_str()` for a String
+// that failed to grow returns NULL, and passing that to a %s is a load from address 0 inside ROM
+// strlen. That is not hypothetical: a LOG.printf added to diagnose an empty browse response turned
+// the out-of-memory it was diagnosing into a reboot. Any %s of a String that came from the network
+// goes through this.
+inline const char *cstr(const String &s) { return s.c_str() ? s.c_str() : "(oom)"; }
+
 // --- one service endpoint ------------------------------------------------------------------------
 
 // A SINGLE KEEP-ALIVE TLS SESSION, reused across every call to one service.

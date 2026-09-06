@@ -5,6 +5,8 @@
 
 #include <WiFiClientSecure.h>
 
+#include <utility>   // std::move
+
 #include "heap_watch.h"       // heapwatch::note — attribute the internal-heap low-water
 #include "net/logmirror.h"    // LOG — tees to the TCP mirror where enabled
 
@@ -144,7 +146,10 @@ bool Client::readResponse(String &out, bool &keepAlive) {
   keepAlive = false;
 
   String raw;
-  raw.reserve(24 * 1024);
+  // 4 KB to start, then exactly Content-Length once the headers say so. This used to reserve 24 KB
+  // unconditionally — 24 KB of contiguous internal heap for a 1.9 KB response, on a board whose
+  // largest free block is ~36-43 KB.
+  raw.reserve(4 * 1024);
   auto pump = [&]() -> bool {                     // one block, yielding; false = socket done
     if (!cli_->connected() && !cli_->available()) return false;
     const int n = cli_->read(buf, sizeof buf);
@@ -170,6 +175,8 @@ bool Client::readResponse(String &out, bool &keepAlive) {
   const int cl = head.indexOf("content-length:");
   if (cl >= 0) len = strtol(head.c_str() + cl + 15, nullptr, 10);
 
+  if (len > (long)raw.length()) raw.reserve((unsigned)len + 64);
+
   if (len >= 0) {
     while ((long)raw.length() < len && millis() < deadline) {
       if (!pump()) break;
@@ -182,7 +189,10 @@ bool Client::readResponse(String &out, bool &keepAlive) {
     }
   }
   heapwatch::note(bodyTag_.c_str());   // raw body + TLS buffers both held — the heaviest point
-  out = raw;
+  // MOVE, never copy. `out = raw` allocated a second buffer the size of the body and held both at
+  // once — 32-48 KB of internal heap for a 16-22 KB response, which is how a browse of a large
+  // container ran the heap out and left an INVALIDATED String behind (buffer == nullptr).
+  out = std::move(raw);
   return true;
 }
 

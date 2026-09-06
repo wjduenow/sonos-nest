@@ -245,8 +245,8 @@ bool browse(const String &id, std::vector<Item> &out, int index, int count) {
   // rejected request returns a fault, and a genuinely empty container returns neither.
   if (out.empty()) {
     const String fault = unescapeXml(tagValue(r, "faultstring"));
-    LOG.printf("[spotify] browse %s -> %u B, no items%s%s\n", id.c_str(), (unsigned)r.length(),
-               fault.length() ? ", fault: " : "", fault.length() ? fault.c_str() : "");
+    LOG.printf("[spotify] browse %s -> %u B, no items%s%s\n", smapi::cstr(id), (unsigned)r.length(),
+               fault.length() ? ", fault: " : "", fault.length() ? smapi::cstr(fault) : "");
   }
   return !out.empty();
 }
@@ -348,7 +348,7 @@ static void searchTask(void *) {
       // The margin, every time, because the way this task fails is a reboot with no log line and a
       // PC that does not resolve. Anything under ~1 KB here means the next larger response is a
       // crash rather than a slow list.
-      LOG.printf("[spotify] browse %s: %d items, stack free %u B\n", id.c_str(), (int)found.size(),
+      LOG.printf("[spotify] browse %s: %d items, stack free %u B\n", smapi::cstr(id), (int)found.size(),
                  (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)));
       continue;
     }
