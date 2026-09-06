@@ -335,6 +335,7 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
 // the pages they switch to.
 static void showPage(int page);
 static void railCb(lv_event_t *e);
+static void srchOnEnter();
 
 static void buildRail(lv_obj_t *scr) {
   lv_obj_t *rail = panel(scr, RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
@@ -490,6 +491,7 @@ static void showPage(int page) {
                                   lv_color_hex(i == page ? JB_ACCENT : JB_TEXT_DIM), 0);
     }
   }
+  if (page == PAGE_SEARCH) srchOnEnter();
 }
 
 static void railCb(lv_event_t *e) {
@@ -1976,6 +1978,22 @@ static const spotify::Category kSrchChipCat[5] = {
     spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
     spotify::Category::Albums, spotify::Category::Playlists};
 
+// The keyboard is 250 px of a 600 px screen, so while it is up the results are a single row. It is
+// therefore MODAL, not permanent: it appears when the field is tapped and goes away the moment the
+// query is submitted, which is exactly when the results become the thing worth looking at.
+static void srchKbShow(bool on) {
+  if (!s_srchKb) return;
+  if (on) lv_obj_remove_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
+  else    lv_obj_add_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Arriving with nothing typed means you came here to type, so the keyboard is up. With results
+// already on screen it stays down — those are what you came back for.
+static void srchOnEnter() {
+  if (!s_srchTa) return;
+  srchKbShow(strlen(lv_textarea_get_text(s_srchTa)) == 0);
+}
+
 static void srchRunIfReady() {
   const String q(lv_textarea_get_text(s_srchTa));
   if (q.length() < 2) return;                 // one letter is not a query, it is a keystroke
@@ -2086,7 +2104,14 @@ static void srchPaint() {
   srchPaintArt();
 }
 
-static void srchTaCb(lv_event_t *) { srchRunIfReady(); }
+// LV_EVENT_READY is the keyboard's tick, LV_EVENT_CANCEL its X — the two ways a user says "done
+// typing". Both put the keyboard away; only the tick runs the query.
+static void srchTaCb(lv_event_t *e) {
+  const lv_event_code_t code = lv_event_get_code(e);
+  if (code == LV_EVENT_READY) srchRunIfReady();
+  srchKbShow(false);
+}
+static void srchTaFocusCb(lv_event_t *) { srchKbShow(true); }
 
 static void buildSearch() {
   lv_obj_t *pg = s_page[PAGE_SEARCH];
@@ -2099,7 +2124,9 @@ static void buildSearch() {
   lv_textarea_set_placeholder_text(s_srchTa, "Artist, song or album");
   lv_obj_set_size(s_srchTa, SCREEN_W - RAIL_W - PAD_X * 2, 58);
   lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 84);
-  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);   // the keyboard's tick
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);    // keyboard tick
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_CANCEL, nullptr);   // keyboard X
+  lv_obj_add_event_cb(s_srchTa, srchTaFocusCb, LV_EVENT_CLICKED, nullptr);
 
   for (int i = 0; i < 5; i++) {
     s_srchChip[i] = lv_button_create(pg);
@@ -2128,6 +2155,7 @@ static void buildSearch() {
   lv_obj_set_size(s_srchKb, SCREEN_W - RAIL_W - PAD_X * 2, 250);
   lv_obj_align(s_srchKb, LV_ALIGN_BOTTOM_LEFT, 0, 0);
   lv_keyboard_set_textarea(s_srchKb, s_srchTa);
+  lv_obj_add_flag(s_srchKb, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void buildSettings() {
