@@ -280,6 +280,18 @@ bool search(const String &term, Category cat, std::vector<Item> &out, int count)
 // term rather than queueing: the user typing another letter means the in-flight query is already
 // stale, and a queue would make the UI walk through every intermediate result before showing the
 // one that was asked for last.
+// 8192, MATCHING EVERY OTHER TASK HERE THAT DOES TLS AND XML: radiocache (the Amazon crawl, the
+// same work over larger responses), favcache, netTask, artTask, uiTask. This was 6144, copied from
+// the link task — and the link task is not a precedent, because it only ever handles a link code
+// and a token, under a kilobyte each.
+//
+// The difference is not theoretical. At 6144 a search survived (3-6 KB responses) and the first
+// real browse did not: `Radio -> Spotify -> Genres and Moods` is 15.7 KB and the device rebooted
+// with task `spsearch`, mcause 5, mtval 0 and a PC that does not resolve in the ELF — a corrupted
+// return address, i.e. the stack, not a null dereference in the parser. If a task here needs to
+// hold a SOAP response, it needs 8192.
+static const uint32_t kWorkerStack = 8192;
+
 static SemaphoreHandle_t  s_searchMx = nullptr;
 static TaskHandle_t       s_searchTask = nullptr;
 static volatile SearchState s_searchState = SearchState::Idle;
@@ -333,6 +345,11 @@ static void searchTask(void *) {
       s_browseGen++;
       s_browseState = ok ? SearchState::Done : SearchState::Failed;
       endSession();
+      // The margin, every time, because the way this task fails is a reboot with no log line and a
+      // PC that does not resolve. Anything under ~1 KB here means the next larger response is a
+      // crash rather than a slow list.
+      LOG.printf("[spotify] browse %s: %d items, stack free %u B\n", id.c_str(), (int)found.size(),
+                 (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)));
       continue;
     }
     if (!s_pendingHas) { vTaskDelay(pdMS_TO_TICKS(60)); continue; }
@@ -368,7 +385,7 @@ void browseStart(const String &id) {
   s_browsePendingHas = true;
   xSemaphoreGive(s_searchMx);
   s_browseState = SearchState::Running;
-  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", 6144, nullptr, 1, &s_searchTask, 0);
+  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", kWorkerStack, nullptr, 1, &s_searchTask, 0);
 }
 
 void searchStart(const String &term, Category cat) {
@@ -380,9 +397,8 @@ void searchStart(const String &term, Category cat) {
   s_pendingHas  = true;
   xSemaphoreGive(s_searchMx);
   s_searchState = SearchState::Running;
-  // Core 0 with the network, like the link task. Lazily created: a device that never searches
-  // never spawns it.
-  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", 6144, nullptr, 1, &s_searchTask, 0);
+  // Core 0 with the network. Lazily created: a device that never searches never spawns it.
+  if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", kWorkerStack, nullptr, 1, &s_searchTask, 0);
 }
 
 // --- playback ------------------------------------------------------------------------------------
