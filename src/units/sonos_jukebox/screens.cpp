@@ -1479,6 +1479,7 @@ static String   s_searchPending;                // last text seen, debounced in 
 static uint32_t s_searchAt = 0;
 
 static void radioShowGenres();
+static String artKey(const String &id, const String &url);
 static void radioShowSpotify(const String &id, const String &title);
 static void radioSrcPaint();
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
@@ -1563,7 +1564,39 @@ static void radioClear() {
 // Fill in any tile whose artwork has finished decoding. Only rows near the viewport are asked for,
 // so a 50-row genre queues a handful of fetches rather than fifty — the cache is bounded and would
 // evict the early ones before they were ever seen anyway.
+// artcache::keyOf() is AMAZON-SHAPED: it pulls the station key out of "catalog/stations/<KEY>/#chunk-"
+// and returns "" for anything else — and artcache::get() drops an empty key without even queueing a
+// fetch. So every Spotify row silently requested no artwork at all, for every item type, which is
+// why the 300 px rewrite in art_cache's thumbUrl() looked like it worked and never ran.
+//
+// Amazon still wants keyOf: its art URL is not stable (the #chunk- is minted per response) but the
+// station KEY is, so keying on it survives a re-crawl. Spotify's art URL is stable and its id is
+// not station-shaped, so it hashes the URL — which is what the Favourites page already does.
+static String artKey(const String &id, const String &url) {
+  const String k = artcache::keyOf(id);
+  return k.length() ? k : artcache::keyOfUrl(url);
+}
+
+// Spotify rows on the Radio page are not in s_radioStations, so radioPaintArt() below skips them
+// entirely — it walks the Amazon station list. This is the same viewport pass over s_spItems.
+static void radioSpotPaintArt() {
+  if (s_spItems.empty() || s_radioTiles.empty()) return;
+  const int32_t top = lv_obj_get_scroll_y(s_radioList);
+  const int32_t bot = top + lv_obj_get_height(s_radioList);
+  for (size_t i = 0; i < s_radioTiles.size() && i < s_spItems.size(); i++) {
+    lv_obj_t *tile = s_radioTiles[i];
+    if (!tile || s_spItems[i].artUrl.isEmpty()) continue;
+    const int32_t y = lv_obj_get_y(tile);
+    if (y + 200 < top || y - 200 > bot) continue;
+    const lv_image_dsc_t *d = artcache::get(artKey(s_spItems[i].id, s_spItems[i].artUrl),
+                                            s_spItems[i].artUrl);
+    if (!d || lv_image_get_src(tile) == d) continue;
+    lv_image_set_src(tile, d);
+  }
+}
+
 static void radioPaintArt() {
+  if (s_radioSrc == 1) { radioSpotPaintArt(); return; }
   if (s_radioLevel != 1 || s_radioTiles.empty()) return;
   const int32_t top = lv_obj_get_scroll_y(s_radioList);
   const int32_t bot = top + lv_obj_get_height(s_radioList);
@@ -1728,7 +1761,7 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
   lv_obj_center(img);
   lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
   s_radioTiles.push_back(img);
-  const lv_image_dsc_t *d = artcache::get(artcache::keyOf(id), artUrl);
+  const lv_image_dsc_t *d = artcache::get(artKey(id, artUrl), artUrl);
   if (d) lv_image_set_src(img, d);
 
   lv_obj_t *t = label(row, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
@@ -2224,7 +2257,7 @@ static void srchPaintArt() {
   if (s_srchTiles.empty()) return;
   for (size_t i = 0; i < s_srchTiles.size() && i < s_srchItems.size(); i++) {
     if (s_srchItems[i].artUrl.isEmpty()) continue;
-    const lv_image_dsc_t *d = artcache::get(artcache::keyOf(s_srchItems[i].id),
+    const lv_image_dsc_t *d = artcache::get(artKey(s_srchItems[i].id, s_srchItems[i].artUrl),
                                             s_srchItems[i].artUrl);
     if (d) lv_image_set_src(s_srchTiles[i], d);
   }
