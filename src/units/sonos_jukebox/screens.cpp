@@ -1982,19 +1982,64 @@ static std::vector<spotify::Item> s_srchItems;
 static std::vector<lv_obj_t *>    s_srchTiles;   // parallel to s_srchItems, for artwork
 static spotify::Category s_srchCat = spotify::Category::All;
 static uint32_t s_srchShownGen = 0;
+// Search-as-you-type, debounced. The async wrapper already replaces a pending query rather than
+// queueing (spotify.h), so firing on a pause is safe — the in-flight answer to a stale prefix is
+// dropped rather than shown. 400 ms is long enough that a normal typing rhythm produces one call
+// per word, not one per letter, and three characters is the floor: "th" matches everything.
+static uint32_t s_srchTypedMs = 0;
+static bool     s_srchTyped   = false;
 // Its OWN artcache generation, not the Radio page's s_artGen: that one is consumed (and reset) by
 // the Radio block in uiTick, so sharing it would mean whichever page ticked first swallowed the
 // change and the other never repainted its tiles.
 static uint32_t s_srchArtGen = 0;
+
+// A KEYMAP FOR SEARCHING, not for writing. The stock layout spends a row-and-a-bit on things a
+// query never contains — $ % ^ & * and the mode machinery to reach them — and carries an X that,
+// now the keyboard is permanent, has nowhere to close to. This drops all of it: 26 letters, a
+// digits/punctuation mode behind one key, space, backspace, submit.
+//
+// It does not make the keyboard SHORTER (still four rows in the same 396 px); it makes the keys
+// BIGGER and removes the ways to get lost. lv_keyboard_set_map() replaces a layout wholesale, and
+// because the stock event handler dispatches mode switches on the key TEXT — "1#" and "abc" — the
+// built-in TEXT_LOWER and SPECIAL slots are overridden rather than LV_KEYBOARD_MODE_USER_1, so the
+// toggle works with no custom event callback at all.
+static const lv_buttonmatrix_ctrl_t W1 = LV_BUTTONMATRIX_CTRL_WIDTH_1;
+static const lv_buttonmatrix_ctrl_t W2 = LV_BUTTONMATRIX_CTRL_WIDTH_2;
+static const lv_buttonmatrix_ctrl_t W3 = LV_BUTTONMATRIX_CTRL_WIDTH_3;
+static const lv_buttonmatrix_ctrl_t W6 = LV_BUTTONMATRIX_CTRL_WIDTH_6;
+
+static const char *const kSrchKbLower[] = {
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+    "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
+    "1#", " ", LV_SYMBOL_OK, ""};
+static const lv_buttonmatrix_ctrl_t kSrchKbLowerCtrl[] = {
+    W1, W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W1, W1, W1, W1, W1, W1, W1, W2,
+    W2, W6, W2};
+
+// Digits plus the punctuation that actually turns up in titles — "blink-182", "Guns N' Roses",
+// "Simon & Garfunkel". Three rows rather than four, so the keys are taller here than in letters;
+// that is a visible difference between modes and it is the right trade for bigger targets.
+static const char *const kSrchKbNum[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "-", "'", "&", ".", ",", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", " ", LV_SYMBOL_OK, ""};
+static const lv_buttonmatrix_ctrl_t kSrchKbNumCtrl[] = {
+    W1, W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W2, W2, W2, W2, W2, W2,
+    W2, W6, W3};
 
 static const char *kSrchChipName[5] = {"All", "Tracks", "Artists", "Albums", "Playlists"};
 static const spotify::Category kSrchChipCat[5] = {
     spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
     spotify::Category::Albums, spotify::Category::Playlists};
 
-static void srchRunIfReady() {
+static void srchRun(unsigned minLen) {
   const String q(lv_textarea_get_text(s_srchTa));
-  if (q.length() < 2) return;                 // one letter is not a query, it is a keystroke
+  s_srchTyped = false;                        // whatever is on screen now answers this text
+  if (q.length() < minLen) return;
   spotify::searchStart(q, s_srchCat);
   lv_label_set_text(s_srchStatus, "Searching...");
   lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
@@ -2009,6 +2054,8 @@ static void srchChipPaint() {
                                 lv_color_hex(on ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
   }
 }
+
+static void srchRunIfReady() { srchRun(2); }   // an explicit submit: two letters is enough
 
 static void srchChipCb(lv_event_t *e) {
   const int i = (int)(intptr_t)lv_event_get_user_data(e);
@@ -2105,6 +2152,8 @@ static void srchPaint() {
 // The keyboard's tick runs the query. Its X has nowhere to close to now, so it CLEARS instead —
 // which is what an X on a search field means anyway. (A custom keymap could drop that key and the
 // mode switches outright; see the compact-layout note in plans/12.)
+static void srchTypedCb(lv_event_t *) { s_srchTyped = true; s_srchTypedMs = millis(); }
+
 static void srchTaCb(lv_event_t *e) {
   if (lv_event_get_code(e) == LV_EVENT_READY) { srchRunIfReady(); return; }
   lv_textarea_set_text(s_srchTa, "");
@@ -2124,6 +2173,7 @@ static void buildSearch() {
   lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP);
   lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);    // keyboard tick -> search
   lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_CANCEL, nullptr);   // keyboard X    -> clear
+  lv_obj_add_event_cb(s_srchTa, srchTypedCb, LV_EVENT_VALUE_CHANGED, nullptr);
 
   // Five chips across 484: 92 wide on a 96 pitch. "Playlists" is the long one and fits at 16 px.
   for (int i = 0; i < 5; i++) {
@@ -2144,6 +2194,9 @@ static void buildSearch() {
   s_srchKb = lv_keyboard_create(pg);
   lv_obj_set_size(s_srchKb, SRCH_LEFT_W, SCREEN_H - (SRCH_TOP + 120) - PAD_BOT);
   lv_obj_align(s_srchKb, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP + 120);
+  lv_keyboard_set_map(s_srchKb, LV_KEYBOARD_MODE_TEXT_LOWER, kSrchKbLower, kSrchKbLowerCtrl);
+  lv_keyboard_set_map(s_srchKb, LV_KEYBOARD_MODE_SPECIAL, kSrchKbNum, kSrchKbNumCtrl);
+  lv_keyboard_set_mode(s_srchKb, LV_KEYBOARD_MODE_TEXT_LOWER);
   lv_keyboard_set_textarea(s_srchKb, s_srchTa);
 
   // RIGHT COLUMN — results, full height, five rows visible and scrollable past that.
@@ -3223,6 +3276,8 @@ void uiTick() {
   }
 
   if (s_cur == PAGE_SEARCH) {
+    if (s_srchTyped && (millis() - s_srchTypedMs) >= 400) srchRun(3);
+
     const uint32_t gen = spotify::searchGen();
     if (gen != s_srchShownGen) {
       s_srchShownGen = gen;
