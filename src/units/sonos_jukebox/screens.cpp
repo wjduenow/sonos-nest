@@ -1483,6 +1483,7 @@ static uint32_t  s_spShownGen = 0;
 // rather than inspecting browseState().
 static bool s_spAwaiting = false;
 static String    s_spTitle;                          // container we descended into, "" at the root
+static String    s_spCurId = "root";                 // what the rows on screen are showing
 static String   s_searchPending;                // last text seen, debounced in uiTick
 static uint32_t s_searchAt = 0;
 
@@ -1491,7 +1492,7 @@ static String artKey(const String &id, const String &url);
 static void radioShowSpotify(String id, String title);
 static void radioSrcPaint();
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
-                          lv_event_cb_t cb);
+                          lv_event_cb_t cb, const String &subtitle = "Prime Station");
 static void radioPaintArt();
 static void radioShowStations(int genreIdx);
 static void radioPaintArt();
@@ -1632,6 +1633,24 @@ static bool radioFlat() { return radiocache::genreCount() == 1; }
 // construct; albums, artists and playlists do NOT — and do not need one, because they browse into
 // tracks. So a container is a drill-down, not a dead end, and nothing here has to guess an
 // x-rincon-cpcontainer prefix.
+// "Playlist", "Album . Queen", "Station" — the second line of a row. Shared so the Search page and
+// the Radio page cannot drift into describing the same item differently.
+static String spotifyKindLine(const spotify::Item &it) {
+  const char *kind = "";
+  switch (it.kind) {
+    case spotify::Item::Kind::Track:    kind = "Track";    break;
+    case spotify::Item::Kind::Artist:   kind = "Artist";   break;
+    case spotify::Item::Kind::Album:    kind = "Album";    break;
+    case spotify::Item::Kind::Playlist: kind = "Playlist"; break;
+    case spotify::Item::Kind::Station:  kind = "Station";  break;
+    default:                            kind = "";         break;
+  }
+  // ASCII separator on purpose: the built-in Montserrat has no middle-dot glyph (issue #21).
+  if (it.subtitle.length() && kind[0]) return String(kind) + " " JB_DASH " " + it.subtitle;
+  if (kind[0])                         return String(kind);
+  return it.subtitle;
+}
+
 static void radioSpotCb(lv_event_t *e) {
   const int i = (int)(intptr_t)lv_event_get_user_data(e);
   if (i < 0 || i >= (int)s_spItems.size()) return;
@@ -1657,6 +1676,7 @@ static void radioSpotCb(lv_event_t *e) {
 // BY VALUE, deliberately. This clears s_spItems, which is where callers get these strings from —
 // taking them by reference means the arguments can be destroyed halfway through the function.
 static void radioShowSpotify(String id, String title) {
+  s_spCurId = id;
   radioClear();
   s_radioLevel = (id == "root") ? 0 : 1;
   s_spTitle    = title;
@@ -1695,7 +1715,8 @@ static void radioSpotPaint() {
   }
   lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
   for (size_t i = 0; i < s_spItems.size(); i++)
-    radioRow(i, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb);
+    radioRow(i, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb,
+             spotifyKindLine(s_spItems[i]));
   radioPaintArt();
 }
 
@@ -1704,9 +1725,16 @@ static void radioSpotPaint() {
 // repainted when the cache generation changed — so a page whose list had been cleared (by a stale
 // paint, or by switching sources) stayed empty until something else happened to change.
 static void radioOnEnter() {
+  if (!s_radioList) return;
+  // Ask the WIDGET, not the model. s_spItems can be full while the list is empty — radioClear()
+  // runs from several paths (switching source, descending, the Amazon repaint) and empties the
+  // list without touching the vector, so "worked and then stopped showing anything" is exactly the
+  // state where those two disagree. Re-browse whatever level we were on rather than jumping to the
+  // root, so coming back to the page does not lose your place.
+  const bool listEmpty = (lv_obj_get_child_count(s_radioList) == 0);
   if (s_radioSrc == 1) {
-    if (s_spItems.empty() && !s_spAwaiting) radioShowSpotify("root", "");
-  } else if (s_radioList && lv_obj_get_child_count(s_radioList) == 0) {
+    if (listEmpty && !s_spAwaiting) radioShowSpotify(s_spCurId, s_spTitle);
+  } else if (listEmpty) {
     radioShowGenres();
   }
 }
@@ -1770,7 +1798,7 @@ static void radioShowGenres() {
 // One carousel row. `artUrl` empty means "show art only if it is already decoded" — used by search
 // results, whose flat index deliberately omits the art URL to keep all.tsv small.
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
-                          lv_event_cb_t cb) {
+                          lv_event_cb_t cb, const String &subtitle) {
   const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
   lv_obj_t *row = lv_button_create(s_radioList);
   lv_obj_remove_style_all(row);
@@ -1796,7 +1824,11 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
   lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
   lv_obj_set_width(t, w - 120);
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
-  lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
+  // The second line said "Prime Station" for every row, on both sources — right for Amazon, which
+  // is all this page ever showed, and wrong for every Spotify playlist, album and artist.
+  lv_obj_t *sub = label(row, subtitle.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(sub, w - 120);
   lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
   return row;
 }
@@ -2327,18 +2359,7 @@ static void srchPaintRows() {
     lv_obj_set_width(t, w - 88);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
 
-    const char *kindName = "";
-    switch (it.kind) {
-      case spotify::Item::Kind::Track:    kindName = "Track";    break;
-      case spotify::Item::Kind::Artist:   kindName = "Artist";   break;
-      case spotify::Item::Kind::Album:    kindName = "Album";    break;
-      case spotify::Item::Kind::Playlist: kindName = "Playlist"; break;
-      default:                            kindName = "";         break;
-    }
-    String sub = it.subtitle;
-    // ASCII separator on purpose: the built-in Montserrat has no middle-dot glyph (issue #21).
-    if (sub.length() && kindName[0]) sub = String(kindName) + " " JB_DASH " " + sub;
-    else if (kindName[0])            sub = kindName;
+    const String sub = spotifyKindLine(it);
     lv_obj_t *sl = label(row, sub.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(sl, w - 88);
