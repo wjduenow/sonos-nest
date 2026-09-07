@@ -1639,6 +1639,16 @@ static bool radioFlat() { return radiocache::genreCount() == 1; }
 // construct; albums, artists and playlists do NOT — and do not need one, because they browse into
 // tracks. So a container is a drill-down, not a dead end, and nothing here has to guess an
 // x-rincon-cpcontainer prefix.
+// WHAT A ROW TAP DOES, decided by KIND and never by "can playUri() build something".
+//
+// Those were the same question until albums and playlists became playable, and then they silently
+// diverged: a playlist suddenly had a URI, so tapping it PLAYED instead of opening, and the
+// container could no longer be browsed at all. Starting a whole album or playlist is the "Play all"
+// row's job; tapping the container itself opens it, as it always did.
+static bool spotifyRowPlays(const spotify::Item &it) {
+  return it.kind == spotify::Item::Kind::Track || it.kind == spotify::Item::Kind::Station;
+}
+
 // "Playlist", "Album . Queen", "Station" — the second line of a row. Shared so the Search page and
 // the Radio page cannot drift into describing the same item differently.
 static String spotifyKindLine(const spotify::Item &it) {
@@ -1679,8 +1689,9 @@ static void radioSpotCb(lv_event_t *e) {
   // "Action not found." The search page's equivalent already copies, which is why drilling down
   // worked there and not here.
   const spotify::Item it = s_spItems[i];
-  const String uri = spotify::playUri(it);
-  if (uri.length()) {
+  if (spotifyRowPlays(it)) {
+    const String uri = spotify::playUri(it);
+    if (uri.isEmpty()) return;
     uiSoundPlay(UiSound::Confirm);
     stateLock();
     g_pending.playUri  = uri;
@@ -2342,8 +2353,9 @@ static void srchRowCb(lv_event_t *e) {
   }
   if (i < 0 || i >= (int)s_srchItems.size()) return;
   const spotify::Item it = s_srchItems[i];
-  const String uri = spotify::playUri(it);
-  if (uri.length()) {
+  if (spotifyRowPlays(it)) {
+    const String uri = spotify::playUri(it);
+    if (uri.isEmpty()) return;
     uiSoundPlay(UiSound::Confirm);
     stateLock();
     g_pending.playUri  = uri;
