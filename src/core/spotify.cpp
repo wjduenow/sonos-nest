@@ -14,6 +14,8 @@
 //     anything this module offers a Radio page is a playlist and should be labelled as one.
 #include "spotify.h"
 
+#include <utility>   // std::move
+
 #include "smapi.h"
 #include "settings.h"
 #include "sonos/soap_client.h"
@@ -309,10 +311,17 @@ static std::vector<Item>  s_browseResults;
 SearchState searchState() { return s_searchState; }
 uint32_t    searchGen()   { return s_searchGen; }
 
+// Results are HANDED OVER, not copied. Every Item is four heap Strings — title, subtitle, id and a
+// ~70-character art URL, all past Arduino's SSO limit — so a 50-row result held in the worker's
+// slot AND in the page is ~400 small allocations on INTERNAL heap, which PSRAM does not absorb
+// (only blocks over 4 KB go there). One artist drill-down measured internal heapMin falling from
+// 42 KB to 17 KB — the LWIP floor — after which TLS could not open a socket and every tile fetch
+// failed silently. The page owns the list after this call; the slot is empty.
 bool searchResults(std::vector<Item> &out) {
   if (!s_searchMx) return false;
   xSemaphoreTake(s_searchMx, portMAX_DELAY);
-  out = s_results;
+  out.swap(s_results);
+  s_results.clear(); s_results.shrink_to_fit();
   xSemaphoreGive(s_searchMx);
   return true;
 }
@@ -320,10 +329,11 @@ bool searchResults(std::vector<Item> &out) {
 SearchState browseState() { return s_browseState; }
 uint32_t    browseGen()   { return s_browseGen; }
 
-bool browseResults(std::vector<Item> &out) {
+bool browseResults(std::vector<Item> &out) {      // same hand-over as searchResults()
   if (!s_searchMx) return false;
   xSemaphoreTake(s_searchMx, portMAX_DELAY);
-  out = s_browseResults;
+  out.swap(s_browseResults);
+  s_browseResults.clear(); s_browseResults.shrink_to_fit();
   xSemaphoreGive(s_searchMx);
   return true;
 }
@@ -338,9 +348,12 @@ static void searchTask(void *) {
 
       s_browseState = SearchState::Running;
       std::vector<Item> found;
-      const bool ok = browse(id, found, 0, 60);
+      // 24, not 60. The list shows five rows and scrolls; a 60-row answer is a 29 KB TLS transfer
+      // over a link that dies under load, parsed into 240 internal-heap Strings the page then has
+      // to hold. Paging past this is a "More" row, not a bigger first request.
+      const bool ok = browse(id, found, 0, 24);
       xSemaphoreTake(s_searchMx, portMAX_DELAY);
-      s_browseResults = found;
+      s_browseResults = std::move(found);
       xSemaphoreGive(s_searchMx);
       s_browseGen++;
       s_browseState = ok ? SearchState::Done : SearchState::Failed;
@@ -369,7 +382,7 @@ static void searchTask(void *) {
     if (s_pendingHas) continue;
 
     xSemaphoreTake(s_searchMx, portMAX_DELAY);
-    s_results = found;
+    s_results = std::move(found);
     xSemaphoreGive(s_searchMx);
     s_searchGen++;
     s_searchState = ok ? SearchState::Done : SearchState::Failed;

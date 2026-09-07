@@ -1868,7 +1868,7 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
 
   lv_obj_t *t = label(row, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
   lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(t, w - 120);
+  lv_obj_set_size(t, w - 120, 28);     // ONE line: LONG_DOT needs a fixed height or it wraps
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
   // The second line said "Prime Station" for every row, on both sources — right for Amazon, which
   // is all this page ever showed, and wrong for every Spotify playlist, album and artist.
@@ -2446,7 +2446,7 @@ static void srchPaintRows() {
 
     lv_obj_t *t = label(row, it.title.c_str(), &lv_font_montserrat_22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(t, w - 88);
+    lv_obj_set_size(t, w - 88, 28);      // ONE line: LONG_DOT needs a fixed height or it wraps
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
 
     const String sub = spotifyKindLine(it);
@@ -2516,10 +2516,13 @@ static void buildSearch() {
   lv_keyboard_set_textarea(s_srchKb, s_srchTa);
 
   // RIGHT COLUMN — results, full height, five rows visible and scrollable past that.
+  // A 32 px strip above the list belongs to the status/"inside" label, permanently. It used to be
+  // drawn over row 0, so drilling into an artist put "Morgan Wallen" straight across the first
+  // result. 516 - 32 = 484 px is still five rows of 96 with 4 px to spare, so nothing is lost.
   s_srchList = lv_obj_create(pg);
   lv_obj_remove_style_all(s_srchList);
-  lv_obj_set_size(s_srchList, SRCH_RIGHT_W, SCREEN_H - SRCH_TOP - PAD_BOT);
-  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP);
+  lv_obj_set_size(s_srchList, SRCH_RIGHT_W, SCREEN_H - (SRCH_TOP + 32) - PAD_BOT);
+  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 32);
 
   s_srchStatus = label(pg, "Type a query.", &lv_font_montserrat_16, JB_TEXT_DIM);
   lv_label_set_long_mode(s_srchStatus, LV_LABEL_LONG_WRAP);
