@@ -34,6 +34,8 @@
 #include "core/ui/art_cache.h"
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
+#include "core/spotify.h"
+#include "core/smapi.h"      // smapi::cstr — never %s a String that came off the network
 #include "core/room_status.h"   // per-room volume + play state for the Rooms page (netTask polls)
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
@@ -51,6 +53,7 @@ LV_FONT_DECLARE(lv_font_clock_120);
 #define ICON_HEART "\xEE\x83\xB2"   // U+E0F2
 #define ICON_RADIO "\xEE\x85\x82"   // U+E142
 #define ICON_SPEAKER "\xEE\x85\xA6" // U+E166
+#define ICON_SEARCH "\xEE\x85\x91"  // U+E151
 
 // --- Geometry, from the design's device shell -------------------------------------------------
 // Rail widened from the design's 66 px and its 48 px items scaled 1.5x to 72 px. A DELIBERATE
@@ -102,8 +105,8 @@ static lv_obj_t *s_provisioning = nullptr;
 // the LV_MEM_SIZE pool.
 // PAGE_FAVORITES is the Sonos favourites list (FV:2) — it was called "Radio" until it acquired a
 // neighbour that actually is radio. PAGE_RADIO is Amazon Prime Stations, browsed from the SD cache.
-enum Page { PAGE_NOW = 0, PAGE_FAVORITES = 1, PAGE_RADIO = 2, PAGE_ROOMS = 3, PAGE_SETTINGS = 4,
-            PAGE_COUNT = 5 };
+enum Page { PAGE_NOW = 0, PAGE_FAVORITES = 1, PAGE_RADIO = 2, PAGE_SEARCH = 3, PAGE_ROOMS = 4,
+            PAGE_SETTINGS = 5, PAGE_COUNT = 6 };
 static lv_obj_t *s_page[PAGE_COUNT]     = {nullptr};
 static lv_obj_t *s_railBtn[PAGE_COUNT]  = {nullptr};
 static lv_obj_t *s_railIcon[PAGE_COUNT] = {nullptr};
@@ -333,6 +336,7 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
 // the pages they switch to.
 static void showPage(int page);
 static void railCb(lv_event_t *e);
+static void radioOnEnter();
 
 static void buildRail(lv_obj_t *scr) {
   lv_obj_t *rail = panel(scr, RAIL_W, SCREEN_H, JB_SCREEN_BG, 0);
@@ -341,14 +345,14 @@ static void buildRail(lv_obj_t *scr) {
   lv_obj_t *line = panel(scr, 1, SCREEN_H, JB_SCREEN_LINE, 0);
   lv_obj_align(line, LV_ALIGN_TOP_LEFT, RAIL_W, 0);
 
-  // Now / Favorites / Radio / Rooms / Settings. Favorites and Radio use the real Lucide glyphs;
+  // Now / Favorites / Radio / Search / Rooms / Settings. Favorites and Radio use the real Lucide glyphs;
   // the rest stay on LVGL's built-in symbols, which already match well enough that subsetting more
   // of Lucide would be flash spent for no gain.
-  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO,
+  const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO, ICON_SEARCH,
                                    ICON_SPEAKER, LV_SYMBOL_SETTINGS};
   const lv_font_t *iconFonts[PAGE_COUNT] = {&lv_font_montserrat_28, &lv_font_lucide_28,
                                             &lv_font_lucide_28, &lv_font_lucide_28,
-                                            &lv_font_montserrat_28};
+                                            &lv_font_lucide_28, &lv_font_montserrat_28};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
@@ -488,6 +492,7 @@ static void showPage(int page) {
                                   lv_color_hex(i == page ? JB_ACCENT : JB_TEXT_DIM), 0);
     }
   }
+  if (page == PAGE_RADIO) radioOnEnter();
 }
 
 static void railCb(lv_event_t *e) {
@@ -1311,6 +1316,23 @@ static void soundCb(lv_event_t *e) {
 static lv_obj_t *s_hourLbl = nullptr, *s_radioMeta = nullptr;
 static lv_obj_t *s_amzStatus = nullptr, *s_amzBtn = nullptr, *s_amzBtnLbl = nullptr;
 static lv_obj_t *s_linkPanel = nullptr, *s_linkQr = nullptr, *s_linkMsg = nullptr;
+static lv_obj_t *s_spStatus = nullptr, *s_spBtn = nullptr, *s_spBtnLbl = nullptr;
+static lv_obj_t *s_linkTitle = nullptr;
+
+// The QR overlay is shared by both services — it is one panel, one QR widget and one message, and
+// which service is mid-ceremony is the only difference. amazon:: and spotify:: expose the same
+// five-state ceremony in the same order, so the tick below drives whichever this points at rather
+// than carrying two near-identical copies of it.
+enum class LinkSvc : uint8_t { Amazon, Spotify };
+static LinkSvc s_linkWhich = LinkSvc::Amazon;
+
+static uint8_t  svcState()   { return s_linkWhich == LinkSvc::Amazon ? (uint8_t)amazon::linkState()
+                                                                     : (uint8_t)spotify::linkState(); }
+static String   svcUrl()     { return s_linkWhich == LinkSvc::Amazon ? amazon::linkUrl() : spotify::linkUrl(); }
+static uint16_t svcLeft()    { return s_linkWhich == LinkSvc::Amazon ? amazon::linkSecondsLeft()
+                                                                     : spotify::linkSecondsLeft(); }
+static void     svcCancel()  { if (s_linkWhich == LinkSvc::Amazon) amazon::linkCancel(); else spotify::linkCancel(); }
+static const char *svcName() { return s_linkWhich == LinkSvc::Amazon ? "Amazon" : "Spotify"; }
 
 static void hourStep(int delta) {
   int h = (int)settingsRadioRefreshHour() + delta;
@@ -1334,9 +1356,28 @@ static void scrollSoundCb(lv_event_t *e) {
 // read off a panel, let alone typed. Everything blocking happens on amazon's own task; this only
 // starts it and reflects state.
 static void linkCloseCb(lv_event_t *) {
-  amazon::linkCancel();
+  svcCancel();
   lv_obj_add_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
 }
+// Opening the overlay is what selects the service, so every read below it goes to the right one.
+static void linkOpen(LinkSvc which) {
+  s_linkWhich = which;
+  lv_label_set_text_fmt(s_linkTitle, "Link %s", svcName());
+  lv_obj_remove_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text_fmt(s_linkMsg, "Requesting a code from %s...", svcName());
+}
+
+static void spBtnCb(lv_event_t *) {
+  if (spotify::linked()) {                // second press unlinks
+    spotify::unlink();
+    uiSoundPlay(UiSound::Confirm);
+    return;
+  }
+  uiSoundPlay(UiSound::Tick);
+  spotify::linkStart();
+  linkOpen(LinkSvc::Spotify);
+}
+
 static void amzBtnCb(lv_event_t *) {
   if (amazon::linked()) {                 // second press unlinks
     amazon::unlink();
@@ -1345,8 +1386,7 @@ static void amzBtnCb(lv_event_t *) {
   }
   uiSoundPlay(UiSound::Tick);
   amazon::linkStart();
-  lv_obj_remove_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
-  lv_label_set_text(s_linkMsg, "Requesting a code from Amazon...");
+  linkOpen(LinkSvc::Amazon);
 }
 
 static void refreshNowCb(lv_event_t *) {
@@ -1428,10 +1468,38 @@ static uint32_t s_artGen = 0;                   // last artcache generation we p
 static lv_obj_t *s_azStrip = nullptr;           // A-Z jump strip (level 2 only)
 static lv_obj_t *s_searchBtn = nullptr, *s_searchTa = nullptr, *s_radioKb = nullptr;
 static std::vector<radiocache::Hit> s_searchHits;
+
+// SOURCE TOGGLE. Amazon stations or Spotify — one at a time, never blended. A merged "all your
+// radio" list would mix two id spaces, two artwork hosts and two playback paths behind rows that
+// look identical, and the first bug report would be "why did tapping this one do nothing".
+// Persisted, defaulting to Amazon so an existing device is unchanged.
+static lv_obj_t *s_srcBtn[2] = {nullptr};
+static uint8_t   s_radioSrc = 0;                    // 0 = Amazon, 1 = Spotify
+static std::vector<spotify::Item> s_spItems;
+static uint32_t  s_spShownGen = 0;
+// Set while THIS page is waiting for a browse it started. The search page uses the same browse
+// slot, so "has a browse finished?" is not the same question as "has MY browse finished?" — a
+// drill-down from Search left the slot in Done, the Radio page read that as its own root browse
+// arriving, and painted the artist's 50 rows into a list it had never laid out. Hence a flag
+// rather than inspecting browseState().
+static bool s_spAwaiting = false;
+static String    s_spTitle;                          // container we descended into, "" at the root
+static String    s_spCurId = "root";                 // what the rows on screen are showing
+// The container we descended INTO, kept whole rather than as an id because playing it needs its
+// Kind. Empty at the root. When it is playable — an album or a playlist — the list gets a synthetic
+// "Play all" first row, which is why the indices below carry an offset.
+static spotify::Item s_spCurItem;
+static bool          s_spPlayAll = false;
 static String   s_searchPending;                // last text seen, debounced in uiTick
 static uint32_t s_searchAt = 0;
 
 static void radioShowGenres();
+static String artKey(const String &id, const String &url);
+static void radioShowSpotify(String id, String title);
+static void radioSrcPaint();
+static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
+                          lv_event_cb_t cb, const String &subtitle = "Prime Station");
+static void radioPaintArt();
 static void radioShowStations(int genreIdx);
 static void radioPaintArt();
 static void radioShowSearch();
@@ -1458,7 +1526,8 @@ static void radioGenreCb(lv_event_t *e) {
 }
 static void radioBackCb(lv_event_t *) {
   uiSoundPlay(UiSound::Tick);
-  radioShowGenres();
+  if (s_radioSrc == 1) radioShowSpotify("root", "");
+  else                 radioShowGenres();
 }
 
 // Detents: fire when the CENTRED ROW CHANGES, never on scroll events — those arrive far more often
@@ -1510,7 +1579,40 @@ static void radioClear() {
 // Fill in any tile whose artwork has finished decoding. Only rows near the viewport are asked for,
 // so a 50-row genre queues a handful of fetches rather than fifty — the cache is bounded and would
 // evict the early ones before they were ever seen anyway.
+// artcache::keyOf() is AMAZON-SHAPED: it pulls the station key out of "catalog/stations/<KEY>/#chunk-"
+// and returns "" for anything else — and artcache::get() drops an empty key without even queueing a
+// fetch. So every Spotify row silently requested no artwork at all, for every item type, which is
+// why the 300 px rewrite in art_cache's thumbUrl() looked like it worked and never ran.
+//
+// Amazon still wants keyOf: its art URL is not stable (the #chunk- is minted per response) but the
+// station KEY is, so keying on it survives a re-crawl. Spotify's art URL is stable and its id is
+// not station-shaped, so it hashes the URL — which is what the Favourites page already does.
+static String artKey(const String &id, const String &url) {
+  const String k = artcache::keyOf(id);
+  return k.length() ? k : artcache::keyOfUrl(url);
+}
+
+// Spotify rows on the Radio page are not in s_radioStations, so radioPaintArt() below skips them
+// entirely — it walks the Amazon station list. This is the same viewport pass over s_spItems.
+static void radioSpotPaintArt() {
+  if (s_spItems.empty() || s_radioTiles.empty()) return;
+  const int32_t top = lv_obj_get_scroll_y(s_radioList);
+  const int32_t bot = top + lv_obj_get_height(s_radioList);
+  const size_t off = s_spPlayAll ? 1 : 0;
+  for (size_t i = off; i < s_radioTiles.size() && (i - off) < s_spItems.size(); i++) {
+    lv_obj_t *tile = s_radioTiles[i];
+    const spotify::Item &row = s_spItems[i - off];
+    if (!tile || row.artUrl.isEmpty()) continue;
+    const int32_t y = lv_obj_get_y(tile);
+    if (y + 200 < top || y - 200 > bot) continue;
+    const lv_image_dsc_t *d = artcache::get(artKey(row.id, row.artUrl), row.artUrl);
+    if (!d || lv_image_get_src(tile) == d) continue;
+    lv_image_set_src(tile, d);
+  }
+}
+
 static void radioPaintArt() {
+  if (s_radioSrc == 1) { radioSpotPaintArt(); return; }
   if (s_radioLevel != 1 || s_radioTiles.empty()) return;
   const int32_t top = lv_obj_get_scroll_y(s_radioList);
   const int32_t bot = top + lv_obj_get_height(s_radioList);
@@ -1534,7 +1636,194 @@ static void radioPaintArt() {
 // again — this keys on what is in the cache, not on a flag.
 static bool radioFlat() { return radiocache::genreCount() == 1; }
 
+// Play a Spotify row, or descend into it. Tracks and stations (artist radio) have a URI we can
+// construct; albums, artists and playlists do NOT — and do not need one, because they browse into
+// tracks. So a container is a drill-down, not a dead end, and nothing here has to guess an
+// x-rincon-cpcontainer prefix.
+// WHAT A ROW TAP DOES, decided by KIND and never by "can playUri() build something".
+//
+// Those were the same question until albums and playlists became playable, and then they silently
+// diverged: a playlist suddenly had a URI, so tapping it PLAYED instead of opening, and the
+// container could no longer be browsed at all. Starting a whole album or playlist is the "Play all"
+// row's job; tapping the container itself opens it, as it always did.
+static bool spotifyRowPlays(const spotify::Item &it) {
+  return it.kind == spotify::Item::Kind::Track || it.kind == spotify::Item::Kind::Station;
+}
+
+// "Playlist", "Album . Queen", "Station" — the second line of a row. Shared so the Search page and
+// the Radio page cannot drift into describing the same item differently.
+static String spotifyKindLine(const spotify::Item &it) {
+  const char *kind = "";
+  switch (it.kind) {
+    case spotify::Item::Kind::Track:    kind = "Track";    break;
+    case spotify::Item::Kind::Artist:   kind = "Artist";   break;
+    case spotify::Item::Kind::Album:    kind = "Album";    break;
+    case spotify::Item::Kind::Playlist: kind = "Playlist"; break;
+    case spotify::Item::Kind::Station:  kind = "Station";  break;
+    default:                            kind = "";         break;
+  }
+  // ASCII separator on purpose: the built-in Montserrat has no middle-dot glyph (issue #21).
+  if (it.subtitle.length() && kind[0]) return String(kind) + " " JB_DASH " " + it.subtitle;
+  if (kind[0])                         return String(kind);
+  return it.subtitle;
+}
+
+static void radioSpotCb(lv_event_t *e) {
+  int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_spPlayAll) {
+    if (i == 0) {                       // the synthetic first row: play the container itself
+      const String uri = spotify::playUri(s_spCurItem);
+      if (uri.isEmpty()) return;
+      uiSoundPlay(UiSound::Confirm);
+      if (stateLock()) {
+        g_pending.playUri  = uri;
+        g_pending.playMeta = spotify::playMeta(s_spCurItem);
+
+        stateUnlock();
+      }
+      return;
+    }
+    --i;                                // every other row sits one lower than its item
+  }
+  if (i < 0 || i >= (int)s_spItems.size()) return;
+  // A COPY, not a reference: radioShowSpotify() clears s_spItems before it uses the id, so a
+  // reference into the vector dangles and the id reaches the SOAP body as an empty string. That is
+  // what "flashes text then goes blank" was — the request went out with no id and Spotify answered
+  // "Action not found." The search page's equivalent already copies, which is why drilling down
+  // worked there and not here.
+  const spotify::Item it = s_spItems[i];
+  if (spotifyRowPlays(it)) {
+    const String uri = spotify::playUri(it);
+    if (uri.isEmpty()) return;
+    uiSoundPlay(UiSound::Confirm);
+    if (stateLock()) {
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(it);
+
+      stateUnlock();
+    }
+    return;
+  }
+  uiSoundPlay(UiSound::Tick);
+  radioShowSpotify(it.id, it.title);
+  s_spCurItem = it;              // AFTER: radioShowSpotify() resets this when it goes to the root
+}
+
+// BY VALUE, deliberately. This clears s_spItems, which is where callers get these strings from —
+// taking them by reference means the arguments can be destroyed halfway through the function.
+static void radioShowSpotify(String id, String title) {
+  s_spCurId = id;
+  if (id == "root") s_spCurItem = spotify::Item {};   // nothing to "play all" at the root
+  radioClear();
+  s_radioLevel = (id == "root") ? 0 : 1;
+  s_spTitle    = title;
+  s_spItems.clear();
+  lv_obj_add_flag(s_azStrip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_radioKb, LV_OBJ_FLAG_HIDDEN);
+  radioLayout(false, false);
+  if (s_radioLevel == 0) lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  else                   lv_obj_remove_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(s_radioTitle, title.length() ? title.c_str() : "Radio");
+  lv_obj_remove_flag(s_radioList, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scroll_snap_y(s_radioList, LV_SCROLL_SNAP_NONE);
+
+  if (!spotify::linked()) {
+    lv_label_set_text(s_radioStatus, "Link Spotify in Settings to browse it here.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_label_set_text(s_radioStatus, "Loading...");
+  lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  s_spShownGen = spotify::browseGen();
+  s_spAwaiting = true;
+  spotify::browseStart(id);
+}
+
+// Repaint when the worker finishes. Rows reuse radioRow(), so artwork, the scroll detents and the
+// pool discipline are the Amazon page's, already proven.
+static void radioSpotPaint() {
+  radioClear();
+  spotify::browseResults(s_spItems);
+  // "Play all" is built even when the listing is EMPTY. A playlist we could not enumerate is still
+  // a playlist the speaker can play — the container URI does not depend on having read its tracks —
+  // and reporting "nothing here" while hiding the one control that would have worked is the worst
+  // of both. The empty case is now a playable row plus an explanation, not a dead end.
+  LOG.printf("[ui    ] radio spotify: %u items, container=%s\n", (unsigned)s_spItems.size(),
+             s_spCurItem.id.length() ? smapi::cstr(s_spCurItem.id) : "(root)");
+  if (s_spItems.empty()) {
+    lv_label_set_text(s_radioStatus, "No tracks listed. Play all still works.");
+    lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  }
+  // A playlist or an album is a thing you usually want to START, not pick through. Offered as the
+  // first row rather than as new chrome: it scrolls with everything else, it is the same 96 px
+  // target, and it costs the page no layout.
+  s_spPlayAll = spotify::playUri(s_spCurItem).length() > 0;
+  const size_t off = s_spPlayAll ? 1 : 0;
+  if (s_spPlayAll)
+    radioRow(0, String("Play all"), s_spCurItem.id, s_spCurItem.artUrl, radioSpotCb,
+             s_spCurItem.title);
+  for (size_t i = 0; i < s_spItems.size(); i++)
+    radioRow(i + off, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb,
+             spotifyKindLine(s_spItems[i]));
+  radioPaintArt();
+}
+
+// Arriving on the page must show SOMETHING for the active source. Neither branch was covered: the
+// Spotify side only ever started a browse from the source toggle, and the Amazon side only
+// repainted when the cache generation changed — so a page whose list had been cleared (by a stale
+// paint, or by switching sources) stayed empty until something else happened to change.
+static void radioOnEnter() {
+  if (!s_radioList) return;
+  // Ask the WIDGET, not the model. s_spItems can be full while the list is empty — radioClear()
+  // runs from several paths (switching source, descending, the Amazon repaint) and empties the
+  // list without touching the vector, so "worked and then stopped showing anything" is exactly the
+  // state where those two disagree. Re-browse whatever level we were on rather than jumping to the
+  // root, so coming back to the page does not lose your place.
+  const bool listEmpty = (lv_obj_get_child_count(s_radioList) == 0);
+  if (s_radioSrc == 1) {
+    // A browse this page started can be CONSUMED BY THE OTHER PAGE: the Search page's drill-down
+    // reads the same slot, so if Radio was mid-browse when the user switched to Search, the answer
+    // lands while Search is the one ticking, Search's gate ignores it, the gen still moves on, and
+    // Radio comes back "awaiting" a result that will never arrive. That is a page that refuses to
+    // load with no error. If nothing is actually in flight, stop waiting and ask again.
+    if (s_spAwaiting && spotify::browseState() != spotify::SearchState::Running) {
+      LOG.println("[ui    ] radio spotify: was awaiting a browse that already landed elsewhere — re-asking");
+      s_spAwaiting = false;
+    }
+    LOG.printf("[ui    ] radio enter: src=spotify listEmpty=%d awaiting=%d state=%d cur=%s\n",
+               (int)listEmpty, (int)s_spAwaiting, (int)spotify::browseState(), smapi::cstr(s_spCurId));
+    if (listEmpty && !s_spAwaiting) radioShowSpotify(s_spCurId, s_spTitle);
+  } else if (listEmpty) {
+    radioShowGenres();
+  }
+}
+
+static void radioSrcCb(lv_event_t *e) {
+  const int src = (int)(intptr_t)lv_event_get_user_data(e);
+  if (src == s_radioSrc) return;
+  uiSoundPlay(UiSound::Tick);
+  s_radioSrc = (uint8_t)src;
+  settingsSetRadioSource(s_radioSrc);
+  radioSrcPaint();
+  if (s_radioSrc == 1) radioShowSpotify("root", "");
+  else                 radioShowGenres();
+}
+
+static void radioSrcPaint() {
+  for (int i = 0; i < 2; i++) {
+    if (!s_srcBtn[i]) continue;
+    const bool on = (i == s_radioSrc);
+    lv_obj_set_style_bg_color(s_srcBtn[i], lv_color_hex(on ? JB_ACCENT : JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_srcBtn[i], 0),
+                                lv_color_hex(on ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
+  }
+}
+
 static void radioShowGenres() {
+  if (s_radioSrc == 1) { radioShowSpotify("root", ""); return; }
   if (radioFlat()) { radioShowStations(0); return; }
   radioClear();
   s_radioLevel = 0; s_radioGenre = -1;
@@ -1571,7 +1860,7 @@ static void radioShowGenres() {
 // One carousel row. `artUrl` empty means "show art only if it is already decoded" — used by search
 // results, whose flat index deliberately omits the art URL to keep all.tsv small.
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
-                          lv_event_cb_t cb) {
+                          lv_event_cb_t cb, const String &subtitle) {
   const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
   lv_obj_t *row = lv_button_create(s_radioList);
   lv_obj_remove_style_all(row);
@@ -1590,14 +1879,18 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
   lv_obj_center(img);
   lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
   s_radioTiles.push_back(img);
-  const lv_image_dsc_t *d = artcache::get(artcache::keyOf(id), artUrl);
+  const lv_image_dsc_t *d = artcache::get(artKey(id, artUrl), artUrl);
   if (d) lv_image_set_src(img, d);
 
   lv_obj_t *t = label(row, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
   lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(t, w - 120);
+  lv_obj_set_size(t, w - 120, 28);     // ONE line: LONG_DOT needs a fixed height or it wraps
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
-  lv_obj_t *sub = label(row, "Prime Station", &lv_font_montserrat_12, JB_TEXT_DIM);
+  // The second line said "Prime Station" for every row, on both sources — right for Amazon, which
+  // is all this page ever showed, and wrong for every Spotify playlist, album and artist.
+  lv_obj_t *sub = label(row, subtitle.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(sub, w - 120);
   lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
   return row;
 }
@@ -1755,6 +2048,27 @@ static void buildRadio() {
 
   s_radioTitle = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
   lv_obj_align(s_radioTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
+
+  // Source segmented control, top right — out of the way of the title and the back button.
+  {
+    const char *name[2] = {"Amazon", "Spotify"};
+    // 64 px of clearance on the right: s_searchBtn is TOP_RIGHT-aligned and 56 px wide, and without
+    // this the Spotify pill sits underneath it.
+    const lv_coord_t w = 140, x0 = SCREEN_W - RAIL_W - PAD_X * 2 - 64 - (w * 2 + 8);
+    for (int i = 0; i < 2; i++) {
+      s_srcBtn[i] = lv_button_create(pg);
+      lv_obj_remove_style_all(s_srcBtn[i]);
+      lv_obj_set_size(s_srcBtn[i], w, 44);
+      lv_obj_align(s_srcBtn[i], LV_ALIGN_TOP_LEFT, x0 + i * (w + 8), PAD_TOP + 48);
+      lv_obj_set_style_radius(s_srcBtn[i], LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_bg_opa(s_srcBtn[i], LV_OPA_COVER, 0);
+      lv_obj_add_event_cb(s_srcBtn[i], radioSrcCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+      lv_obj_t *l = label(s_srcBtn[i], name[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+      lv_obj_center(l);
+    }
+    s_radioSrc = settingsRadioSource() ? 1 : 0;
+    radioSrcPaint();
+  }
 
   s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
   lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
@@ -1915,6 +2229,328 @@ static lv_obj_t *ssDropdown(lv_obj_t *parent, const char *opts, uint16_t sel,
   lv_obj_set_style_text_font(list, &lv_font_montserrat_16, 0);
   lv_obj_set_style_bg_color(list, lv_color_hex(JB_ACCENT), LV_PART_SELECTED | LV_STATE_CHECKED);
   return d;
+}
+
+
+// --- Search (Spotify) ----------------------------------------------------------------------------
+// The one page on this device that reaches a music service live rather than out of a cache. Every
+// call it makes is blocking HTTPS, so nothing here calls spotify:: except through the async wrapper
+// (spotify.h): searchStart() hands the query to a worker, and this page watches searchGen().
+// TWO-PANE, because this screen is landscape and the alternative wastes it. A full-width keyboard
+// is 880 px of a 600 px-tall screen spent on something that needs ~500, with the results stacked
+// underneath where only one fits. Side by side, the keyboard is permanent, the results are
+// permanent, and there is no mode to enter or dismiss gesture to discover — which on a
+// wall-mounted panel matters more than the row width it costs.
+//
+// The numbers: content is 880 x 600 (1024 less the 96 px rail and two 30 px gutters). Left column
+// 484 for field + chips + keyboard; right column 380 for results, 516 px tall = five rows of 96.
+// Split keyboards on phones exist for THUMB REACH, which is not the constraint here — this is
+// touched with an index finger by someone standing at a wall — so the split is about area, not
+// ergonomics, and the keyboard keeps its full single-block layout.
+static const lv_coord_t SRCH_LEFT_W  = 484;
+static const lv_coord_t SRCH_RIGHT_X = 500;
+static const lv_coord_t SRCH_RIGHT_W = SCREEN_W - RAIL_W - PAD_X * 2 - SRCH_RIGHT_X;   // 380
+static const lv_coord_t SRCH_TOP     = PAD_TOP + 44;
+
+static lv_obj_t *s_srchTa = nullptr, *s_srchKb = nullptr, *s_srchList = nullptr;
+static lv_obj_t *s_srchStatus = nullptr;
+static lv_obj_t *s_srchChip[5] = {nullptr};
+static std::vector<spotify::Item> s_srchItems;
+static std::vector<lv_obj_t *>    s_srchTiles;   // parallel to s_srchItems, for artwork
+static spotify::Category s_srchCat = spotify::Category::All;
+static uint32_t s_srchShownGen = 0;
+// Search-as-you-type, debounced. The async wrapper already replaces a pending query rather than
+// queueing (spotify.h), so firing on a pause is safe — the in-flight answer to a stale prefix is
+// dropped rather than shown. 400 ms is long enough that a normal typing rhythm produces one call
+// per word, not one per letter, and three characters is the floor: "th" matches everything.
+static uint32_t s_srchTypedMs = 0;
+static bool     s_srchTyped   = false;
+// Its OWN artcache generation, not the Radio page's s_artGen: that one is consumed (and reset) by
+// the Radio block in uiTick, so sharing it would mean whichever page ticked first swallowed the
+// change and the other never repainted its tiles.
+static uint32_t s_srchArtGen = 0;
+
+// Set while showing the contents of a container rather than search results. Only for the status
+// line — the rows themselves are the same list either way.
+static String        s_srchInside;
+static spotify::Item s_srchInsideItem;    // kept whole: playing it needs its Kind, not just its id
+static bool          s_srchPlayAll = false;
+static uint32_t      s_srchBrowseGen = 0;
+static bool          s_srchAwaiting  = false;   // a drill-down THIS page started is in flight
+
+// A KEYMAP FOR SEARCHING, not for writing. The stock layout spends a row-and-a-bit on things a
+// query never contains — $ % ^ & * and the mode machinery to reach them — and carries an X that,
+// now the keyboard is permanent, has nowhere to close to. This drops all of it: 26 letters, a
+// digits/punctuation mode behind one key, space, backspace, submit.
+//
+// It does not make the keyboard SHORTER (still four rows in the same 396 px); it makes the keys
+// BIGGER and removes the ways to get lost. lv_keyboard_set_map() replaces a layout wholesale, and
+// because the stock event handler dispatches mode switches on the key TEXT — "1#" and "abc" — the
+// built-in TEXT_LOWER and SPECIAL slots are overridden rather than LV_KEYBOARD_MODE_USER_1, so the
+// toggle works with no custom event callback at all.
+static const lv_buttonmatrix_ctrl_t W1 = LV_BUTTONMATRIX_CTRL_WIDTH_1;
+static const lv_buttonmatrix_ctrl_t W2 = LV_BUTTONMATRIX_CTRL_WIDTH_2;
+static const lv_buttonmatrix_ctrl_t W3 = LV_BUTTONMATRIX_CTRL_WIDTH_3;
+static const lv_buttonmatrix_ctrl_t W6 = LV_BUTTONMATRIX_CTRL_WIDTH_6;
+
+static const char *const kSrchKbLower[] = {
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+    "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
+    "1#", " ", LV_SYMBOL_OK, ""};
+static const lv_buttonmatrix_ctrl_t kSrchKbLowerCtrl[] = {
+    W1, W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W1, W1, W1, W1, W1, W1, W1, W2,
+    W2, W6, W2};
+
+// Digits plus the punctuation that actually turns up in titles — "blink-182", "Guns N' Roses",
+// "Simon & Garfunkel". Three rows rather than four, so the keys are taller here than in letters;
+// that is a visible difference between modes and it is the right trade for bigger targets.
+static const char *const kSrchKbNum[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "-", "'", "&", ".", ",", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", " ", LV_SYMBOL_OK, ""};
+static const lv_buttonmatrix_ctrl_t kSrchKbNumCtrl[] = {
+    W1, W1, W1, W1, W1, W1, W1, W1, W1, W1,
+    W2, W2, W2, W2, W2, W2,
+    W2, W6, W3};
+
+static const char *kSrchChipName[5] = {"All", "Tracks", "Artists", "Albums", "Playlists"};
+static const spotify::Category kSrchChipCat[5] = {
+    spotify::Category::All, spotify::Category::Tracks, spotify::Category::Artists,
+    spotify::Category::Albums, spotify::Category::Playlists};
+
+static void srchPaintRows();
+
+static void srchRun(unsigned minLen) {
+  const String q(lv_textarea_get_text(s_srchTa));
+  s_srchTyped = false;                        // whatever is on screen now answers this text
+  if (q.length() < minLen) return;
+  spotify::searchStart(q, s_srchCat);
+  lv_label_set_text(s_srchStatus, "Searching...");
+  lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void srchChipPaint() {
+  for (int i = 0; i < 5; i++) {
+    const bool on = (kSrchChipCat[i] == s_srchCat);
+    lv_obj_set_style_bg_color(s_srchChip[i],
+                              lv_color_hex(on ? JB_ACCENT : JB_SCREEN_ELEV_2), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_srchChip[i], 0),
+                                lv_color_hex(on ? JB_ACCENT_INK : JB_TEXT_MUTED), 0);
+  }
+}
+
+static void srchRunIfReady() { srchRun(2); }   // an explicit submit: two letters is enough
+
+static void srchChipCb(lv_event_t *e) {
+  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (i < 0 || i >= 5 || kSrchChipCat[i] == s_srchCat) return;
+  uiSoundPlay(UiSound::Tick);
+  s_srchCat = kSrchChipCat[i];
+  srchChipPaint();
+  srchRunIfReady();          // re-ask in the new category rather than making them retype
+}
+
+// Play a result. Only tracks have a URI we can construct — see spotify.h — so the others say so
+// instead of sending the speaker something that would come back as a UPnP 402.
+// Tracks and stations play; everything else DESCENDS. An album browses to its tracks, an artist to
+// its top tracks, its radio and its albums — so a container is a drill-down, not the dead end this
+// used to report. Descending reuses the search worker's browse slot and repaints the same list, so
+// the page needs no second mode: the query stays in the box, and the next search replaces the rows.
+static void srchRowCb(lv_event_t *e) {
+  int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_srchPlayAll) {
+    if (i == 0) {                       // "Play all" — the container we drilled into
+      const String uri = spotify::playUri(s_srchInsideItem);
+      if (uri.isEmpty()) return;
+      uiSoundPlay(UiSound::Confirm);
+      if (stateLock()) {
+        g_pending.playUri  = uri;
+        g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
+
+        stateUnlock();
+      }
+      return;
+    }
+    --i;
+  }
+  if (i < 0 || i >= (int)s_srchItems.size()) return;
+  const spotify::Item it = s_srchItems[i];
+  if (spotifyRowPlays(it)) {
+    const String uri = spotify::playUri(it);
+    if (uri.isEmpty()) return;
+    uiSoundPlay(UiSound::Confirm);
+    if (stateLock()) {
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(it);
+
+      stateUnlock();
+    }
+    return;
+  }
+  uiSoundPlay(UiSound::Tick);
+  s_srchInside = it.title;
+  s_srchInsideItem = it;
+  s_srchBrowseGen = spotify::browseGen();
+  s_srchAwaiting  = true;
+  spotify::browseStart(it.id);
+  lv_label_set_text_fmt(s_srchStatus, "Opening %s...", smapi::cstr(it.title));
+  lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void srchPaintArt() {
+  if (s_srchTiles.empty()) return;
+  const size_t off = s_srchPlayAll ? 1 : 0;
+  for (size_t i = off; i < s_srchTiles.size() && (i - off) < s_srchItems.size(); i++) {
+    const spotify::Item &it = s_srchItems[i - off];
+    if (!s_srchTiles[i] || it.artUrl.isEmpty()) continue;
+    const lv_image_dsc_t *d = artcache::get(artKey(it.id, it.artUrl), it.artUrl);
+    if (d) lv_image_set_src(s_srchTiles[i], d);
+  }
+}
+
+// Draws whatever is in s_srchItems, whoever put it there — a search or a drill-down.
+static void srchPaintRows() {
+  // ⚠️ Clear the tile vector BEFORE lv_obj_clean(): removing children changes the scroll extent and
+  // fires LV_EVENT_SCROLL synchronously, so a callback can walk this vector mid-clean. That exact
+  // shape crashed the Radio page after five hours of uptime (CLAUDE.md).
+  s_srchTiles.clear();
+  lv_obj_clean(s_srchList);
+
+  const lv_coord_t w = SRCH_RIGHT_W, h = 88;
+
+  // Inside a playable container, the first row starts the whole thing. Same reasoning as the Radio
+  // page: an album or a playlist is usually something you want to START rather than pick through,
+  // and a row costs no layout. Everything after it sits one index lower than its item.
+  s_srchPlayAll = spotify::playUri(s_srchInsideItem).length() > 0;
+  const size_t off = s_srchPlayAll ? 1 : 0;
+  if (s_srchPlayAll) {
+    lv_obj_t *row = lv_button_create(s_srchList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, 0);
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_ACCENT), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_80, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)0);
+    lv_obj_t *t = label(row, "Play all", &lv_font_montserrat_22, JB_ACCENT_INK);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 24, -11);
+    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &lv_font_montserrat_12,
+                         JB_ACCENT_INK);
+    lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(sl, w - 48);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 24, 15);
+    s_srchTiles.push_back(nullptr);       // keeps tiles parallel to rows for the artwork pass
+  }
+
+  for (size_t i = 0; i < s_srchItems.size(); i++) {
+    const spotify::Item &it = s_srchItems[i];
+    lv_obj_t *row = lv_button_create(s_srchList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, (lv_coord_t)((i + off) * (h + 8)));
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)(i + off));
+
+    lv_obj_t *tile = panel(row, 64, 64, JB_SCREEN_ELEV_2, JB_R_MD);
+    lv_obj_align(tile, LV_ALIGN_LEFT_MID, 8, 0);
+    lv_obj_t *img = lv_image_create(tile);
+    lv_obj_set_size(img, 64, 64);
+    lv_obj_center(img);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    s_srchTiles.push_back(img);
+
+    lv_obj_t *t = label(row, it.title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(t, w - 88, 28);      // ONE line: LONG_DOT needs a fixed height or it wraps
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
+
+    const String sub = spotifyKindLine(it);
+    lv_obj_t *sl = label(row, sub.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(sl, w - 88);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80, 15);
+  }
+  srchPaintArt();
+}
+
+static void srchPaint() {
+  spotify::searchResults(s_srchItems);
+  s_srchInside = "";          // these rows answer the query again, not a container
+  s_srchAwaiting = false;
+  s_srchInsideItem = spotify::Item {};
+  srchPaintRows();
+}
+
+// The keyboard's tick runs the query. Its X has nowhere to close to now, so it CLEARS instead —
+// which is what an X on a search field means anyway. (A custom keymap could drop that key and the
+// mode switches outright; see the compact-layout note in plans/12.)
+static void srchTypedCb(lv_event_t *) { s_srchTyped = true; s_srchTypedMs = millis(); }
+
+static void srchTaCb(lv_event_t *e) {
+  if (lv_event_get_code(e) == LV_EVENT_READY) { srchRunIfReady(); return; }
+  lv_textarea_set_text(s_srchTa, "");
+  lv_label_set_text(s_srchStatus, "");
+  lv_obj_add_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void buildSearch() {
+  lv_obj_t *pg = s_page[PAGE_SEARCH];
+
+  // LEFT COLUMN — field, chips, keyboard. No page header: the accent-lit rail glyph says which page
+  // this is and the placeholder says what to type, and 44 px of header is a whole result row.
+  s_srchTa = lv_textarea_create(pg);
+  lv_textarea_set_one_line(s_srchTa, true);
+  lv_textarea_set_placeholder_text(s_srchTa, "Artist, song or album");
+  lv_obj_set_size(s_srchTa, SRCH_LEFT_W, 56);
+  lv_obj_align(s_srchTa, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP);
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_READY, nullptr);    // keyboard tick -> search
+  lv_obj_add_event_cb(s_srchTa, srchTaCb, LV_EVENT_CANCEL, nullptr);   // keyboard X    -> clear
+  lv_obj_add_event_cb(s_srchTa, srchTypedCb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // Five chips across 484: 92 wide on a 96 pitch. "Playlists" is the long one and fits at 16 px.
+  for (int i = 0; i < 5; i++) {
+    s_srchChip[i] = lv_button_create(pg);
+    lv_obj_remove_style_all(s_srchChip[i]);
+    lv_obj_set_size(s_srchChip[i], 92, 40);
+    lv_obj_align(s_srchChip[i], LV_ALIGN_TOP_LEFT, i * 96, SRCH_TOP + 68);
+    lv_obj_set_style_radius(s_srchChip[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_srchChip[i], LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(s_srchChip[i], srchChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_t *cl = label(s_srchChip[i], kSrchChipName[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_center(cl);
+  }
+  srchChipPaint();
+
+  // The keyboard takes the rest of the left column — ~396 px for four rows, so the keys are large,
+  // which is the right trade for a panel you touch standing up.
+  s_srchKb = lv_keyboard_create(pg);
+  lv_obj_set_size(s_srchKb, SRCH_LEFT_W, SCREEN_H - (SRCH_TOP + 120) - PAD_BOT);
+  lv_obj_align(s_srchKb, LV_ALIGN_TOP_LEFT, 0, SRCH_TOP + 120);
+  lv_keyboard_set_map(s_srchKb, LV_KEYBOARD_MODE_TEXT_LOWER, kSrchKbLower, kSrchKbLowerCtrl);
+  lv_keyboard_set_map(s_srchKb, LV_KEYBOARD_MODE_SPECIAL, kSrchKbNum, kSrchKbNumCtrl);
+  lv_keyboard_set_mode(s_srchKb, LV_KEYBOARD_MODE_TEXT_LOWER);
+  lv_keyboard_set_textarea(s_srchKb, s_srchTa);
+
+  // RIGHT COLUMN — results, full height, five rows visible and scrollable past that.
+  // A 32 px strip above the list belongs to the status/"inside" label, permanently. It used to be
+  // drawn over row 0, so drilling into an artist put "Morgan Wallen" straight across the first
+  // result. 516 - 32 = 484 px is still five rows of 96 with 4 px to spare, so nothing is lost.
+  s_srchList = lv_obj_create(pg);
+  lv_obj_remove_style_all(s_srchList);
+  lv_obj_set_size(s_srchList, SRCH_RIGHT_W, SCREEN_H - (SRCH_TOP + 32) - PAD_BOT);
+  lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 32);
+
+  s_srchStatus = label(pg, "Type a query.", &lv_font_montserrat_16, JB_TEXT_DIM);
+  lv_label_set_long_mode(s_srchStatus, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_srchStatus, SRCH_RIGHT_W);
+  lv_obj_align(s_srchStatus, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 8);
 }
 
 static void buildSettings() {
@@ -2161,6 +2797,33 @@ static void buildSettings() {
     lv_obj_align(sn, LV_ALIGN_TOP_LEFT, 0, Y + 400);
   }
 
+  // --- Spotify account -------------------------------------------------------------------------
+  // Below the screensaver block, which ends near PAD_TOP + 1100; the page scrolls.
+  {
+    const lv_coord_t Y = PAD_TOP + 1160;
+    lv_obj_t *sl = label(pg, "Spotify (for Search)", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_align(sl, LV_ALIGN_TOP_LEFT, 0, Y);
+    s_spStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+    lv_obj_align(s_spStatus, LV_ALIGN_TOP_LEFT, 0, Y + 28);
+    lv_obj_t *sh = label(pg,
+        "Browses and searches with an account this device links for itself. Playback still uses\n"
+        "the Spotify account linked in the Sonos app, so the two need not match.",
+        &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_align(sh, LV_ALIGN_TOP_LEFT, 0, Y + 56);
+
+    s_spBtn = lv_button_create(pg);
+    lv_obj_remove_style_all(s_spBtn);
+    lv_obj_set_size(s_spBtn, 200, 52);
+    lv_obj_align(s_spBtn, LV_ALIGN_TOP_LEFT, 400, Y - 4);
+    lv_obj_set_style_radius(s_spBtn, JB_R_MD, 0);
+    lv_obj_set_style_bg_opa(s_spBtn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_spBtn, lv_color_hex(JB_ACCENT), 0);
+    lv_obj_set_style_bg_opa(s_spBtn, LV_OPA_80, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(s_spBtn, spBtnCb, LV_EVENT_CLICKED, nullptr);
+    s_spBtnLbl = label(s_spBtn, "Link account", &lv_font_montserrat_16, JB_ACCENT_INK);
+    lv_obj_center(s_spBtnLbl);
+  }
+
   s_amzBtn = lv_button_create(pg);
   lv_obj_remove_style_all(s_amzBtn);
   lv_obj_set_size(s_amzBtn, 200, 52);
@@ -2177,8 +2840,8 @@ static void buildSettings() {
   lv_obj_align(s_linkPanel, LV_ALIGN_TOP_LEFT, -PAD_X, -PAD_TOP);
   lv_obj_add_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
 
-  lv_obj_t *lt = label(s_linkPanel, "Link Amazon Music", &lv_font_montserrat_28, JB_TEXT);
-  lv_obj_align(lt, LV_ALIGN_TOP_MID, 0, 40);
+  s_linkTitle = label(s_linkPanel, "Link account", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_align(s_linkTitle, LV_ALIGN_TOP_MID, 0, 40);
 
   s_linkQr = lv_qrcode_create(s_linkPanel);
   lv_qrcode_set_size(s_linkQr, 300);
@@ -2640,6 +3303,7 @@ void uiInit() {
   buildTransport();
   buildFavourites();
   buildRadio();
+  buildSearch();
   buildRooms();
   buildSettings();
   buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
@@ -2953,6 +3617,46 @@ void uiTick() {
     }
   }
 
+  if (s_cur == PAGE_SEARCH) {
+    if (s_srchTyped && (millis() - s_srchTypedMs) >= 400) srchRun(3);
+
+    // A drill-down lands in the BROWSE slot, not the search slot, and paints the same rows.
+    const uint32_t bgen = spotify::browseGen();
+    // Only a browse THIS page started: the slot is shared with the Radio page, and a Radio browse
+    // landing while s_srchInside is still set would repaint Search with Radio's rows.
+    if (s_srchAwaiting && bgen != s_srchBrowseGen && s_srchInside.length()) {
+      s_srchBrowseGen = bgen;
+      s_srchAwaiting  = false;
+      spotify::browseResults(s_srchItems);
+      srchPaintRows();
+      if (s_srchItems.empty()) lv_label_set_text_fmt(s_srchStatus, "%s is empty.", smapi::cstr(s_srchInside));
+      else                     lv_label_set_text(s_srchStatus, smapi::cstr(s_srchInside));
+      lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    const uint32_t gen = spotify::searchGen();
+    if (gen != s_srchShownGen) {
+      s_srchShownGen = gen;
+      srchPaint();
+      const size_t n = s_srchItems.size();
+      if (n) lv_obj_add_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+      else {
+        lv_label_set_text(s_srchStatus, "Nothing found.");
+        lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+      }
+    } else if (spotify::searchState() == spotify::SearchState::Failed && s_srchItems.empty()) {
+      lv_label_set_text(s_srchStatus,
+                        spotify::linked() ? "Search failed. Check the network."
+                                          : "Link Spotify in Settings to search.");
+      lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Artwork arrives after the rows, exactly as the Radio tiles do.
+    if (artcache::generation() != s_srchArtGen) {
+      s_srchArtGen = artcache::generation();
+      srchPaintArt();
+    }
+  }
+
   if (s_cur == PAGE_SETTINGS && s_amzStatus) {
     static amazon::LinkState shownState = (amazon::LinkState)0xFF;
     static bool shownLinked = false;
@@ -2962,25 +3666,39 @@ void uiTick() {
       lv_label_set_text(s_amzStatus, nowLinked ? "Account linked." : "Not linked.");
       lv_label_set_text(s_amzBtnLbl, nowLinked ? "Unlink" : "Link account");
     }
-    const amazon::LinkState st = amazon::linkState();
-    if (st != shownState) {
-      shownState = st;
-      switch (st) {
+    static bool shownSpLinked = false;
+    const bool nowSpLinked = spotify::linked();
+    if (nowSpLinked != shownSpLinked && s_spStatus) {
+      shownSpLinked = nowSpLinked;
+      lv_label_set_text(s_spStatus, nowSpLinked ? "Account linked." : "Not linked.");
+      lv_label_set_text(s_spBtnLbl, nowSpLinked ? "Unlink" : "Link account");
+    }
+
+    // One overlay, whichever service is mid-ceremony. The enums are ordered identically, so the
+    // state is compared as a number rather than duplicating this switch per service.
+    const uint8_t st = svcState();
+    if (st != (uint8_t)shownState) {
+      shownState = (amazon::LinkState)st;
+      switch ((amazon::LinkState)st) {
         case amazon::LinkState::Starting:
-          lv_label_set_text(s_linkMsg, "Requesting a code from Amazon...");
+          lv_label_set_text_fmt(s_linkMsg, "Requesting a code from %s...", svcName());
           lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
           break;
         case amazon::LinkState::Waiting: {
-          const String u = amazon::linkUrl();
+          const String u = svcUrl();
           lv_qrcode_update(s_linkQr, u.c_str(), u.length());
           lv_obj_remove_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
-          lv_label_set_text(s_linkMsg, "Scan with a phone, then approve in Amazon.");
+          lv_label_set_text_fmt(s_linkMsg, "Scan with a phone, then approve in %s.", svcName());
           break;
         }
         case amazon::LinkState::Linked:
           lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
-          lv_label_set_text(s_linkMsg, "Linked. Building the station list...");
-          radiocache::requestRefresh();
+          if (s_linkWhich == LinkSvc::Amazon) {
+            lv_label_set_text(s_linkMsg, "Linked. Building the station list...");
+            radiocache::requestRefresh();
+          } else {
+            lv_label_set_text(s_linkMsg, "Linked. Search is ready.");
+          }
           break;
         case amazon::LinkState::Failed:
           lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
@@ -2989,14 +3707,16 @@ void uiTick() {
         default: break;
       }
     }
-    // The countdown is the only thing that changes second to second while waiting.
-    if (st == amazon::LinkState::Waiting) {
+    // The countdown is the only thing that changes second to second while waiting — and on Spotify
+    // it is load-bearing rather than decorative: that code dies at five minutes, in the browser
+    // before the wire, so a QR left up past zero is a QR that no longer works.
+    if ((amazon::LinkState)st == amazon::LinkState::Waiting) {
       static uint16_t shownLeft = 0;
-      const uint16_t left = amazon::linkSecondsLeft();
+      const uint16_t left = svcLeft();
       if (left / 10 != shownLeft / 10) {
         shownLeft = left;
-        lv_label_set_text_fmt(s_linkMsg, "Scan with a phone, then approve in Amazon.\n%u:%02u left",
-                              left / 60, left % 60);
+        lv_label_set_text_fmt(s_linkMsg, "Scan with a phone, then approve in %s.\n%u:%02u left",
+                              svcName(), left / 60, left % 60);
       }
     }
   }
@@ -3044,11 +3764,27 @@ void uiTick() {
       radioPaintArt();
     }
 
-    // Populate once the cache exists, and repopulate after a refresh replaces it.
-    const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;
-    if (gen && gen != s_radioShownGen && !radiocache::busy()) {
-      s_radioShownGen = gen;
-      radioShowGenres();
+    if (s_radioSrc == 1) {
+      // Spotify is browsed live, so the page fills in when the worker answers rather than when a
+      // cache appears. Entering the page with nothing loaded kicks the first browse.
+      const uint32_t bg = spotify::browseGen();
+      if (s_spAwaiting && bg != s_spShownGen) {
+        s_spShownGen = bg;
+        s_spAwaiting = false;
+        radioSpotPaint();
+      } else if (s_spAwaiting && spotify::browseState() == spotify::SearchState::Failed) {
+        s_spAwaiting = false;
+        lv_label_set_text(s_radioStatus, spotify::linked() ? "Could not reach Spotify."
+                                                           : "Link Spotify in Settings.");
+        lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+      }
+    } else {
+      // Amazon: populate once the cache exists, and repopulate after a refresh replaces it.
+      const uint32_t gen = radiocache::ready() ? (uint32_t)radiocache::fetchedAt() : 0;
+      if (gen && gen != s_radioShownGen && !radiocache::busy()) {
+        s_radioShownGen = gen;
+        radioShowGenres();
+      }
     }
   }
 
@@ -3108,8 +3844,10 @@ void uiTick() {
       // be a blocking co-processor RPC and an unlocked read of a vector netTask rewrites, i.e.
       // this log would stall or crash the UI task in exactly the fault it exists to report.
       const uint32_t ip = g_linkIp;
+      const char *gapStage = "";
+      const uint32_t gapMs = appNetGapMaxMs(&gapStage);   // plain loads, same rule as g_link*
       LOG.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
-                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu art=%s\n",
+                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu art=%s netgap=%lus@%s\n",
                     (unsigned long)(millis() / 1000),
                     (unsigned long)(ESP.getFreeHeap() / 1024),
                     (unsigned long)(ESP.getMinFreeHeap() / 1024),
@@ -3124,7 +3862,8 @@ void uiTick() {
                     // healthy while albumArtTake() has never handed anything over, and then the
                     // album-art screensaver silently shows a clock with no way to tell why from
                     // off-device. This is the answer to that exact question.
-                    s_artDsc ? "yes" : "none");
+                    s_artDsc ? "yes" : "none",
+                    (unsigned long)(gapMs / 1000), gapStage);
     }
   }
 

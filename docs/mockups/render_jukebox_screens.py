@@ -283,7 +283,15 @@ def ic_list(d, cx, cy, s, fill):
         d.line([(cx - s * 0.30, cy + dy), (cx + s * 0.30, cy + dy)], fill=fill, width=w)
 
 
-RAIL_ICONS = (ic_note, ic_heart, ic_radio, ic_speaker, ic_gear)
+def ic_search(d, cx, cy, s, fill):
+    w = max(2, int(s * 0.11))
+    r = s * 0.24
+    d.ellipse([cx - r - s * 0.06, cy - r - s * 0.06, cx + r - s * 0.06, cy + r - s * 0.06],
+              outline=fill, width=w)
+    d.line([(cx + r * 0.55, cy + r * 0.55), (cx + s * 0.34, cy + s * 0.34)], fill=fill, width=w)
+
+
+RAIL_ICONS = (ic_note, ic_heart, ic_radio, ic_search, ic_speaker, ic_gear)
 
 
 # --- Placeholder album art --------------------------------------------------------------------
@@ -346,10 +354,14 @@ def _cover(size: int, variant: int = 0, bands: bool = True) -> Image.Image:
 # Shared chrome
 # ==============================================================================================
 def draw_rail(d: ImageDraw.ImageDraw, F: Fonts, active: int):
-    """screens.cpp:337 — 96 px rail, 72 px items on an 86 px pitch, hairline divider."""
+    """screens.cpp:337 — 96 px rail, 72 px items on an 86 px pitch, hairline divider.
+
+    SIX entries since Search landed: Now / Favorites / Radio / Search / Rooms / Settings. They fit
+    without touching the geometry — PAD_TOP 22 + 6 x 86 = 538, under SCREEN_H 600.
+    """
     panel(d, 0, 0, RAIL_W, SCREEN_H, BG)
     panel(d, RAIL_W, 0, 1, SCREEN_H, LINE)
-    for i in range(5):
+    for i in range(len(RAIL_ICONS)):
         x = (RAIL_W - RAIL_BTN) // 2
         y = PAD_TOP + i * RAIL_STEP
         if i == active:
@@ -433,7 +445,7 @@ ROOMS = [
 
 def render_rooms(F: Fonts) -> Image.Image:
     img, d = new_screen()
-    draw_rail(d, F, 3)
+    draw_rail(d, F, 4)      # Rooms moved down one when Search took index 3
     draw_status(d, F, "Living Room", "Grouped with Kitchen" + SEP + "Dining Room", True)
 
     x = CONTENT_X
@@ -531,6 +543,17 @@ def render_radio(F: Fonts) -> Image.Image:
     panel(d, sb_x, sb_y, 56, 52, ELEV, radius=R_MD)
     ic_list(d, sb_x + 28, sb_y + 26, 22, MUTED)
 
+    # Source toggle — Amazon or Spotify, one at a time, never blended (screens.cpp, buildRadio).
+    # 64 px of clearance on the right because the search button above is TOP_RIGHT-aligned and
+    # 56 px wide; without it the second pill sits underneath it, which is what shipped first.
+    tw, tgap = 140, 8
+    tx = x + CONTENT_W - 64 - (tw * 2 + tgap)
+    for i, (nm, on) in enumerate((("Amazon", True), ("Spotify", False))):
+        px = tx + i * (tw + tgap)
+        panel(d, px, PAD_TOP + 48, tw, 44, ACCENT if on else ELEV2, radius=22)
+        text(d, (px + tw // 2, PAD_TOP + 48 + 22), nm, F(16),
+             ACCENT_INK if on else MUTED, anchor="mm")
+
     # The list is a scroll container, so rows are drawn into a layer the size of its viewport and
     # pasted — the row straddling the bottom edge then truncates the way it does on the panel,
     # rather than being skipped and leaving a hole.
@@ -560,6 +583,90 @@ def render_radio(F: Fonts) -> Image.Image:
     for i in range(26):
         text(d, (x + i * step + step // 2, ay + 22), chr(65 + i), F(16),
              MUTED if i in have else LINE, anchor="mm")
+    return img
+
+
+def render_search(F: Fonts) -> Image.Image:
+    """Search: two panes. Keyboard and category chips left, results right.
+
+    The split is the point and the numbers are from screens.cpp's buildSearch(): content is
+    880 x 600 (1024 less the 96 px rail and two 30 px gutters), left column 484, right column 380
+    starting at x+500. A full-width keyboard would be 880 px of a 600 px-tall screen spent on
+    something that needs ~500, with the results stacked underneath where one row fits.
+    """
+    img, d = new_screen()
+    draw_rail(d, F, 3)
+    draw_status(d, F, "Living Room", "Grouped with Kitchen" + SEP + "Dining Room", True)
+
+    x = CONTENT_X
+    LEFT_W, RIGHT_X, TOP = 484, 500, PAD_TOP + 44
+    RIGHT_W = CONTENT_W - RIGHT_X
+
+    # Query field. No page header: the accent-lit rail glyph says which page this is and the
+    # placeholder says what to type, and 44 px of header is a whole result row.
+    panel(d, x, TOP, LEFT_W, 56, ELEV, radius=R_MD)
+    text(d, (x + 16, TOP + 28), "bohemian", F(22), TEXT, anchor="lm")
+    d.line([(x + 16 + 104, TOP + 14), (x + 16 + 104, TOP + 42)], fill=ACCENT, width=2)
+
+    # Five chips on a 96 px pitch, 92 wide. "All" is selected.
+    for i, nm in enumerate(("All", "Tracks", "Artists", "Albums", "Playlists")):
+        cx = x + i * 96
+        on = (i == 0)
+        panel(d, cx, TOP + 68, 92, 40, ACCENT if on else ELEV2, radius=20)
+        text(d, (cx + 46, TOP + 88), nm, F(16), ACCENT_INK if on else MUTED, anchor="mm")
+
+    # Keyboard: the reduced map — 26 letters, digits behind one key, space, backspace, submit.
+    # No $ % ^ & *, and no X, because a permanent keyboard has nowhere to close to.
+    kb_y = TOP + 120
+    kb_h = SCREEN_H - kb_y - PAD_BOT
+    panel(d, x, kb_y, LEFT_W, kb_h, ELEV, radius=R_MD)
+    rows = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
+    rh = kb_h // 4
+    for r, row in enumerate(rows):
+        n = len(row) + (1 if r == 2 else 0)
+        kw = (LEFT_W - 12) // n
+        off = x + 6 + (LEFT_W - 12 - kw * n) // 2
+        for c, ch in enumerate(row):
+            kx = off + c * kw
+            panel(d, kx + 2, kb_y + 6 + r * rh, kw - 4, rh - 6, ELEV2, radius=8)
+            text(d, (kx + kw // 2, kb_y + 6 + r * rh + (rh - 6) // 2), ch, F(20), TEXT, anchor="mm")
+        if r == 2:                                   # backspace shares the bottom letter row
+            kx = off + len(row) * kw
+            panel(d, kx + 2, kb_y + 6 + r * rh, kw - 4, rh - 6, ELEV2, radius=8)
+            # Drawn, not typed: Montserrat has no backspace glyph, and the device draws this
+            # one from a subsetted LVGL symbol font that cannot be rendered here either.
+            ic_left(d, kx + kw // 2, kb_y + 6 + r * rh + (rh - 6) // 2, 20, MUTED)
+    # Bottom row: 1#  space  submit, on 2:6:2 widths.
+    by = kb_y + 6 + 3 * rh
+    units = (("1#", 2, ELEV2, MUTED), ("", 6, ELEV2, MUTED), (None, 2, ACCENT, ACCENT_INK))
+    ux = x + 6
+    for label, wgt, fill, ink in units:
+        uw = (LEFT_W - 12) * wgt // 10
+        panel(d, ux + 2, by, uw - 4, rh - 6, fill, radius=8)
+        if label:
+            text(d, (ux + uw // 2, by + (rh - 6) // 2), label, F(20), ink, anchor="mm")
+        elif label is None:                          # submit — drawn, same reason as backspace
+            ic_check(d, ux + uw // 2, by + (rh - 6) // 2, 22, ink)
+        ux += uw
+
+    # Results: 88 px rows on a 96 px pitch, five visible in a 516 px column.
+    rows_out = (("Bohemian Rhapsody", "Track  --  Queen"),
+                ("Bohemian Rhapsody", "Album  --  Queen"),
+                ("Queen", "Artist"),
+                ("Queen Radio", "Station"),
+                ("Bohemian Nights", "Playlist  --  Fictional Mixes"))
+    ry0 = TOP
+    for i, (title, sub) in enumerate(rows_out):
+        ry = ry0 + i * 96
+        if ry + 88 > SCREEN_H - PAD_BOT:
+            break
+        panel(d, x + RIGHT_X, ry, RIGHT_W, 88, ELEV, radius=R_LG)
+        tile = _cover(64, variant=i + 1)
+        m = Image.new("L", (64, 64), 0)
+        ImageDraw.Draw(m).rounded_rectangle([0, 0, 63, 63], radius=R_MD, fill=255)
+        img.paste(tile, (x + RIGHT_X + 8, ry + 12), m)
+        text(d, (x + RIGHT_X + 80, ry + 44 - 11 - 11), title, F(22), TEXT)
+        text(d, (x + RIGHT_X + 80, ry + 44 + 15 - 6), sub, F(12), DIM)
     return img
 
 
@@ -611,6 +718,7 @@ def main() -> None:
         "jukebox-now-playing.png": render_now_playing(F),
         "jukebox-rooms.png":       render_rooms(F),
         "jukebox-radio.png":       render_radio(F),
+        "jukebox-search.png":      render_search(F),
         "jukebox-screensaver.png": render_screensaver(F, font_path),
     }
     for name, im in screens.items():

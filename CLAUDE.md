@@ -126,6 +126,65 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
   > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
   > instead of 27 connect/handshake/close cycles.
+  > ⚠️ **Spotify Search + Radio are live here (`core/smapi` + `core/spotify`, plans/12).** One
+  > browser ceremony from Settings and the device holds its own SMAPI token; Search is a sixth rail
+  > entry (two-pane: keyboard left, results right) and Radio has an Amazon/Spotify source toggle.
+  > **Tracks and artist radio play; containers BROWSE rather than being constructed** — an album
+  > yields its tracks, an artist yields its radio + top tracks + albums — so no
+  > `x-rincon-cpcontainer` prefix is ever guessed. Correcting plans/08: **Spotify DOES have
+  > stations** (`spotify:artistRadio:<id>`, `itemType=program`), one level down under an artist,
+  > not at the root.
+  > ⚠️ **A task that holds a SOAP response and parses it needs an 8192-byte stack.** `radiocache`,
+  > `favcache`, `netTask`, `artTask` and `uiTask` all use it. The Spotify worker was given 6144,
+  > copied from the LINK task — which only ever holds a link code and a token — and survived 3-6 KB
+  > searches before rebooting on the first 15.7 KB browse. **Symptom to recognise: a coredump whose
+  > PC does not resolve in the ELF** — that is a corrupted return address, i.e. the stack, and the
+  > give-away that it is NOT a null dereference is the same PC appearing in two different builds.
+  > ⚠️ **NEVER `%s` a String that came off the network — use `smapi::cstr()`.** Arduino's `String`
+  > calls `invalidate()` on a failed allocation, setting its buffer to `nullptr`, so `c_str()`
+  > returns NULL and printf faults in ROM `strlen` (`_svfprintf_r`, `a0=0`, `a3=0x7f7f7f7f`). A
+  > LOG.printf added to *diagnose* an empty response turned the out-of-memory it was diagnosing
+  > into a reboot. The same guard later printed `(null)` and thereby identified a use-after-free
+  > without a coredump — a dangling String reads back the same way.
+  > ⚠️ **`readResponse()` moves the body and reserves exactly `Content-Length`.** It used to copy
+  > (`out = raw`, two body-sized buffers live at once — 32-48 KB for a 16-22 KB response, against a
+  > largest free block of ~36-43 KB) and to reserve 24 KB *before reading the headers*. Don't
+  > reintroduce either.
+  > ⚠️ **Tile artwork is a load profile, not just bytes.** `art_cache` had no pacing and drained its
+  > queue back to back, so a screen of rows was a screen of TLS handshakes — and Spotify's
+  > placeholder icons are PNG on a DIFFERENT host from its JPEG artwork, so a mixed list forced a
+  > fresh handshake per alternation against the one pooled client. That is the connect/close churn
+  > plans/07 blames for wedging the ESP-Hosted link, and it showed up as `health.lastReboot =
+  > "netlink"` with `resetReason 3` and no coredump. PNGs are not fetched (nothing here decodes
+  > them) and fetches are paced 120 ms. **Read `lastReboot` before assuming a blank screen was a
+  > crash.** That was not enough: two more netlink deaths followed. **Two rules now stand.** The art
+  > fetcher checks `Content-Type` BEFORE reading a body — Spotify's user-uploaded covers negotiate
+  > **WebP** to a bare client and a 24 KB one was downloaded in full just to be refused — and it
+  > **never fetches while `smapi::busy()`**: a 15-29 KB browse plus tile TLS sessions plus the
+  > Sonos poll on the SDIO bridge at once is the death profile. Nothing is late; rows are not on
+  > screen until the browse lands. "Play all" on a playlist is PROVEN on hardware (the speaker
+  > expands `x-rincon-cpcontainer:1006206c` into its queue), and so is **artist radio**
+  > (`x-sonosapi-radio:spotify%3aartistRadio%3a…?sid=12&flags=8300&sn=…`, "ABBA Radio" from
+  > Search, 2026-09-07). Every Spotify playback form the UI offers has now played.
+  > ⚠️ **NEVER read an HTTP body with `HTTPClient::writeToStream()` here — use
+  > `core/net/http_body.h`.** On a chunked response it reads every chunk header with
+  > `readStringUntil()` (a busy-wait) and separates chunks with `delay(0)`, which yields only to
+  > EQUAL priority and never lets IDLE0 run — so a source that dribbles chunks (the speaker's
+  > `/getaa` proxying a station's cover) starves the watchdog ACROSS chunks while every single read
+  > stays under 5 s. A per-read timeout bounds one read, not the gap between them. Coredump
+  > 2026-09-07: task `art`, PC in `xQueueGenericSend` under lwIP's core lock. `httpbody::read()`
+  > owns the loop (chunked / Content-Length / read-to-close, real `delay(5)` sleeps, one deadline)
+  > and both art fetchers go through it. To decode a coredump against a REBUILT elf, patch the
+  > 9-char SHA the dump stores (`b"71dbb6bac"` → the rebuilt elf's) and recompute the trailing
+  > CRC32 — `esp_coredump` refuses the mismatch otherwise, and a rebuild never reproduces the SHA.
+  > ⚠️ **`artcache::keyOf()` is AMAZON-SHAPED and returns "" for anything else, and
+  > `artcache::get()` drops an empty key without queueing a fetch.** Every Spotify row silently
+  > requested no artwork at all until `artKey()` fell back to `keyOfUrl()`. Amazon must keep
+  > `keyOf`: its art URL is not stable (the `#chunk-` is minted per response) but the station KEY
+  > is. Sources with a stable art URL hash the URL, as Favourites always has. Spotify renditions are
+  > size-coded in the URL — album `ab67616d…b273`=640/`1e02`=300/`4851`=64, artist
+  > `ab676161…e5eb`=640/`5174`=320/`f178`=160, mosaic `/640/`→`/60/` — and tiles take the smallest;
+  > Now Playing and the screensaver never come through `thumbUrl()` at all.
   > ⚠️ **Amazon's station tree is CREDENTIAL-DEPENDENT — a RE-LINK IS A DOWNGRADE, which is why
   > publishing is a MERGE. Do not "simplify" it back to a swap.** Same account, same Prime tier, two
   > tokens: the jukebox's long-standing one enumerates **26 genres / ~1,045 stations** (verified on
@@ -146,9 +205,33 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > hard `400 "householdId must not be blank or null!"`, so do not "fix" `amazon.cpp` to match the
   > schema. Full evidence: `plans/08` (2026-09-05).
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
-  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
+  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121, and
+  > **#184 names the mechanism: inbound flow control.** Once the C6's Wi-Fi RX buffers fill with
+  > inbound TCP, the SDIO host driver mishandles the backpressure and the link freezes — open, no
+  > fix (reported on 2.12.0; this build's host library is **2.12.11**, `esp_hosted_host_fw_ver.h`),
+  > and the only workaround offered is pacing inbound reads. That is our profile exactly: it
+  > died **three runs out of three on 2026-09-07 at the same spot**, the Popular Playlists tiles
+  > landing on top of a 15-29 KB browse. **The "slower SDIO clock" lead is closed** — this board is
+  > already 1-bit at 10 MHz (`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000`), and #167 reports 20 MHz
+  > did not help either. **The C6 firmware lead is closed too**: the slave already runs **2.12.11**,
+  > matching the host library exactly (`jukebox-c6` probe env, 2026-09-07 — plans/07's "2.3.0" was
+  > stale). The fault is present on matched, current versions. The one lead left is shrinking
+  > inbound bursts: the 158 KB `/getaa` cover at play time is the largest transfer this panel makes.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
-  > users hard-freezes the device. Next leads are a slower SDIO clock and the C6 firmware upgrade.
+  > users hard-freezes the device.
+  > ⚠️ **Detection is in SECONDS now; keep it there.** The original check lived inside the
+  > rediscovery path, reached only after three failed polls — 15 s apart under GENA, each blocking
+  > for its SOAP timeout first — and measured **3-4 minutes** of hung device per death, the user
+  > watching a "Searching..." that could never finish. `deadLinkFast()` in `app.cpp` samples the
+  > RSSI `publishLinkStats()` already reads on every pass, needs two sightings 3 s apart, then
+  > PROVES it with a 2 s TCP probe to the coordinator (a roam that still connects never costs a
+  > reboot). Measured: `dead=7s`. **The reboot note is a diary** — `health.lastReboot` reads
+  > `netlink:fast dead=7s gapmax=5s@linkstats now=linkstats`: which detector, how long dead,
+  > netTask's worst gap between stage stamps and the stage it sat in. Nothing on the wire can carry
+  > that (the mirror dies with the link), so NVS is the channel. The `[health]` line prints the
+  > worst gap continuously as `netgap=Ns@stage`; a dead-link RSSI read costs the 5 s RPC timeout
+  > (`DEFAULT_RPC_RSP_TIMEOUT`), which is why `gapmax=5s@linkstats` is the healthy reading for a
+  > death, not a stall.
   > ⚠️ **Power-cycle after every upload**, and read the `[health]` heartbeat before diagnosing any
   > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
   > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
@@ -246,6 +329,9 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 - The button on a XIAO ESP32S3 + why not the C6: **`plans/11-button-v2.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
+- Jukebox Search + the Radio source toggle, and the six hardware-only bugs building them turned up:
+  **`plans/12-jukebox-search.md`** — §12 is the one to read before touching `core/spotify`,
+  `core/smapi` or `core/ui/art_cache`
 - Jukebox screensaver — what shipped, and the video/photo options that did not:
   **`plans/10-jukebox-screensaver.md`**. Read §1 before proposing anything that moves pixels: it
   has the measured budget, and the two facts that kill the obvious ideas — the P4's H.264 block is

@@ -39,6 +39,7 @@ void appStartTasks();  // launch the ui / net / art FreeRTOS tasks
 void        appSupervisorTick();
 const char *appNetStage();      // the netTask stage as of its last iteration
 uint32_t    appNetStallSec();   // seconds since netTask last iterated (0 = healthy/not started)
+uint32_t    appNetGapMaxMs(const char **stage);   // netTask's longest gap between stage stamps since boot, and the stage it was in
 
 // --- Link snapshot, published by netTask, for UI-side diagnostics ------------------------------
 // WiFi.RSSI() / WiFi.localIP() are not free on every board: where the radio is a separate

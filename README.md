@@ -30,8 +30,8 @@ risk, which the docs are honest about rather than quiet about.
 
 ### sonos-jukebox — the wall panel
 
-A 7" landscape touchscreen on an **ESP32-P4**, wall-mounted, always awake. Five screens off a
-nav rail — Now Playing, Favorites, Radio, Rooms, Settings — a physical dial, and album art.
+A 7" landscape touchscreen on an **ESP32-P4**, wall-mounted, always awake. Six screens off a
+nav rail — Now Playing, Favorites, Radio, Search, Rooms, Settings — a physical dial, and album art.
 
 ![Now Playing](docs/images/jukebox-now-playing.png)
 
@@ -48,11 +48,25 @@ death (3.00 SOAP calls/sec became 0.09).
 <td><b>Rooms</b> — a checkbox per room joins or leaves the active group, with per-room volume,
 per-room play/pause, and a group summary bar over the top. Live volume and transport for every
 room, polled only while you are looking at the page.</td>
-<td><b>Radio</b> — 26 genres and ~1,050 Amazon Prime Stations, crawled onto the SD card with
-artwork, browsable with an A–Z jump strip and a global search. No Sonos app involved, at any
-point.</td>
+<td><b>Radio</b> — two sources behind one toggle, never blended. <b>Amazon</b>: 26 genres and
+~1,050 Prime Stations crawled onto the SD card with artwork, an A–Z jump strip and a global
+search. <b>Spotify</b>: charts, playlists, genres and your own library, browsed live. No Sonos app
+involved, at any point.</td>
 </tr>
 </table>
+
+![Search](docs/images/jukebox-search.png)
+
+**Search** is the one screen that goes out to a music service live. Type, and results arrive in
+about a second — tracks, artists, albums, playlists, and an artist's own radio. Tap a track and it
+plays; tap an album or an artist and it opens, because containers are browsed rather than guessed
+at. The device holds **its own Spotify account**, linked once by scanning a QR on the panel; no
+Sonos app, no cloud service of ours, and nothing on the network but the speakers.
+
+The layout is the screen shape doing work: a full-width keyboard on a 600 px-tall panel leaves
+room for one result, so the keyboard takes the left 484 px and the results the right 380 — both
+permanent, nothing to dismiss. The keymap is cut down to what a music query actually contains,
+which is why there is no `$ % ^ &` and no close button.
 
 ![Screensaver](docs/images/jukebox-screensaver.png)
 
@@ -68,8 +82,9 @@ freezes the UI rather than dropping a frame.
 > **Read before touching it:** [`plans/07-sonos-jukebox.md`](plans/07-sonos-jukebox.md) — this is
 > RISC-V silicon on a different toolchain, and several of its failure modes are silent.
 > Screensaver: [`plans/10`](plans/10-jukebox-screensaver.md) · Radio and the music-service
-> research: [`plans/08`](plans/08-music-service-integration.md) · eventing:
-> [`plans/09`](plans/09-gena-eventing.md).
+> research: [`plans/08`](plans/08-music-service-integration.md) · Search, the Radio sources, and
+> the six hardware-only bugs building them turned up:
+> [`plans/12`](plans/12-jukebox-search.md) · eventing: [`plans/09`](plans/09-gena-eventing.md).
 
 ---
 
@@ -266,6 +281,7 @@ CI builds all five app envs on every PR and every push to `main`.
 | Flash from WSL | [`docs/flashing-wsl.md`](docs/flashing-wsl.md) |
 | Work on the jukebox | [`plans/07`](plans/07-sonos-jukebox.md), then [`plans/10`](plans/10-jukebox-screensaver.md) |
 | Add a music service, or know why one is impossible | [`plans/08`](plans/08-music-service-integration.md) |
+| Touch `core/spotify`, `core/smapi` or the artwork cache | [`plans/12`](plans/12-jukebox-search.md) § 12 first |
 | Train a wake word | [`plans/03`](plans/03-wake-word-integration.md), [`training/wake-word/`](training/wake-word/) |
 | Run the portal | [`sonos-portal/README.md`](sonos-portal/README.md) |
 | Ship firmware to many devices | [`plans/06-scalable-ota.md`](plans/06-scalable-ota.md) |
@@ -283,6 +299,7 @@ gotcha that cost someone a day is written down there, at length, with the reason
 The jukebox, nest, sleep-machine and both buttons all work and are in daily use. Known open
 items: the jukebox's four transport buttons and its case; the sleep-machine's RGB LED; a third
 wake word that trains but does not fire; and one unresolved ESP-Hosted link fault on the P4 that
-recovers by reboot rather than being cured. Each is written up where it lives.
+recovers by reboot rather than being cured. On Search, playing a track is proven on hardware and
+playing an artist *station* is not yet. Each is written up where it lives.
 
 Sonos is a third party and is not affiliated with this project.

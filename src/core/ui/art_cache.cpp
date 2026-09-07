@@ -16,9 +16,11 @@
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
 #include "jpeg_decode.h" // progressive-JPEG fallback for tiles TJpgDec refuses
 #include "core/amazon.h"
+#include "core/smapi.h"      // smapi::busy — never fetch tiles under a browse
 #include "core/board.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water
+#include "core/net/http_body.h"   // the yielding body reader — see album_art.cpp
 
 namespace artcache {
 
@@ -127,6 +129,10 @@ String keyOfUrl(const String &url) {
 // 72 px tile — an Amazon cover is up to 6.7 MB and often PNG, which TJpg cannot decode at all — so
 // fetching full size would be both slow on a fragile link and useless. Unknown hosts fall through
 // unchanged and are simply downloaded as-is.
+// The mosaic path segment for a given tile size, kept out of thumbUrl() so the string is not
+// built twice.
+static const char *tile640(int px) { return px <= 96 ? "/60/" : "/300/"; }
+
 static String thumbUrl(const String &url, int px) {
   if (url.indexOf("media-amazon.com") >= 0 || url.indexOf("ssl-images-amazon.com") >= 0)
     return amazon::artThumbUrl(url, px > 96 ? 160 : 128);   // also transcodes PNG -> baseline JPEG
@@ -139,10 +145,38 @@ static String thumbUrl(const String &url, int px) {
     if (slash > 0) return url.substring(0, slash) + "/mqdefault.jpg";   // 320x180, ~10 KB
   }
   if (url.indexOf("i.scdn.co/image/") >= 0) {
-    // Spotify encodes the size in the id prefix: b273 = 640, e02 = 300, 851 = 64.
-    String u = url; u.replace("ab67616d0000b273", "ab67616d00001e02");
+    // Spotify encodes the rendition in the id prefix, and there are TWO families. Album and track
+    // covers: b273 = 640 (52 KB), 1e02 = 300 (18 KB), 4851 = 64 (1.6 KB). ARTIST portraits are a
+    // different prefix entirely: e5eb = 640 (134 KB), 5174 = 320 (46 KB), f178 = 160 (15 KB).
+    // Sizes measured against live URLs 2026-09-06.
+    //
+    // Only the album family was rewritten here at first, which silently lost the art on every
+    // artist AND every Spotify STATION — artist radio carries the artist portrait — because 134 KB
+    // is over kJpegMax and the fetch is dropped before anything is decoded.
+    //
+    // TILES TAKE THE SMALLEST RENDITION THAT EXISTS. A 72 px tile fed by a 300 px cover spends
+    // 18 KB and a TLS round trip per row to throw away 94% of the pixels, and a list is 50 rows
+    // over the ESP-Hosted link — which is what "art loads very slowly" was. 64 px upscaled to 72
+    // is marginally soft; 11x less data per row is not marginal. Now Playing and the screensaver
+    // are unaffected and deliberately so: album_art.cpp never comes through here, it decodes
+    // whatever the speaker reports up to ART_MAX_PX.
+    const bool tile = (px <= 96);
+    String u = url;
+    u.replace("ab67616d0000b273", tile ? "ab67616d00004851" : "ab67616d00001e02");  // album 640 ->
+    u.replace("ab67616d00001e02", tile ? "ab67616d00004851" : "ab67616d00001e02");  // ...or 300 ->
+    u.replace("ab6761610000e5eb", tile ? "ab6761610000f178" : "ab67616100005174");  // artist/radio
     return u;
   }
+  if (url.indexOf("mosaic.scdn.co/") >= 0) {
+    // Playlist mosaics put the size in a path segment: 640 = 76 KB, 300 = 22 KB, 160 = 7 KB,
+    // 60 = 2 KB. Matched on the host rather than on "/640/" so a mosaic served at another size is
+    // still normalised. Note the path also CONTAINS ab67616d… cover ids — hence a separate branch,
+    // because the album rewrite above would corrupt them.
+    String u = url; u.replace("/640/", tile640(px));
+    return u;
+  }
+  // pickasso.spotifycdn.com and seed-mix-image.spotifycdn.com (the other playlist art hosts) have
+  // no size knob and already answer at 15-45 KB, so they pass through under the cap.
   return url;
 }
 
@@ -179,22 +213,37 @@ static size_t obtain(const Req &r) {
   http.setReuse(true);
   http.setTimeout(12000);
   if (!http.begin(*cli, r.url)) return 0;
+  // Ask for the Content-Type up front and refuse anything that is not JPEG BEFORE reading a body.
+  // The decoders here are JPEG-only, and this used to download the whole file to find that out:
+  // Spotify's user-uploaded playlist covers (image-cdn-*.spotifycdn.com) come back as WebP — a
+  // 23,898-byte one was fetched in full and thrown away — and its placeholder icons are PNG. On a
+  // link that dies under load, a wasted 24 KB TLS transfer per row is not a rounding error.
+  static const char *kHdrs[] = {"Content-Type"};
+  httpbody::prepare(http, kHdrs, 1);   // collectHeaders() replaces the list, so ask through the reader
   const int code = http.GET();
   if (code != 200) { http.end(); return 0; }
+  const String ct = http.header("Content-Type");
+  if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
+    LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, smapi::cstr(ct));
+    http.end();
+    markBad(r.key);     // takes s_lock itself — taking it here first deadlocked the worker
+    return 0;
+  }
   const int len = http.getSize();
   if (len > (int)kJpegMax) { http.end(); return 0; }
-  WiFiClient *st = http.getStreamPtr();
-  size_t got = 0;
-  const uint32_t deadline = millis() + 12000;
-  while (millis() < deadline && got < kJpegMax) {
-    const size_t avail = st->available();
-    if (!avail) { if (!http.connected() && (len < 0 || got >= (size_t)len)) break; delay(5); continue; }
-    got += st->readBytes(s_jpeg + got, min(avail, kJpegMax - got));
-    heapwatch::note("artcache.fetch");
-    if (len > 0 && got >= (size_t)len) break;
-  }
+  // The same yielding reader Now Playing art uses (core/net/http_body.h). This loop was already
+  // sleeping when idle, but it did not de-chunk, and one body reader is enough to get right.
+  struct Buf { size_t got; bool over; } buf{0, false};
+  const long n = httpbody::read(http, 12000, [](void *ctx, const uint8_t *d, size_t k) -> bool {
+    Buf *b = (Buf *)ctx;
+    if (b->got + k > kJpegMax) { b->over = true; return false; }
+    memcpy(s_jpeg + b->got, d, k); b->got += k;
+    return true;
+  }, &buf);
+  heapwatch::note("artcache.fetch");
+  const size_t got = buf.got;
   http.end();
-  if (got < 100) return 0;
+  if (n < 0 || buf.over || got < 100) return 0;
 
   if (!dir().isEmpty()) {                 // persist so this is the last time we pay for it
     mkdir(dir().c_str(), 0777);
@@ -236,6 +285,19 @@ static void worker(void *) {
       xSemaphoreGive(s_lock);
     }
     if (have) continue;
+
+    // PACING, for the same reason radio_cache paces its crawl: back-to-back requests are the
+    // sustained-load profile that kills this board's ESP-Hosted link (plans/07), and a screen of
+    // rows enqueues a whole screen of fetches at once. 120 ms is invisible on a list that scrolls
+    // at human speed and turns a burst into a trickle. It does not CURE the link fault — nothing
+    // here does — it stops us provoking it.
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // NEVER under a browse. A Spotify listing is a 15-29 KB TLS transfer; starting tile fetches
+    // while it is still arriving puts two TLS sessions and the Sonos poll on the SDIO bridge at
+    // once, and that is the load profile that has killed the ESP-Hosted link three times in one
+    // evening. The tiles are not late — the rows are not on screen until the browse lands anyway.
+    while (smapi::busy()) vTaskDelay(pdMS_TO_TICKS(50));
 
     const size_t n = obtain(r);
     if (!n) continue;
@@ -360,9 +422,19 @@ const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
   // Miss: queue it. The queue is short and drops when full rather than blocking the UI task — a
   // fast flick past fifty rows should not enqueue fifty fetches, and the rows still on screen when
   // it settles will simply ask again on the next pass.
+  const String small = thumbUrl(artUrl, s_px);
+  // A PNG is a guaranteed decode failure — the decoders here are JPEG-only — so fetching one costs
+  // a TLS handshake to learn nothing. Checked AFTER thumbUrl() because Amazon's rewrite transcodes
+  // PNG originals to JPEG, so only what we are actually about to request matters.
+  //
+  // This is not just wasted bytes. Spotify's placeholder icons live on a DIFFERENT host from its
+  // artwork (spotify-static.ws.sonos.com vs i.scdn.co), and the fetcher keeps one pooled TLS
+  // client, so a list mixing the two forced a fresh handshake on every alternation — the
+  // connect/close churn plans/07 identifies as what wedges this board's ESP-Hosted link.
+  if (small.endsWith(".png") || small.endsWith(".PNG")) return nullptr;
+
   Req r {};
   strncpy(r.key, stationKey.c_str(), sizeof r.key - 1);
-  const String small = thumbUrl(artUrl, s_px);
   strncpy(r.url, small.c_str(), sizeof r.url - 1);
   xQueueSend(s_q, &r, 0);
   return nullptr;

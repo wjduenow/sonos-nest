@@ -49,4 +49,4 @@ const char *localStorageRoot() { return nullptr; }
 
 // On-die radio: a dead link is a Wi-Fi problem, not a transport one, so the normal reconnect
 // path is the right and only recovery. See core/board.h.
-bool netLinkRecover() { return false; }
+bool netLinkRecover(const char *) { return false; }
