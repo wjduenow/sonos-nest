@@ -193,10 +193,17 @@ bool albumArtFetch(const String &url) {
   // between chunks, which starved IDLE0 across a dribbling /getaa response and rebooted the
   // jukebox (task watchdog, coredump 2026-09-07). httpbody::read de-chunks too, and sleeps.
   ArtBuf sink{s_jpeg, JPEG_MAX, 0, false};
+  const uint32_t t0 = millis();
   const long n = httpbody::read(http, 15000, artSink, &sink);
   const size_t got = sink.len;
   heapwatch::note("art.fetch");
   http.end();
+  // Logged because the size IS the finding: a Spotify cover through the speaker's /getaa is
+  // ~158 KB, chunked, at LAN speed — the largest inbound burst this device ever takes over the
+  // SDIO link, and the link deaths (esp-hosted-mcu #184, inbound flow control) cluster at play
+  // time. Correlate a `netlink` diary against the fetch just before it.
+  LOG.printf("[art] %u B in %lu ms%s\n", (unsigned)got, (unsigned long)(millis() - t0),
+             n < 0 ? " (incomplete)" : "");
   // Refuse an oversize cover loudly — no art beats wrong art, and the message says what to raise.
   if (sink.full) {
     LOG.printf("[art] TRUNCATED: cover exceeds JPEG_MAX=%u. Raise JPEG_MAX.\n", (unsigned)JPEG_MAX);
