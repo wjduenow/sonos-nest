@@ -385,6 +385,10 @@ void browseStart(const String &id) {
   s_browsePendingHas = true;
   xSemaphoreGive(s_searchMx);
   s_browseState = SearchState::Running;
+  // Logged on the WAY IN, not just on completion. Without this, "the request went out and came
+  // back empty" and "the tap never reached a request at all" produce the same silence, and they
+  // are opposite bugs — one is the service or the parser, the other is the UI.
+  LOG.printf("[spotify] browse start %s\n", smapi::cstr(id));
   if (!s_searchTask) xTaskCreatePinnedToCore(searchTask, "spsearch", kWorkerStack, nullptr, 1, &s_searchTask, 0);
 }
 
