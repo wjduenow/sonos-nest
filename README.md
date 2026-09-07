@@ -167,7 +167,7 @@ as **standalone Docker** on any always-on host:
 ```bash
 git clone https://github.com/wjduenow/sonos-nest
 cd sonos-nest/sonos-portal
-docker compose up -d          # host networking; dashboard at http://<host-ip>:8000
+docker compose up -d --build  # host networking; dashboard at http://<host-ip>:8000
 ```
 
 It also serves firmware for **pull-based OTA**, so devices can update themselves from the LAN

@@ -16,9 +16,11 @@ The placeholders carry a marker in their PNG metadata, so re-running
 `python3 docs/mockups/render_photo_placeholders.py` will *not* clobber a real photo you have
 dropped in (use `--force` if you actually want the placeholder back).
 
-A JPEG is fine for photographs — save it as `.png`, or rename the file and fix the one
-matching line in `README.md`. PNG for photos is wasteful; if you convert the README to `.jpg`
-names, do all six at once so the set stays consistent.
+A JPEG is fine for photographs, and PNG for a photo is wasteful — but **renaming a `.jpg` to
+`.png` does not re-encode it**, it just hands PNG-expecting tooling JPEG bytes. So either
+*convert* to PNG (`magick photo.jpg photo.png`) and keep the path, or keep the JPEG and fix the
+one matching line in `README.md`. If you switch to `.jpg` names, do all six at once so the set
+stays consistent.
 
 ## The shot list
 
