@@ -377,7 +377,10 @@ fetch pushes up to 220 KB through it — the failures cluster around exactly tha
 load often improve when you slow the bus. Widening to 4-bit would need D2/D3, which Elecrow does
 not document for this board.
 
-**Also still open:** the C6 slave firmware is **2.3.0**; the host stack is 2.12.x and warns that a
+**CLOSED 2026-09-07 — the C6 is already at 2.12.11, matching the host exactly** (read back by the
+`jukebox-c6` probe env; the attempt below evidently took, since a pre-2.6 slave activates on `end`, and
+nobody re-read the version). The link still dies on matched versions, so this was never the cause.
+Original note: the C6 slave firmware was **2.3.0**; the host stack is 2.12.x and warns that a
 version gap can cause RPC timeouts. An SDIO OTA transferred successfully but `Activate` failed
 with `ESP_ERR_NOT_SUPPORTED` — 2.3.0 is too old to support the activate RPC, so the image was
 written but never marked bootable. Next avenue is flashing the C6 directly over its own UART

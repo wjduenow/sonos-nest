@@ -213,7 +213,10 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > died **three runs out of three on 2026-09-07 at the same spot**, the Popular Playlists tiles
   > landing on top of a 15-29 KB browse. **The "slower SDIO clock" lead is closed** — this board is
   > already 1-bit at 10 MHz (`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000`), and #167 reports 20 MHz
-  > did not help either. Remaining leads: the C6 firmware upgrade, and shrinking inbound bursts.
+  > did not help either. **The C6 firmware lead is closed too**: the slave already runs **2.12.11**,
+  > matching the host library exactly (`jukebox-c6` probe env, 2026-09-07 — plans/07's "2.3.0" was
+  > stale). The fault is present on matched, current versions. The one lead left is shrinking
+  > inbound bursts: the 158 KB `/getaa` cover at play time is the largest transfer this panel makes.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
   > users hard-freezes the device.
   > ⚠️ **Detection is in SECONDS now; keep it there.** The original check lived inside the
