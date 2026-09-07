@@ -1,6 +1,6 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status: **not started** — a handoff stub written at the end of the plans/12 work (2026-09-07),
+Status: **not started** — tracked as [issue #24](https://github.com/wjduenow/sonos-nest/issues/24); a handoff stub written at the end of the plans/12 work (2026-09-07),
 so the next session starts from evidence instead of memory.
 
 ## What is known (all measured on hardware, 2026-09-07)
