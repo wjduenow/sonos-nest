@@ -6,6 +6,7 @@
 //
 // C6_PHASE 1: read only — host + slave versions, the update URL the core would fetch. No writes.
 // C6_PHASE 2: transfer only — download, begin/write/end into the C6's INACTIVE OTA slot. No activate.
+//             Phases 2 and 3 also need -DC6_IMAGE_SHA256="<hex>" (see below).
 // C6_PHASE 3: transfer + activate, then restart the P4 (boot resets the C6 via C6_EN) and print the
 //             version the C6 comes back with. Attempted ONCE per power cycle (RTC-retained flag),
 //             so a slave that ignores activate does not get re-flashed on every boot.
@@ -14,6 +15,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include "esp32-hal-hosted.h"
+#include "mbedtls/sha256.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -22,6 +24,15 @@
 #endif
 #ifndef C6_PHASE
 #define C6_PHASE 1
+#endif
+// The download runs with setInsecure() like every TLS client in this tree (no cert store on the
+// device), so origin is proven by content instead: phases that WRITE require the image's SHA-256,
+// taken on a trusted machine (`curl -sL <url> | sha256sum`), and refuse to end() on a mismatch.
+#if C6_PHASE >= 2 && !defined(C6_IMAGE_SHA256)
+#error "C6_PHASE >= 2 needs -DC6_IMAGE_SHA256=\"<64 hex chars>\" — the sha256 of the image, taken on a trusted machine"
+#endif
+#ifndef C6_IMAGE_SHA256
+#define C6_IMAGE_SHA256 ""
 #endif
 
 RTC_NOINIT_ATTR static uint32_t s_attempted;      // survives ESP.restart(), not a power cycle
@@ -49,6 +60,9 @@ static bool transfer(const char *url) {
   Serial.printf("[c6] GET %s -> %d, %d bytes\n", url, code, len);
   if (code != 200 || len <= 0) { http.end(); return false; }
   if (!hostedBeginUpdate()) { Serial.println("[c6] hostedBeginUpdate FAILED"); http.end(); return false; }
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts(&sha, 0);
   WiFiClient *st = http.getStreamPtr();
   static uint8_t buf[4096];
   int got = 0;
@@ -58,6 +72,7 @@ static bool transfer(const char *url) {
     if (avail <= 0) { if (!st->connected()) break; delay(5); continue; }
     const int n = st->read(buf, min(avail, (int)sizeof buf));
     if (n <= 0) continue;
+    mbedtls_sha256_update(&sha, buf, n);
     if (!hostedWriteUpdate(buf, n)) { Serial.printf("[c6] hostedWriteUpdate FAILED at %d\n", got); http.end(); return false; }
     got += n;
     if ((got / 4096) % 16 == 0) Serial.printf("[c6] %d / %d\n", got, len);
@@ -66,6 +81,15 @@ static bool transfer(const char *url) {
   http.end();
   Serial.printf("[c6] transferred %d of %d bytes\n", got, len);
   if (got != len) return false;
+  uint8_t digest[32]; char hex[65];
+  mbedtls_sha256_finish(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  for (int i = 0; i < 32; ++i) snprintf(hex + 2 * i, 3, "%02x", digest[i]);
+  Serial.printf("[c6] image sha256 %s\n", hex);
+  if (strcasecmp(hex, C6_IMAGE_SHA256) != 0) {
+    Serial.printf("[c6] SHA-256 MISMATCH (expected %s) — NOT ending the update; the inactive slot is left unactivated\n", C6_IMAGE_SHA256);
+    return false;
+  }
   const bool ended = hostedEndUpdate();
   Serial.printf("[c6] hostedEndUpdate -> %s\n", ended ? "OK" : "FAILED");
   return ended;

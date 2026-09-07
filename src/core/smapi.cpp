@@ -5,6 +5,7 @@
 
 #include <WiFiClientSecure.h>
 
+#include <atomic>
 #include <utility>   // std::move
 
 #include "heap_watch.h"       // heapwatch::note — attribute the internal-heap low-water
@@ -26,9 +27,12 @@ String tagValue(const String &xml, const char *tag, int from) {
     if (gt < 0) break;
     String name = xml.substring(lt + 1, gt);
     if (name.startsWith("/") || name.startsWith("?") || name.startsWith("!")) { p = gt + 1; continue; }
+    // Self-closing BEFORE the attributes are dropped: `<albumArtURI requiresAuthentication="false"/>`
+    // truncated at the space no longer ends in '/', was taken for an opening tag, and the value
+    // returned was everything up to some later </albumArtURI>.
+    if (name.endsWith("/")) { p = gt + 1; continue; }  // self-closing: no value
     const int sp = name.indexOf(' ');
     if (sp >= 0) name = name.substring(0, sp);        // drop attributes
-    if (name.endsWith("/")) { p = gt + 1; continue; }  // self-closing: no value
     const int colon = name.indexOf(':');
     const String bare = (colon >= 0) ? name.substring(colon + 1) : name;
     if (bare == want) {
@@ -87,14 +91,25 @@ String loginCreds(const String &token, const String &key, const String &househol
          "</householdId></loginToken></credentials>";
 }
 
-static volatile int s_inFlight = 0;
-bool busy() { return s_inFlight > 0; }
+// Atomic, not volatile: two Clients on two tasks each ++/-- this, and a lost update leaves
+// busy() stuck true, which silently stops the tile fetcher for good.
+static std::atomic<int> s_inFlight{0};
+bool busy() { return s_inFlight.load() > 0; }
 
 // --- Client --------------------------------------------------------------------------------------
 
 Client::Client(const char *host, const char *path, const char *logTag)
     : host_(host), path_(path), tag_(logTag) {
   bodyTag_ = String(logTag) + ".body";
+  mx_ = xSemaphoreCreateMutex();
+}
+
+namespace {
+struct Locked {   // holds the Client's mutex for one complete public operation
+  SemaphoreHandle_t m;
+  explicit Locked(SemaphoreHandle_t mx) : m(mx) { if (m) xSemaphoreTake(m, portMAX_DELAY); }
+  ~Locked() { if (m) xSemaphoreGive(m); }
+};
 }
 
 void Client::dropSession() {
@@ -104,7 +119,7 @@ void Client::dropSession() {
   cli_ = nullptr;
 }
 
-void Client::endSession() { dropSession(); }
+void Client::endSession() { Locked lk(mx_); dropSession(); }
 
 bool Client::ensureSession() {
   static const uint32_t kIdleDropMs = 30000;   // a session idle this long is presumed dead
@@ -200,6 +215,7 @@ bool Client::readResponse(String &out, bool &keepAlive) {
 }
 
 String Client::post(const String &action, const String &header, const String &body) {
+  Locked lk(mx_);
   // Counted, not flagged: two Clients (Amazon, Spotify) may each be mid-request on different tasks.
   struct InFlight { InFlight() { ++s_inFlight; } ~InFlight() { --s_inFlight; } } inFlight;
   const String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"

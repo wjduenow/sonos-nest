@@ -21,6 +21,8 @@
 // is a hard conflicting-declaration error there while compiling fine on the S3 units' 2.0.17. Same
 // 2.x/3.x split that needed a shim in core/net/registrar.cpp.
 #include <WiFiClientSecure.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 namespace smapi {
 
@@ -114,6 +116,9 @@ class Client {
   String           bodyTag_;              // "<tag>.body", for heapwatch::note
   WiFiClientSecure *cli_       = nullptr;
   uint32_t          lastUseMs_ = 0;
+  // One request at a time per Client. The Spotify link task and the search worker share one
+  // Client; without this, endSession() on one task deletes cli_ under a post() on the other.
+  SemaphoreHandle_t mx_        = nullptr;
 };
 
 }  // namespace smapi

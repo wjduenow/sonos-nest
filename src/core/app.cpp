@@ -372,7 +372,7 @@ static bool deadLinkFast() {
   WiFiClient probe;
   IPAddress ip;
   if (!ip.fromString(s_zoneIp)) return false;
-  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_seen = 0; return false; }   // alive after all
+  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_seen = 0; s_deadSinceMs = 0; return false; }   // alive after all
   LOG.printf("[net] RSSI 0 while 'connected' for %lus and %s does not answer TCP — the radio link is dead\n",
              (unsigned long)((now - s_firstMs) / 1000), s_zoneIp.c_str());
   s_seen = 0;

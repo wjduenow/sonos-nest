@@ -35,6 +35,7 @@
 #include "core/fav_cache.h"
 #include "core/radio_cache.h"
 #include "core/spotify.h"
+#include "core/smapi.h"      // smapi::cstr — never %s a String that came off the network
 #include "core/room_status.h"   // per-room volume + play state for the Rooms page (netTask polls)
 #include "core/sonos/ssdp.h"
 #include "core/unit.h"
@@ -1674,10 +1675,12 @@ static void radioSpotCb(lv_event_t *e) {
       const String uri = spotify::playUri(s_spCurItem);
       if (uri.isEmpty()) return;
       uiSoundPlay(UiSound::Confirm);
-      stateLock();
-      g_pending.playUri  = uri;
-      g_pending.playMeta = spotify::playMeta(s_spCurItem);
-      stateUnlock();
+      if (stateLock()) {
+        g_pending.playUri  = uri;
+        g_pending.playMeta = spotify::playMeta(s_spCurItem);
+
+        stateUnlock();
+      }
       return;
     }
     --i;                                // every other row sits one lower than its item
@@ -1693,10 +1696,12 @@ static void radioSpotCb(lv_event_t *e) {
     const String uri = spotify::playUri(it);
     if (uri.isEmpty()) return;
     uiSoundPlay(UiSound::Confirm);
-    stateLock();
-    g_pending.playUri  = uri;
-    g_pending.playMeta = spotify::playMeta(it);
-    stateUnlock();
+    if (stateLock()) {
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(it);
+
+      stateUnlock();
+    }
     return;
   }
   uiSoundPlay(UiSound::Tick);
@@ -1745,7 +1750,7 @@ static void radioSpotPaint() {
   // and reporting "nothing here" while hiding the one control that would have worked is the worst
   // of both. The empty case is now a playable row plus an explanation, not a dead end.
   LOG.printf("[ui    ] radio spotify: %u items, container=%s\n", (unsigned)s_spItems.size(),
-             s_spCurItem.id.length() ? s_spCurItem.id.c_str() : "(root)");
+             s_spCurItem.id.length() ? smapi::cstr(s_spCurItem.id) : "(root)");
   if (s_spItems.empty()) {
     lv_label_set_text(s_radioStatus, "No tracks listed. Play all still works.");
     lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
@@ -1789,7 +1794,7 @@ static void radioOnEnter() {
       s_spAwaiting = false;
     }
     LOG.printf("[ui    ] radio enter: src=spotify listEmpty=%d awaiting=%d state=%d cur=%s\n",
-               (int)listEmpty, (int)s_spAwaiting, (int)spotify::browseState(), s_spCurId.c_str());
+               (int)listEmpty, (int)s_spAwaiting, (int)spotify::browseState(), smapi::cstr(s_spCurId));
     if (listEmpty && !s_spAwaiting) radioShowSpotify(s_spCurId, s_spTitle);
   } else if (listEmpty) {
     radioShowGenres();
@@ -2271,6 +2276,7 @@ static String        s_srchInside;
 static spotify::Item s_srchInsideItem;    // kept whole: playing it needs its Kind, not just its id
 static bool          s_srchPlayAll = false;
 static uint32_t      s_srchBrowseGen = 0;
+static bool          s_srchAwaiting  = false;   // a drill-down THIS page started is in flight
 
 // A KEYMAP FOR SEARCHING, not for writing. The stock layout spends a row-and-a-bit on things a
 // query never contains — $ % ^ & * and the mode machinery to reach them — and carries an X that,
@@ -2360,10 +2366,12 @@ static void srchRowCb(lv_event_t *e) {
       const String uri = spotify::playUri(s_srchInsideItem);
       if (uri.isEmpty()) return;
       uiSoundPlay(UiSound::Confirm);
-      stateLock();
-      g_pending.playUri  = uri;
-      g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
-      stateUnlock();
+      if (stateLock()) {
+        g_pending.playUri  = uri;
+        g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
+
+        stateUnlock();
+      }
       return;
     }
     --i;
@@ -2374,18 +2382,21 @@ static void srchRowCb(lv_event_t *e) {
     const String uri = spotify::playUri(it);
     if (uri.isEmpty()) return;
     uiSoundPlay(UiSound::Confirm);
-    stateLock();
-    g_pending.playUri  = uri;
-    g_pending.playMeta = spotify::playMeta(it);
-    stateUnlock();
+    if (stateLock()) {
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(it);
+
+      stateUnlock();
+    }
     return;
   }
   uiSoundPlay(UiSound::Tick);
   s_srchInside = it.title;
   s_srchInsideItem = it;
   s_srchBrowseGen = spotify::browseGen();
+  s_srchAwaiting  = true;
   spotify::browseStart(it.id);
-  lv_label_set_text_fmt(s_srchStatus, "Opening %s...", it.title.c_str());
+  lv_label_set_text_fmt(s_srchStatus, "Opening %s...", smapi::cstr(it.title));
   lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -2472,6 +2483,7 @@ static void srchPaintRows() {
 static void srchPaint() {
   spotify::searchResults(s_srchItems);
   s_srchInside = "";          // these rows answer the query again, not a container
+  s_srchAwaiting = false;
   s_srchInsideItem = spotify::Item {};
   srchPaintRows();
 }
@@ -3610,12 +3622,15 @@ void uiTick() {
 
     // A drill-down lands in the BROWSE slot, not the search slot, and paints the same rows.
     const uint32_t bgen = spotify::browseGen();
-    if (bgen != s_srchBrowseGen && s_srchInside.length()) {
+    // Only a browse THIS page started: the slot is shared with the Radio page, and a Radio browse
+    // landing while s_srchInside is still set would repaint Search with Radio's rows.
+    if (s_srchAwaiting && bgen != s_srchBrowseGen && s_srchInside.length()) {
       s_srchBrowseGen = bgen;
+      s_srchAwaiting  = false;
       spotify::browseResults(s_srchItems);
       srchPaintRows();
-      if (s_srchItems.empty()) lv_label_set_text_fmt(s_srchStatus, "%s is empty.", s_srchInside.c_str());
-      else                     lv_label_set_text(s_srchStatus, s_srchInside.c_str());
+      if (s_srchItems.empty()) lv_label_set_text_fmt(s_srchStatus, "%s is empty.", smapi::cstr(s_srchInside));
+      else                     lv_label_set_text(s_srchStatus, smapi::cstr(s_srchInside));
       lv_obj_remove_flag(s_srchStatus, LV_OBJ_FLAG_HIDDEN);
     }
 

@@ -224,9 +224,9 @@ static size_t obtain(const Req &r) {
   if (code != 200) { http.end(); return 0; }
   const String ct = http.header("Content-Type");
   if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
-    LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, ct.c_str());
+    LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, smapi::cstr(ct));
     http.end();
-    if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) { markBad(r.key); xSemaphoreGive(s_lock); }
+    markBad(r.key);     // takes s_lock itself — taking it here first deadlocked the worker
     return 0;
   }
   const int len = http.getSize();

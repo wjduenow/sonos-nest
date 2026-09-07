@@ -99,9 +99,12 @@ void adopt() {
                           "<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>"
                           "<Filter>*</Filter><StartingIndex>0</StartingIndex>"
                           "<RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>", r)) {
-      const int at = r.indexOf("sid=12");
-      const int sn = (at < 0) ? -1 : r.indexOf("sn=", at);
-      if (sn > 0) {
+      // "sid=12&" with its delimiter — "sid=12" alone also matches sid=120..129 — and the sn= must
+      // sit inside the SAME <res>, or a later favourite's serial from another service is adopted.
+      const int at  = r.indexOf("sid=12&");
+      const int end = (at < 0) ? -1 : r.indexOf("</res", at);
+      const int sn  = (at < 0) ? -1 : r.indexOf("sn=", at);
+      if (sn > 0 && (end < 0 || sn < end)) {
         const uint8_t v = (uint8_t)strtoul(r.substring(sn + 3, sn + 6).c_str(), nullptr, 10);
         if (v) { settingsSetSpotifySerial(v); LOG.printf("[spotify] account serial sn=%u\n", v); }
       }
@@ -130,7 +133,7 @@ static bool linkBegin(String &regUrlOut) {
   if (regUrlOut.isEmpty() || s_linkCode.isEmpty()) {
     const String fault = unescapeXml(tagValue(r, "faultstring"));
     LOG.printf("[spotify] link begin failed (%s)\n",
-               fault.length() ? fault.c_str() : "no regUrl/linkCode in the response");
+               fault.length() ? smapi::cstr(fault) : "no regUrl/linkCode in the response");
     return false;
   }
   return true;

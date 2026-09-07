@@ -18,8 +18,9 @@ re-investigation first.
    time, persisted, never intermingled.
 3. ~~**A fix for a live bug**~~ **SHIPPED** — Amazon's link ceremony, plus three more bugs testing
    it uncovered. §5.
-4. **A docs pass** — still owed. §9 is the gate and it is not met: the README still does not
-   mention the jukebox or button-v2.
+4. **A docs pass** — README done (units table, the Search page, the Radio sources, button-v2;
+   CLAUDE.md and plans/08 updated). Still owed from §9: the per-unit jukebox guide in `docs/` and
+   photos of the real panel.
 
 **Not in scope: YouTube Music.** Its SMAPI endpoint is behind a Google API-key gateway that only
 Sonos's own app and firmware can pass. Closed, with evidence, in `plans/08`. Don't re-open it here.
@@ -393,11 +394,9 @@ plans/08 §"Construction rules" has the reasoning and the known-good `desc` form
 
 The screens are not done until these are, in the same PR as the feature:
 
-- **`README.md`** — the units table and the feature blurbs. Note it is **already behind**: it lists
-  three units and does not mention **sonos-jukebox** or **sonos-button-v2** at all, and the
-  architecture tree omits `boards/crowpanel_p4_7in/`, `boards/xiao_esp32s3/`,
-  `boards/button_common/` and `units/sonos_jukebox/`. Fix that in the same pass — a reader landing
-  on this repo currently cannot tell the jukebox exists.
+- ~~**`README.md`** — the units table and the feature blurbs.~~ **DONE** in this PR: the units
+  table lists sonos-jukebox and sonos-button-v2, the jukebox blurb names Search and the two Radio
+  sources, and the architecture tree carries the jukebox and button boards.
 - **`docs/` per-unit guide for the jukebox** — there are guides for nest and sleep-machine
   (`docs/sonos-nest.md`, `docs/sonos-sleep-machine.md`) and none for the jukebox. The new screens
   are a good reason to write it: screens, linking a music service, the Radio sources, Search.

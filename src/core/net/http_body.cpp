@@ -70,7 +70,9 @@ long read(HTTPClient &http, uint32_t maxMs, Sink sink, void *ctx) {
     for (;;) {
       if (!readLine(c, line, sizeof line, deadline)) return -1;
       if (!line[0]) continue;                          // a stray blank line; be lenient
-      const size_t sz = strtoul(line, nullptr, 16);    // stops at a ';' chunk extension by itself
+      char        *end = nullptr;
+      const size_t sz  = strtoul(line, &end, 16);      // stops at a ';' chunk extension by itself
+      if (end == line) return -1;                      // no hex digits: framing is lost, not "done"
       if (sz == 0) return total;                       // the last chunk; trailers are not wanted
       const long n = readN(c, sz, deadline, sink, ctx, stopped);
       if (n < 0) return -1;
