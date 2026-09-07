@@ -35,7 +35,11 @@ so the next session starts from evidence instead of memory.
    a per-socket receive window (lwIP `TCP_WND` is global and the buffer experiment is documented
    as harmful; a per-pcb window via `setsockopt(SO_RCVBUF)` is untested here). #184's reporter
    tried 5760 and 32768 windows without relief — treat this as the weaker lead.
-3. **Do nothing at play time.** Defer the Now Playing fetch until the GENA notify and the poll are
+3. **Fetch tiles only for the viewport.** Search paints up to 8 rows and a drill-down up to 24
+   while the list shows five; `artcache::get()` queues a fetch for every miss, so a single paint
+   can enqueue 24 TLS fetches, paced 120 ms apart. Gate `srchPaintArt()` to the visible rows and
+   repaint on scroll (the Amazon Radio list has the same shape). Raised in review on PR #23.
+4. **Do nothing at play time.** Defer the Now Playing fetch until the GENA notify and the poll are
    quiet, and never overlap it with a tile fetch or a browse (extend the `smapi::busy()` rule to a
    single "one inbound transfer at a time" gate across art, tiles, browse and the crawl).
 
