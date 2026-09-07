@@ -269,6 +269,13 @@ static void worker(void *) {
     }
     if (have) continue;
 
+    // PACING, for the same reason radio_cache paces its crawl: back-to-back requests are the
+    // sustained-load profile that kills this board's ESP-Hosted link (plans/07), and a screen of
+    // rows enqueues a whole screen of fetches at once. 120 ms is invisible on a list that scrolls
+    // at human speed and turns a burst into a trickle. It does not CURE the link fault — nothing
+    // here does — it stops us provoking it.
+    vTaskDelay(pdMS_TO_TICKS(120));
+
     const size_t n = obtain(r);
     if (!n) continue;
 
@@ -392,9 +399,19 @@ const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
   // Miss: queue it. The queue is short and drops when full rather than blocking the UI task — a
   // fast flick past fifty rows should not enqueue fifty fetches, and the rows still on screen when
   // it settles will simply ask again on the next pass.
+  const String small = thumbUrl(artUrl, s_px);
+  // A PNG is a guaranteed decode failure — the decoders here are JPEG-only — so fetching one costs
+  // a TLS handshake to learn nothing. Checked AFTER thumbUrl() because Amazon's rewrite transcodes
+  // PNG originals to JPEG, so only what we are actually about to request matters.
+  //
+  // This is not just wasted bytes. Spotify's placeholder icons live on a DIFFERENT host from its
+  // artwork (spotify-static.ws.sonos.com vs i.scdn.co), and the fetcher keeps one pooled TLS
+  // client, so a list mixing the two forced a fresh handshake on every alternation — the
+  // connect/close churn plans/07 identifies as what wedges this board's ESP-Hosted link.
+  if (small.endsWith(".png") || small.endsWith(".PNG")) return nullptr;
+
   Req r {};
   strncpy(r.key, stationKey.c_str(), sizeof r.key - 1);
-  const String small = thumbUrl(artUrl, s_px);
   strncpy(r.url, small.c_str(), sizeof r.url - 1);
   xQueueSend(s_q, &r, 0);
   return nullptr;
