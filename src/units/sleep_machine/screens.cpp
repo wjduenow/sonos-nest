@@ -17,6 +17,7 @@
 #include "core/sonos/ssdp.h"   // sonos::zones() for the device picker
 #include "core/net/wifi.h"     // wifiApply/result/ssid for Wi-Fi setup
 #include "ui_scale.h"
+#include "latin_fonts.h"   // smFontNN — montserrat + Latin-1, for anything showing metadata
 #include <lvgl.h>
 #include <Arduino.h>
 #include <WiFi.h>              // scanNetworks for the Wi-Fi picker
@@ -428,7 +429,7 @@ static lv_obj_t *makeGhost(lv_align_t align, lv_coord_t xoff, lv_obj_t **iconOut
   lv_obj_set_style_border_opa(g, LV_OPA_30, 0);
   lv_obj_set_style_opa(g, LV_OPA_40, 0);              // whole ghost is dim
   lv_obj_t *ic = lv_label_create(g);
-  lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(ic, &smFont20, 0);
   lv_obj_set_style_text_color(ic, lv_color_hex(COL_SUBTLE), 0);
   lv_obj_center(ic);
   *iconOut = ic;
@@ -516,7 +517,7 @@ static lv_obj_t *makeButton(lv_obj_t *parent, const char *text, uint32_t color, 
   lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);   // let swipe gestures reach the page below
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
-  lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_font(l, &smFont24, 0);
   lv_obj_set_style_text_color(l, lv_color_white(), 0);
   lv_label_set_text(l, text);
   lv_obj_center(l);
@@ -548,7 +549,7 @@ static lv_obj_t *makeGlassButton(lv_obj_t *parent, const char *text, uint32_t ac
   lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
-  lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_font(l, &smFont24, 0);
   lv_obj_set_style_text_color(l, light, 0);
   lv_label_set_text(l, text);
   lv_obj_center(l);
@@ -573,7 +574,7 @@ static lv_obj_t *makeListButton(lv_obj_t *parent, const char *text, uint32_t col
   lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
-  lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(l, &smFont20, 0);
   lv_obj_set_style_text_color(l, lv_color_white(), 0);
   lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
   lv_obj_set_width(l, SW(84));
@@ -661,7 +662,7 @@ static void openRooms() {
   if (stateLock()) { cur = g_player.zoneName; stateUnlock(); }
   std::vector<sonos::Zone> zs;
   sonos::zonesSnapshot(zs);   // copy: netTask rewrites the live list during discovery
-  if (zs.empty()) makeLabel(s_roomsList, "Searching...", &lv_font_montserrat_20, COL_SUBTLE);
+  if (zs.empty()) makeLabel(s_roomsList, "Searching...", &smFont20, COL_SUBTLE);
   for (size_t i = 0; i < zs.size(); ++i) {
     lv_obj_t *b = makeButton(s_roomsList, zs[i].name.c_str(),
                              zs[i].name == cur ? COL_CLOUD : COL_SLATE, roomClickCb);
@@ -689,7 +690,7 @@ static void kbReadyCb(lv_event_t *) {
   s_wifiConnecting = true;
   lv_obj_clean(s_wifiList);
   makeLabel(s_wifiList, (String("Connecting to ") + s_pickedSsid + "...").c_str(),
-            &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+            &smFont20, lv_color_to_u32(lv_color_white()));
   showOnly(s_wifi);
 }
 static void kbCancelCb(lv_event_t *) { openWifi(); }
@@ -698,7 +699,7 @@ static void openWifi() {
   s_wifiConnecting = false;
   lv_obj_clean(s_wifiList);
   s_ssids.clear();
-  makeLabel(s_wifiList, "Scanning" LV_SYMBOL_REFRESH, &lv_font_montserrat_20, COL_SUBTLE);
+  makeLabel(s_wifiList, "Scanning" LV_SYMBOL_REFRESH, &smFont20, COL_SUBTLE);
   WiFi.scanDelete();
   WiFi.scanNetworks(true /* async */);
   s_wifiScanPending = true;
@@ -735,7 +736,7 @@ static void openTracks(bool wake) {
   String cur = wake ? wakeTrackPath() : currentTrack();
   lv_label_set_text(s_tracksHdr, wake ? "Wake Track" : "Sleep Track");
   if (n == 0) {
-    makeLabel(s_tracksList, "No MP3s on the SD card", &lv_font_montserrat_20, COL_SUBTLE);
+    makeLabel(s_tracksList, "No MP3s on the SD card", &smFont20, COL_SUBTLE);
   }
   for (int i = 0; i < n; ++i) {
     const char *name = localTrackName(i);
@@ -892,9 +893,9 @@ void uiInit() {
   lv_obj_set_style_pad_all(s_homeBtn, SH(2), 0);
   lv_obj_set_style_pad_row(s_homeBtn, SH(2), 0);
   s_homeIcon = lv_label_create(s_homeBtn);
-  lv_obj_set_style_text_font(s_homeIcon, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_homeIcon, &smFont28, 0);
   s_homeBtnLabel = lv_label_create(s_homeBtn);
-  lv_obj_set_style_text_font(s_homeBtnLabel, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_font(s_homeBtnLabel, &smFont24, 0);
   lv_label_set_long_mode(s_homeBtnLabel, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(s_homeBtnLabel, SW(64));
   lv_obj_set_style_text_align(s_homeBtnLabel, LV_TEXT_ALIGN_CENTER, 0);
@@ -963,7 +964,7 @@ void uiInit() {
   // STARTING — brief transitional state while playback is enqueued (label set per track).
   s_starting = makePage(scr);
   makeLabel(s_starting, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, COL_CLOUD);
-  s_startingLabel = makeLabel(s_starting, "Starting...", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  s_startingLabel = makeLabel(s_starting, "Starting...", &smFont24, lv_color_to_u32(lv_color_white()));
   lv_obj_set_width(s_startingLabel, SW(92));
   lv_label_set_long_mode(s_startingLabel, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(s_startingLabel, LV_TEXT_ALIGN_CENTER, 0);
@@ -978,7 +979,7 @@ void uiInit() {
   lv_obj_set_flex_align(s_playing, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_all(s_playing, SH(7), 0);
 
-  s_playTitle = makeLabel(s_playing, "Ocean Waves", &lv_font_montserrat_28, lv_color_to_u32(lv_color_white()));
+  s_playTitle = makeLabel(s_playing, "Ocean Waves", &smFont28, lv_color_to_u32(lv_color_white()));
   lv_obj_set_width(s_playTitle, SW(94));
   lv_label_set_long_mode(s_playTitle, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(s_playTitle, LV_TEXT_ALIGN_CENTER, 0);
@@ -1015,7 +1016,7 @@ void uiInit() {
 
   // TOAST — transient bottom message for the placeholder actions / errors.
   s_toast = lv_label_create(scr);
-  lv_obj_set_style_text_font(s_toast, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(s_toast, &smFont20, 0);
   lv_obj_set_style_text_color(s_toast, lv_color_white(), 0);
   lv_obj_set_style_bg_color(s_toast, lv_color_hex(COL_SLATE), 0);
   lv_obj_set_style_bg_opa(s_toast, LV_OPA_COVER, 0);
@@ -1032,9 +1033,9 @@ void uiInit() {
   lv_obj_remove_flag(s_settings, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *setBack = makeButton(s_settings, LV_SYMBOL_LEFT " Back", COL_SLATE, backHomeCb);
   lv_obj_set_size(setBack, SW(28), SH(15));
-  lv_obj_set_style_text_font(lv_obj_get_child(setBack, 0), &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(setBack, 0), &smFont20, 0);
   lv_obj_align(setBack, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  lv_obj_t *setHdr = makeLabel(s_settings, "Settings", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_t *setHdr = makeLabel(s_settings, "Settings", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(setHdr, LV_ALIGN_TOP_MID, 0, SH(6));
 
   s_settingsList = lv_obj_create(s_settings);
@@ -1076,9 +1077,9 @@ void uiInit() {
   lv_obj_remove_flag(s_rooms, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *rback = makeButton(s_rooms, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
   lv_obj_set_size(rback, SW(28), SH(15));
-  lv_obj_set_style_text_font(lv_obj_get_child(rback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(rback, 0), &smFont20, 0);
   lv_obj_align(rback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  lv_obj_t *rhdr = makeLabel(s_rooms, "Sonos Device", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_t *rhdr = makeLabel(s_rooms, "Sonos Device", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(rhdr, LV_ALIGN_TOP_MID, 0, SH(6));
   s_roomsList = lv_obj_create(s_rooms);
   lv_obj_remove_style_all(s_roomsList);
@@ -1096,9 +1097,9 @@ void uiInit() {
   lv_obj_remove_flag(s_wifi, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *wback = makeButton(s_wifi, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
   lv_obj_set_size(wback, SW(28), SH(15));
-  lv_obj_set_style_text_font(lv_obj_get_child(wback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(wback, 0), &smFont20, 0);
   lv_obj_align(wback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  lv_obj_t *whdr = makeLabel(s_wifi, "Wi-Fi", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_t *whdr = makeLabel(s_wifi, "Wi-Fi", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(whdr, LV_ALIGN_TOP_MID, 0, SH(6));
   s_wifiList = lv_obj_create(s_wifi);
   lv_obj_remove_style_all(s_wifiList);
@@ -1114,7 +1115,7 @@ void uiInit() {
   lv_obj_set_size(s_wifiPw, SCREEN_W, SCREEN_H);
   lv_obj_center(s_wifiPw);
   lv_obj_remove_flag(s_wifiPw, LV_OBJ_FLAG_SCROLLABLE);
-  s_wifiSsidLabel = makeLabel(s_wifiPw, "", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  s_wifiSsidLabel = makeLabel(s_wifiPw, "", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(s_wifiSsidLabel, LV_ALIGN_TOP_MID, 0, SH(1));
   s_wifiPwArea = lv_textarea_create(s_wifiPw);
   lv_textarea_set_one_line(s_wifiPwArea, true);
@@ -1134,7 +1135,7 @@ void uiInit() {
   lv_obj_set_size(s_nameEdit, SCREEN_W, SCREEN_H);
   lv_obj_center(s_nameEdit);
   lv_obj_remove_flag(s_nameEdit, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t *nameHdr = makeLabel(s_nameEdit, "Device Name", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_t *nameHdr = makeLabel(s_nameEdit, "Device Name", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(nameHdr, LV_ALIGN_TOP_MID, 0, SH(1));
   s_nameArea = lv_textarea_create(s_nameEdit);
   lv_textarea_set_one_line(s_nameArea, true);
@@ -1157,12 +1158,12 @@ void uiInit() {
   lv_obj_remove_flag(s_manager, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *mback = makeButton(s_manager, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
   lv_obj_set_size(mback, SW(28), SH(15));
-  lv_obj_set_style_text_font(lv_obj_get_child(mback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(mback, 0), &smFont20, 0);
   lv_obj_align(mback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  lv_obj_t *mhdr = makeLabel(s_manager, "File Manager", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  lv_obj_t *mhdr = makeLabel(s_manager, "File Manager", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(mhdr, LV_ALIGN_TOP_MID, 0, SH(6));
   // The URL wraps rather than ellipsizing — it's useless if you can't read all of it.
-  s_managerUrl = makeLabel(s_manager, "", &lv_font_montserrat_24, lv_color_to_u32(lv_color_white()));
+  s_managerUrl = makeLabel(s_manager, "", &smFont24, lv_color_to_u32(lv_color_white()));
   lv_obj_set_width(s_managerUrl, SW(92));
   lv_label_set_long_mode(s_managerUrl, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(s_managerUrl, LV_TEXT_ALIGN_CENTER, 0);
@@ -1181,9 +1182,9 @@ void uiInit() {
   lv_obj_remove_flag(s_tracks, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *tback = makeButton(s_tracks, LV_SYMBOL_LEFT " Back", COL_SLATE, backSettingsCb);
   lv_obj_set_size(tback, SW(28), SH(15));
-  lv_obj_set_style_text_font(lv_obj_get_child(tback, 0), &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(tback, 0), &smFont20, 0);
   lv_obj_align(tback, LV_ALIGN_TOP_LEFT, SW(3), SH(3));
-  s_tracksHdr = makeLabel(s_tracks, "Sleep Track", &lv_font_montserrat_20, lv_color_to_u32(lv_color_white()));
+  s_tracksHdr = makeLabel(s_tracks, "Sleep Track", &smFont20, lv_color_to_u32(lv_color_white()));
   lv_obj_align(s_tracksHdr, LV_ALIGN_TOP_MID, 0, SH(6));
   s_tracksList = lv_obj_create(s_tracks);
   lv_obj_remove_style_all(s_tracksList);
@@ -1209,7 +1210,7 @@ void uiInit() {
   lv_obj_set_flex_align(s_ssBox, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(s_ssBox, SH(2), 0);
   s_clockLabel = makeLabel(s_ssBox, "--:--", &lv_font_montserrat_48, COL_SUBTLE);   // current time
-  s_timerLabel = makeLabel(s_ssBox, "", &lv_font_montserrat_28, COL_SUBTLE);        // sleep elapsed
+  s_timerLabel = makeLabel(s_ssBox, "", &smFont28, COL_SUBTLE);        // sleep elapsed
 
   lv_obj_add_event_cb(scr, screenGestureCb, LV_EVENT_GESTURE, nullptr);
 
@@ -1230,7 +1231,7 @@ void uiProvisioning(const char *apSsid) {
 
     lv_obj_t *t = lv_label_create(s_provOverlay);
     lv_obj_set_style_text_color(t, lv_color_white(), 0);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(t, &smFont20, 0);
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(t, LV_PCT(85));
@@ -1294,7 +1295,7 @@ void uiTick() {
       s_wifiScanPending = false;
       lv_obj_clean(s_wifiList);
       s_ssids.clear();
-      if (n == 0) makeLabel(s_wifiList, "No networks found", &lv_font_montserrat_20, COL_SUBTLE);
+      if (n == 0) makeLabel(s_wifiList, "No networks found", &smFont20, COL_SUBTLE);
       for (int i = 0; i < n && (int)s_ssids.size() < 24; ++i) {
         String ss = WiFi.SSID(i);
         if (ss.length() == 0) continue;
