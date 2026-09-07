@@ -329,7 +329,7 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
                             LV_STATE_PRESSED);
   if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
 
-  lv_obj_t *l = label(b, sym, &lv_font_montserrat_24, solid ? JB_ACCENT_INK : JB_TEXT_MUTED);
+  lv_obj_t *l = label(b, sym, &jbFont24, solid ? JB_ACCENT_INK : JB_TEXT_MUTED);
   lv_obj_center(l);
   if (labelOut) *labelOut = l;
   return b;
@@ -978,7 +978,7 @@ static void buildRooms() {
   lv_obj_set_style_border_width(bar, 1, 0);
   lv_obj_set_style_border_color(bar, lv_color_hex(JB_SCREEN_LINE), 0);
 
-  s_grpCount = label(bar, "--", &lv_font_montserrat_24, JB_TEXT);
+  s_grpCount = label(bar, "--", &jbFont24, JB_TEXT);
   lv_obj_align(s_grpCount, LV_ALIGN_TOP_LEFT, 18, 14);
   s_grpMembers = label(bar, "", &jbFont12, JB_TEXT_DIM);
   lv_label_set_long_mode(s_grpMembers, LV_LABEL_LONG_DOT);
@@ -1252,7 +1252,7 @@ static void buildFavourites() {
   lv_obj_set_size(s_favBack, 52, 52);
   lv_obj_align(s_favBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
   lv_obj_add_event_cb(s_favBack, favBackCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = label(s_favBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_t *bl = label(s_favBack, LV_SYMBOL_LEFT, &jbFont24, JB_TEXT);
   lv_obj_center(bl);
   lv_obj_add_flag(s_favBack, LV_OBJ_FLAG_HIDDEN);
 
@@ -2046,7 +2046,7 @@ static void buildRadio() {
   lv_obj_set_size(s_radioBack, 52, 52);
   lv_obj_align(s_radioBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
   lv_obj_add_event_cb(s_radioBack, radioBackCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = label(s_radioBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_t *bl = label(s_radioBack, LV_SYMBOL_LEFT, &jbFont24, JB_TEXT);
   lv_obj_center(bl);
   lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
 
@@ -2646,7 +2646,7 @@ static void buildSettings() {
 
   lv_obj_t *dn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, hourDownCb);
   lv_obj_align(dn, LV_ALIGN_TOP_LEFT, 400, PAD_TOP + 400);
-  s_hourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+  s_hourLbl = label(pg, "", &jbFont24, JB_TEXT);
   lv_obj_align(s_hourLbl, LV_ALIGN_TOP_LEFT, 462, PAD_TOP + 408);
   lv_label_set_text_fmt(s_hourLbl, "%02d:00", settingsRadioRefreshHour());
   lv_obj_t *up = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, hourUpCb);
@@ -2692,7 +2692,7 @@ static void buildSettings() {
 
     lv_obj_t *fdn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, favHourDownCb);
     lv_obj_align(fdn, LV_ALIGN_TOP_LEFT, 400, Y);
-    s_favHourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+    s_favHourLbl = label(pg, "", &jbFont24, JB_TEXT);
     lv_obj_align(s_favHourLbl, LV_ALIGN_TOP_LEFT, 462, Y + 8);
     lv_label_set_text_fmt(s_favHourLbl, "%02d:00", settingsFavRefreshHour());
     lv_obj_t *fup = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, favHourUpCb);

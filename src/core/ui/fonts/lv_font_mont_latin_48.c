@@ -3,16 +3,17 @@
  *
  * WHY THIS FILE EXISTS. LVGL's lv_font_montserrat_48 has no accented characters, so Sonos
  * metadata rendered "Mötley Crüe" as "M□tley Cr□e" (issue #21). This is NOT a replacement for the
- * built-in — it is the .fallback half of jbFont48, which is the built-in plus this. ASCII and
+ * built-in — it is the .fallback half of a wrapper font that is the built-in plus this. ASCII and
  * the LV_SYMBOL_* FontAwesome glyphs still come from the built-in; only U+00A0-U+00FF come from
- * here. See latin_fonts.h for why it is wired that way round.
+ * here. See src/core/ui/fonts/README.md, and any unit's latin_fonts.h, for why it is wired that
+ * way round.
  *
  * Generated, not hand-authored — regenerate rather than edit. From the repo root, using the exact
  * TTF LVGL builds its own faces from, so the metrics match glyph for glyph:
  *   npm install lv_font_conv
  *   npx lv_font_conv --font .pio/libdeps/sonos-jukebox/lvgl/scripts/built_in_font/Montserrat-Medium.ttf \
  *       --size 48 --bpp 4 --range 0xA0-0xFF --format lvgl --lv-include lvgl.h \
- *       --no-compress --no-prefilter --no-kerning -o src/units/sonos_jukebox/lv_font_mont_latin_48.c
+ *       --no-compress --no-prefilter --no-kerning -o src/core/ui/fonts/lv_font_mont_latin_48.c
  *
  * --no-kerning is deliberate: kern pairs only apply within one font, and every pair that matters
  * here straddles the fallback boundary (an accented letter beside an ASCII one), so the tables

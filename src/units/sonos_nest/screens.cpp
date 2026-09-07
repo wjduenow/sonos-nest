@@ -1,5 +1,6 @@
 #include "screens.h"
 #include "ui_scale.h"
+#include "latin_fonts.h"   // nestFontNN — montserrat + Latin-1, for anything showing metadata
 #include "core/ui/album_art.h"
 #include "core/player_state.h"
 #include "core/sonos/ssdp.h"
@@ -35,7 +36,7 @@ struct ListScreen {
 // List rows are sized as finger touch targets (~2x a text line) with a large font. Tapping a
 // row selects it; dragging up/down scrolls the list (LVGL treats a press that moves past the
 // scroll threshold as a scroll, not a click).
-static const lv_font_t *LIST_FONT = &lv_font_montserrat_28;
+static const lv_font_t *LIST_FONT = &nestFont28;
 
 static void listHighlight(ListScreen &L) {
   uint32_t n = lv_obj_get_child_count(L.list);
@@ -57,7 +58,7 @@ static void listBuild(ListScreen &L, const char *titleText) {
 
   L.title = lv_label_create(L.scr);
   lv_obj_set_style_text_color(L.title, lv_color_white(), 0);
-  lv_obj_set_style_text_font(L.title, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(L.title, &nestFont20, 0);
   lv_label_set_text(L.title, titleText);
   lv_obj_align(L.title, LV_ALIGN_TOP_MID, 0, SH(12));
 
@@ -145,7 +146,7 @@ static lv_obj_t *makeNavBtn(lv_obj_t *scr, const char *sym, lv_align_t align, lv
   lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);   // let edge-drag gestures reach the screen
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t *l = lv_label_create(b);
-  lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);   // bigger arrow glyph
+  lv_obj_set_style_text_font(l, &nestFont28, 0);   // bigger arrow glyph
   lv_label_set_text(l, sym);
   lv_obj_center(l);
   return b;
@@ -189,13 +190,13 @@ static void buildNowPlaying() {
 
   s_zone = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_zone, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_zone, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(s_zone, &nestFont20, 0);
   lv_label_set_text(s_zone, "");
   lv_obj_align(s_zone, LV_ALIGN_CENTER, 0, -SH(32));
 
   s_title = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_title, lv_color_white(), 0);
-  lv_obj_set_style_text_font(s_title, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_title, &nestFont28, 0);
   lv_obj_set_style_text_align(s_title, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(s_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(s_title, SW(70));
@@ -204,7 +205,7 @@ static void buildNowPlaying() {
 
   s_artist = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_artist, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_artist, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_font(s_artist, &nestFont24, 0);
   lv_obj_set_style_text_align(s_artist, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(s_artist, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(s_artist, SW(70));
@@ -213,13 +214,13 @@ static void buildNowPlaying() {
 
   s_time = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_time, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_time, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(s_time, &nestFont20, 0);
   lv_label_set_text(s_time, LV_SYMBOL_STOP " 0:00 / 0:00");
   lv_obj_align(s_time, LV_ALIGN_CENTER, 0, SH(33));
 
   s_vol = lv_label_create(s_scrNow);
   lv_obj_set_style_text_color(s_vol, lv_color_white(), 0);
-  lv_obj_set_style_text_font(s_vol, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_vol, &nestFont28, 0);
   lv_obj_set_style_bg_color(s_vol, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(s_vol, LV_OPA_70, 0);
   lv_obj_set_style_pad_all(s_vol, SW(2), 0);
@@ -459,7 +460,7 @@ static void buildClock() {
 
   s_clkDate = lv_label_create(s_scrClock);
   lv_obj_set_style_text_color(s_clkDate, lv_palette_main(LV_PALETTE_GREY), 0);
-  lv_obj_set_style_text_font(s_clkDate, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_clkDate, &nestFont28, 0);
   lv_obj_set_style_transform_pivot_x(s_clkDate, lv_pct(50), 0);
   lv_obj_set_style_transform_pivot_y(s_clkDate, lv_pct(50), 0);
   lv_obj_set_style_transform_scale_x(s_clkDate, 384, 0);   // ~1.5x -> ~42px
@@ -499,7 +500,7 @@ static void buildSettings() {
 
   lv_obj_t *hdr = lv_label_create(s_scrSettings);
   lv_obj_set_style_text_color(hdr, lv_color_white(), 0);
-  lv_obj_set_style_text_font(hdr, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(hdr, &nestFont20, 0);
   lv_label_set_text(hdr, "Settings");
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, SH(12));
 
@@ -515,7 +516,7 @@ static void buildSettings() {
 
   s_setBright = lv_label_create(s_scrSettings);
   lv_obj_set_style_text_color(s_setBright, lv_color_white(), 0);
-  lv_obj_set_style_text_font(s_setBright, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_setBright, &nestFont28, 0);
   lv_obj_align(s_setBright, LV_ALIGN_CENTER, 0, -SH(4));
 
   s_setOta = lv_label_create(s_scrSettings);
@@ -553,14 +554,14 @@ static void buildOta() {
 
   lv_obj_t *t = lv_label_create(s_scrOta);   // static title — drawn once, never reflows
   lv_obj_set_style_text_color(t, lv_color_white(), 0);
-  lv_obj_set_style_text_font(t, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(t, &nestFont28, 0);
   lv_label_set_text(t, "Updating");
   lv_obj_align(t, LV_ALIGN_CENTER, 0, -SH(14));
 
   // Fixed-width, centre-aligned percent label so it never shifts as the number widens.
   s_otaPct = lv_label_create(s_scrOta);
   lv_obj_set_style_text_color(s_otaPct, lv_color_white(), 0);
-  lv_obj_set_style_text_font(s_otaPct, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(s_otaPct, &nestFont28, 0);
   lv_obj_set_width(s_otaPct, SW(60));
   lv_obj_set_style_text_align(s_otaPct, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_text(s_otaPct, "0%");
@@ -591,7 +592,7 @@ void uiProvisioning(const char *apSsid) {
 
     lv_obj_t *t = lv_label_create(s_provOverlay);
     lv_obj_set_style_text_color(t, lv_color_white(), 0);
-    lv_obj_set_style_text_font(t, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(t, &nestFont20, 0);
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(t, LV_PCT(80));

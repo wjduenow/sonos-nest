@@ -34,8 +34,17 @@
 // one of these is a zeroed struct with a null get_glyph_dsc.
 #include <lvgl.h>
 
+// *** AUDIT BY WHAT A LABEL IS LATER SET TO, NOT BY THE TEXT IT IS CREATED WITH. *** 24 px was
+// first left out of this list on the strength of its call sites — every one of them creates an
+// LV_SYMBOL_* or a number. s_grpCount is created as "--" and then set to s_roomsData[a].name
+// whenever the group has a single member, so an accented room name still drew boxes in the
+// Rooms summary bar. Caught in review on PR #25, not by reading the constructors.
+//
+// 20 px is deliberately NOT here, and was re-checked the same way: all seven of its call sites
+// create an LV_SYMBOL_*, and all four later lv_label_set_text() calls write one too.
 extern lv_font_t jbFont12;   // badges, timecodes, browse-row subtitles, group member lists
 extern lv_font_t jbFont16;   // status-bar room name, room rows, dropdowns, screensaver meta
 extern lv_font_t jbFont22;   // Now Playing artist/album, browse row titles, favourites
+extern lv_font_t jbFont24;   // the Rooms group summary, which shows a lone room's NAME
 extern lv_font_t jbFont28;   // page titles (a browsed genre name), screensaver track title
 extern lv_font_t jbFont48;   // Now Playing title
