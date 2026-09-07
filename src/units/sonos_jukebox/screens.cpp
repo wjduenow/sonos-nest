@@ -1484,6 +1484,11 @@ static uint32_t  s_spShownGen = 0;
 static bool s_spAwaiting = false;
 static String    s_spTitle;                          // container we descended into, "" at the root
 static String    s_spCurId = "root";                 // what the rows on screen are showing
+// The container we descended INTO, kept whole rather than as an id because playing it needs its
+// Kind. Empty at the root. When it is playable — an album or a playlist — the list gets a synthetic
+// "Play all" first row, which is why the indices below carry an offset.
+static spotify::Item s_spCurItem;
+static bool          s_spPlayAll = false;
 static String   s_searchPending;                // last text seen, debounced in uiTick
 static uint32_t s_searchAt = 0;
 
@@ -1592,13 +1597,14 @@ static void radioSpotPaintArt() {
   if (s_spItems.empty() || s_radioTiles.empty()) return;
   const int32_t top = lv_obj_get_scroll_y(s_radioList);
   const int32_t bot = top + lv_obj_get_height(s_radioList);
-  for (size_t i = 0; i < s_radioTiles.size() && i < s_spItems.size(); i++) {
+  const size_t off = s_spPlayAll ? 1 : 0;
+  for (size_t i = off; i < s_radioTiles.size() && (i - off) < s_spItems.size(); i++) {
     lv_obj_t *tile = s_radioTiles[i];
-    if (!tile || s_spItems[i].artUrl.isEmpty()) continue;
+    const spotify::Item &row = s_spItems[i - off];
+    if (!tile || row.artUrl.isEmpty()) continue;
     const int32_t y = lv_obj_get_y(tile);
     if (y + 200 < top || y - 200 > bot) continue;
-    const lv_image_dsc_t *d = artcache::get(artKey(s_spItems[i].id, s_spItems[i].artUrl),
-                                            s_spItems[i].artUrl);
+    const lv_image_dsc_t *d = artcache::get(artKey(row.id, row.artUrl), row.artUrl);
     if (!d || lv_image_get_src(tile) == d) continue;
     lv_image_set_src(tile, d);
   }
@@ -1652,7 +1658,20 @@ static String spotifyKindLine(const spotify::Item &it) {
 }
 
 static void radioSpotCb(lv_event_t *e) {
-  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_spPlayAll) {
+    if (i == 0) {                       // the synthetic first row: play the container itself
+      const String uri = spotify::playUri(s_spCurItem);
+      if (uri.isEmpty()) return;
+      uiSoundPlay(UiSound::Confirm);
+      stateLock();
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(s_spCurItem);
+      stateUnlock();
+      return;
+    }
+    --i;                                // every other row sits one lower than its item
+  }
   if (i < 0 || i >= (int)s_spItems.size()) return;
   // A COPY, not a reference: radioShowSpotify() clears s_spItems before it uses the id, so a
   // reference into the vector dangles and the id reaches the SOAP body as an empty string. That is
@@ -1671,12 +1690,14 @@ static void radioSpotCb(lv_event_t *e) {
   }
   uiSoundPlay(UiSound::Tick);
   radioShowSpotify(it.id, it.title);
+  s_spCurItem = it;              // AFTER: radioShowSpotify() resets this when it goes to the root
 }
 
 // BY VALUE, deliberately. This clears s_spItems, which is where callers get these strings from —
 // taking them by reference means the arguments can be destroyed halfway through the function.
 static void radioShowSpotify(String id, String title) {
   s_spCurId = id;
+  if (id == "root") s_spCurItem = spotify::Item {};   // nothing to "play all" at the root
   radioClear();
   s_radioLevel = (id == "root") ? 0 : 1;
   s_spTitle    = title;
@@ -1714,8 +1735,16 @@ static void radioSpotPaint() {
     return;
   }
   lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
+  // A playlist or an album is a thing you usually want to START, not pick through. Offered as the
+  // first row rather than as new chrome: it scrolls with everything else, it is the same 96 px
+  // target, and it costs the page no layout.
+  s_spPlayAll = spotify::playUri(s_spCurItem).length() > 0;
+  const size_t off = s_spPlayAll ? 1 : 0;
+  if (s_spPlayAll)
+    radioRow(0, String("Play all"), s_spCurItem.id, s_spCurItem.artUrl, radioSpotCb,
+             s_spCurItem.title);
   for (size_t i = 0; i < s_spItems.size(); i++)
-    radioRow(i, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb,
+    radioRow(i + off, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb,
              spotifyKindLine(s_spItems[i]));
   radioPaintArt();
 }
@@ -2210,8 +2239,10 @@ static uint32_t s_srchArtGen = 0;
 
 // Set while showing the contents of a container rather than search results. Only for the status
 // line — the rows themselves are the same list either way.
-static String   s_srchInside;
-static uint32_t s_srchBrowseGen = 0;
+static String        s_srchInside;
+static spotify::Item s_srchInsideItem;    // kept whole: playing it needs its Kind, not just its id
+static bool          s_srchPlayAll = false;
+static uint32_t      s_srchBrowseGen = 0;
 
 // A KEYMAP FOR SEARCHING, not for writing. The stock layout spends a row-and-a-bit on things a
 // query never contains — $ % ^ & * and the mode machinery to reach them — and carries an X that,
@@ -2295,7 +2326,20 @@ static void srchChipCb(lv_event_t *e) {
 // used to report. Descending reuses the search worker's browse slot and repaints the same list, so
 // the page needs no second mode: the query stays in the box, and the next search replaces the rows.
 static void srchRowCb(lv_event_t *e) {
-  const int i = (int)(intptr_t)lv_event_get_user_data(e);
+  int i = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_srchPlayAll) {
+    if (i == 0) {                       // "Play all" — the container we drilled into
+      const String uri = spotify::playUri(s_srchInsideItem);
+      if (uri.isEmpty()) return;
+      uiSoundPlay(UiSound::Confirm);
+      stateLock();
+      g_pending.playUri  = uri;
+      g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
+      stateUnlock();
+      return;
+    }
+    --i;
+  }
   if (i < 0 || i >= (int)s_srchItems.size()) return;
   const spotify::Item it = s_srchItems[i];
   const String uri = spotify::playUri(it);
@@ -2309,6 +2353,7 @@ static void srchRowCb(lv_event_t *e) {
   }
   uiSoundPlay(UiSound::Tick);
   s_srchInside = it.title;
+  s_srchInsideItem = it;
   s_srchBrowseGen = spotify::browseGen();
   spotify::browseStart(it.id);
   lv_label_set_text_fmt(s_srchStatus, "Opening %s...", it.title.c_str());
@@ -2317,10 +2362,11 @@ static void srchRowCb(lv_event_t *e) {
 
 static void srchPaintArt() {
   if (s_srchTiles.empty()) return;
-  for (size_t i = 0; i < s_srchTiles.size() && i < s_srchItems.size(); i++) {
-    if (s_srchItems[i].artUrl.isEmpty()) continue;
-    const lv_image_dsc_t *d = artcache::get(artKey(s_srchItems[i].id, s_srchItems[i].artUrl),
-                                            s_srchItems[i].artUrl);
+  const size_t off = s_srchPlayAll ? 1 : 0;
+  for (size_t i = off; i < s_srchTiles.size() && (i - off) < s_srchItems.size(); i++) {
+    const spotify::Item &it = s_srchItems[i - off];
+    if (!s_srchTiles[i] || it.artUrl.isEmpty()) continue;
+    const lv_image_dsc_t *d = artcache::get(artKey(it.id, it.artUrl), it.artUrl);
     if (d) lv_image_set_src(s_srchTiles[i], d);
   }
 }
@@ -2334,17 +2380,43 @@ static void srchPaintRows() {
   lv_obj_clean(s_srchList);
 
   const lv_coord_t w = SRCH_RIGHT_W, h = 88;
+
+  // Inside a playable container, the first row starts the whole thing. Same reasoning as the Radio
+  // page: an album or a playlist is usually something you want to START rather than pick through,
+  // and a row costs no layout. Everything after it sits one index lower than its item.
+  s_srchPlayAll = spotify::playUri(s_srchInsideItem).length() > 0;
+  const size_t off = s_srchPlayAll ? 1 : 0;
+  if (s_srchPlayAll) {
+    lv_obj_t *row = lv_button_create(s_srchList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_pos(row, 0, 0);
+    lv_obj_set_style_radius(row, JB_R_LG, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(JB_ACCENT), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_80, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)0);
+    lv_obj_t *t = label(row, "Play all", &lv_font_montserrat_22, JB_ACCENT_INK);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 24, -11);
+    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &lv_font_montserrat_12,
+                         JB_ACCENT_INK);
+    lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(sl, w - 48);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 24, 15);
+    s_srchTiles.push_back(nullptr);       // keeps tiles parallel to rows for the artwork pass
+  }
+
   for (size_t i = 0; i < s_srchItems.size(); i++) {
     const spotify::Item &it = s_srchItems[i];
     lv_obj_t *row = lv_button_create(s_srchList);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, w, h);
-    lv_obj_set_pos(row, 0, (lv_coord_t)(i * (h + 8)));
+    lv_obj_set_pos(row, 0, (lv_coord_t)((i + off) * (h + 8)));
     lv_obj_set_style_radius(row, JB_R_LG, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV), 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
-    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)(i + off));
 
     lv_obj_t *tile = panel(row, 64, 64, JB_SCREEN_ELEV_2, JB_R_MD);
     lv_obj_align(tile, LV_ALIGN_LEFT_MID, 8, 0);
@@ -2371,6 +2443,7 @@ static void srchPaintRows() {
 static void srchPaint() {
   spotify::searchResults(s_srchItems);
   s_srchInside = "";          // these rows answer the query again, not a container
+  s_srchInsideItem = spotify::Item {};
   srchPaintRows();
 }
 

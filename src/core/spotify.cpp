@@ -407,6 +407,30 @@ void searchStart(const String &term, Category cat) {
 
 // --- playback ------------------------------------------------------------------------------------
 
+// The wrapper for a playable CONTAINER. These are not guesses: they are the values SoCo's
+// ShareLinkPlugin has shipped for years, which plans/08 already identified as the canonical
+// "public link -> playable Sonos URI" implementation, and they agree with that document's wrapper
+// rule — the low four hex digits of the prefix ARE the flags value (206c = 8300).
+//
+//   album     x-rincon-cpcontainer:1004206c   DIDL item id 00040000   object.container.album.musicAlbum
+//   playlist  x-rincon-cpcontainer:1006206c   DIDL item id 1006206c   object.container.playlistContainer
+//
+// The album's URI prefix and DIDL key deliberately DIFFER; that asymmetry is SoCo's and is copied
+// rather than tidied. Tracks keep the x-sonos-spotify: form proven on this household's favourite.
+struct Wrapper { const char *uriPrefix; const char *didlKey; const char *cls; };
+static bool wrapperFor(Item::Kind k, Wrapper &w) {
+  switch (k) {
+    case Item::Kind::Album:
+      w = {"x-rincon-cpcontainer:1004206c", "00040000", "object.container.album.musicAlbum"};
+      return true;
+    case Item::Kind::Playlist:
+      w = {"x-rincon-cpcontainer:1006206c", "1006206c", "object.container.playlistContainer"};
+      return true;
+    default:
+      return false;
+  }
+}
+
 String playUri(const Item &it) {
   // Tracks use the form this household's existing favourite (FV:2/64) proves. Stations
   // (itemType=program, i.e. artist radio) take the x-sonosapi-radio: form that Amazon's stations
@@ -423,21 +447,29 @@ String playUri(const Item &it) {
   if (it.kind == Item::Kind::Station)
     return "x-sonosapi-radio:" + urlEncode(it.id) + "?sid=" + String(kSid) +
            "&flags=8300&sn=" + String(settingsSpotifySerial());
-  return "";
+  Wrapper w;
+  if (wrapperFor(it.kind, w))
+    return String(w.uriPrefix) + urlEncode(it.id) + "?sid=" + String(kSid) +
+           "&flags=8300&sn=" + String(settingsSpotifySerial());
+  return "";        // artists and service containers have nothing to play; they browse
 }
 
 String playMeta(const Item &it) {
-  if (it.kind != Item::Kind::Track && it.kind != Item::Kind::Station) return "";
+  Wrapper w;
+  const bool container = wrapperFor(it.kind, w);
+  if (!container && it.kind != Item::Kind::Track && it.kind != Item::Kind::Station) return "";
   const bool station = (it.kind == Item::Kind::Station);
   return String("<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
                 "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" "
                 "xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" "
                 "xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">"
-                "<item id=\"00032020") + urlEncode(it.id) +
+                "<item id=\"") + (container ? w.didlKey : "00032020") + urlEncode(it.id) +
          "\" parentID=\"-1\" restricted=\"true\">"
          "<dc:title>" + escapeXml(it.title) + "</dc:title>"
-         "<upnp:class>" + (station ? "object.item.audioItem.audioBroadcast"
-                                   : "object.item.audioItem.musicTrack") + "</upnp:class>"
+         "<upnp:class>" + (container ? w.cls
+                                     : (station ? "object.item.audioItem.audioBroadcast"
+                                                : "object.item.audioItem.musicTrack")) +
+         "</upnp:class>"
          "<desc id=\"cdudn\" nameSpace=\"urn:schemas-rinconnetworks-com:metadata-1-0/\">" +
          kDesc + "</desc></item></DIDL-Lite>";
 }

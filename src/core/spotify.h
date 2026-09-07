@@ -115,11 +115,19 @@ void adopt();
 
 // A transport URI + DIDL for `it`, to hand to g_pending.playUri / .playMeta.
 //
-// ⚠️ TRACKS ARE PROVEN, CONTAINERS ARE NOT. The household has a working `x-sonos-spotify:` track
-// favourite to copy the shape from; albums, playlists and artists need the
-// `x-rincon-cpcontainer:<8-hex prefix>` form, and that prefix is not derivable from anything we can
-// read — plans/08's wrapper rule says how to READ one, not how to mint one for a type we have no
-// sample of. playUri() returns "" for a Kind it cannot construct, so a caller must check.
+// What each Kind can do:
+//   Track     plays — the x-sonos-spotify: form, proven on this household's own favourite
+//   Station   plays — x-sonosapi-radio:, artist radio (shape inferred from Amazon's, UNVERIFIED)
+//   Album     plays as a whole — x-rincon-cpcontainer:1004206c
+//   Playlist  plays as a whole — x-rincon-cpcontainer:1006206c
+//   Artist, Container   nothing to play; they BROWSE
+//
+// The two container prefixes are SoCo's ShareLinkPlugin values, not guesses — plans/08 names that
+// plugin as the canonical "public link -> playable Sonos URI" implementation, and the values agree
+// with its wrapper rule (the prefix's low four hex digits are the flags: 206c = 8300).
+//
+// ⚠️ playUri() returns "" for a Kind it cannot construct, so a caller MUST check rather than
+// handing the speaker an empty URI.
 String playUri(const Item &it);
 String playMeta(const Item &it);
 
