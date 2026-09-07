@@ -9,7 +9,8 @@
 #include "core/amazon.h"          // artThumbUrl — ask the CDN to resize instead of pulling ~208 KB
 #endif
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
-#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
+#include "core/heap_watch.h"
+#include "core/net/http_body.h"   // the yielding body reader — writeToStream() rebooted the jukebox   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
@@ -44,29 +45,16 @@ static lv_image_dsc_t s_dsc;
 static volatile bool s_changed = false;     // new art (or clear) pending for the UI
 static volatile bool s_hasArt  = false;
 
-// A Stream sink that appends into a fixed buffer. Lets HTTPClient::writeToStream() do the
-// chunked-transfer de-framing for us (reading the raw stream pointer does NOT de-chunk).
-class BufSink : public Stream {
- public:
-  BufSink(uint8_t *b, size_t cap) : _b(b), _cap(cap) {}
-  size_t len = 0;
-  size_t dropped = 0;   // bytes that did not fit — see albumArtFetch(), which must not ignore this
-  size_t write(uint8_t c) override {
-    if (len < _cap) { _b[len++] = c; return 1; }
-    dropped++; return 0;
-  }
-  size_t write(const uint8_t *d, size_t n) override {
-    size_t t = (len + n <= _cap) ? n : (_cap - len);
-    memcpy(_b + len, d, t); len += t;
-    dropped += n - t;
-    return t;
-  }
-  int available() override { return 0; }
-  int read() override { return -1; }
-  int peek() override { return -1; }
- private:
-  uint8_t *_b; size_t _cap;
-};
+// Where the body lands. `full` is set the moment a cover would not fit, and the read stops there:
+// a cover larger than JPEG_MAX used to be truncated silently, with TJpg then failing or drawing
+// garbage and nothing in the log pointing at the buffer.
+struct ArtBuf { uint8_t *b; size_t cap; size_t len; bool full; };
+static bool artSink(void *ctx, const uint8_t *d, size_t n) {
+  ArtBuf *s = (ArtBuf *)ctx;
+  if (s->len + n > s->cap) { s->full = true; return false; }
+  memcpy(s->b + s->len, d, n); s->len += n;
+  return true;
+}
 
 // TJpgDec block callback: copy one decoded MCU block into the back buffer.
 static bool tjpgCb(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
@@ -198,24 +186,25 @@ bool albumArtFetch(const String &url) {
   // failed the fetch. artFail ran 42-50% of artFetch on 2026-08-31. 4 s keeps a full second of
   // watchdog margin while tolerating the stalls this network actually produces.
   http.setTimeout(4000);
+  httpbody::prepare(http);          // keep Transfer-Encoding: the body reader needs it
   int code = http.GET();
   if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
-  // writeToStream() de-chunks the body (the raw stream pointer would include chunk framing).
-  BufSink sink(s_jpeg, JPEG_MAX);
-  http.writeToStream(&sink);
-  size_t got = sink.len;
+  // NOT http.writeToStream(): that de-chunks, but with a busy-wait per chunk header and delay(0)
+  // between chunks, which starved IDLE0 across a dribbling /getaa response and rebooted the
+  // jukebox (task watchdog, coredump 2026-09-07). httpbody::read de-chunks too, and sleeps.
+  ArtBuf sink{s_jpeg, JPEG_MAX, 0, false};
+  const long n = httpbody::read(http, 15000, artSink, &sink);
+  const size_t got = sink.len;
   heapwatch::note("art.fetch");
-  size_t dropped = sink.dropped;
   http.end();
-  if (got < 100) { LOG.printf("[art] short read (%u bytes)\n", (unsigned)got); ++s_nFail; return false; }
-  // A cover larger than JPEG_MAX used to be truncated silently: TJpg then failed or produced a
-  // garbled image, with nothing in the log pointing at the buffer. Refuse it loudly instead —
-  // no art beats wrong art, and the message says exactly what to raise.
-  if (dropped) {
-    LOG.printf("[art] TRUNCATED: %u bytes did not fit (JPEG_MAX=%u). Raise JPEG_MAX.\n",
-                  (unsigned)dropped, (unsigned)JPEG_MAX);
+  // Refuse an oversize cover loudly — no art beats wrong art, and the message says what to raise.
+  if (sink.full) {
+    LOG.printf("[art] TRUNCATED: cover exceeds JPEG_MAX=%u. Raise JPEG_MAX.\n", (unsigned)JPEG_MAX);
+    ++s_nFail;
     return false;
   }
+  if (n < 0) { LOG.printf("[art] body read failed after %u bytes\n", (unsigned)got); ++s_nFail; return false; }
+  if (got < 100) { LOG.printf("[art] short read (%u bytes)\n", (unsigned)got); ++s_nFail; return false; }
 
   // Size + pick a power-of-2 downscale so the long edge fits ART_MAX.
   //

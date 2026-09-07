@@ -19,7 +19,8 @@
 #include "core/smapi.h"      // smapi::busy — never fetch tiles under a browse
 #include "core/board.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
-#include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water
+#include "core/heap_watch.h"
+#include "core/net/http_body.h"   // the yielding body reader — see album_art.cpp   // heapwatch::note — attribute the heap low-water
 
 namespace artcache {
 
@@ -218,7 +219,7 @@ static size_t obtain(const Req &r) {
   // 23,898-byte one was fetched in full and thrown away — and its placeholder icons are PNG. On a
   // link that dies under load, a wasted 24 KB TLS transfer per row is not a rounding error.
   static const char *kHdrs[] = {"Content-Type"};
-  http.collectHeaders(kHdrs, 1);
+  httpbody::prepare(http, kHdrs, 1);   // collectHeaders() replaces the list, so ask through the reader
   const int code = http.GET();
   if (code != 200) { http.end(); return 0; }
   const String ct = http.header("Content-Type");
@@ -230,18 +231,19 @@ static size_t obtain(const Req &r) {
   }
   const int len = http.getSize();
   if (len > (int)kJpegMax) { http.end(); return 0; }
-  WiFiClient *st = http.getStreamPtr();
-  size_t got = 0;
-  const uint32_t deadline = millis() + 12000;
-  while (millis() < deadline && got < kJpegMax) {
-    const size_t avail = st->available();
-    if (!avail) { if (!http.connected() && (len < 0 || got >= (size_t)len)) break; delay(5); continue; }
-    got += st->readBytes(s_jpeg + got, min(avail, kJpegMax - got));
-    heapwatch::note("artcache.fetch");
-    if (len > 0 && got >= (size_t)len) break;
-  }
+  // The same yielding reader Now Playing art uses (core/net/http_body.h). This loop was already
+  // sleeping when idle, but it did not de-chunk, and one body reader is enough to get right.
+  struct Buf { size_t got; bool over; } buf{0, false};
+  const long n = httpbody::read(http, 12000, [](void *ctx, const uint8_t *d, size_t k) -> bool {
+    Buf *b = (Buf *)ctx;
+    if (b->got + k > kJpegMax) { b->over = true; return false; }
+    memcpy(s_jpeg + b->got, d, k); b->got += k;
+    return true;
+  }, &buf);
+  heapwatch::note("artcache.fetch");
+  const size_t got = buf.got;
   http.end();
-  if (got < 100) return 0;
+  if (n < 0 || buf.over || got < 100) return 0;
 
   if (!dir().isEmpty()) {                 // persist so this is the last time we pay for it
     mkdir(dir().c_str(), 0777);
