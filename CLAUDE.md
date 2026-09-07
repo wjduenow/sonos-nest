@@ -126,6 +126,46 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `radioart`, a sibling, and `rmTree` recurses. The crawl is now **resumable across reboots**
   > (per-genre files + a `genres.tsv` manifest), and `post()` holds **one keep-alive TLS session**
   > instead of 27 connect/handshake/close cycles.
+  > ⚠️ **Spotify Search + Radio are live here (`core/smapi` + `core/spotify`, plans/12).** One
+  > browser ceremony from Settings and the device holds its own SMAPI token; Search is a sixth rail
+  > entry (two-pane: keyboard left, results right) and Radio has an Amazon/Spotify source toggle.
+  > **Tracks and artist radio play; containers BROWSE rather than being constructed** — an album
+  > yields its tracks, an artist yields its radio + top tracks + albums — so no
+  > `x-rincon-cpcontainer` prefix is ever guessed. Correcting plans/08: **Spotify DOES have
+  > stations** (`spotify:artistRadio:<id>`, `itemType=program`), one level down under an artist,
+  > not at the root.
+  > ⚠️ **A task that holds a SOAP response and parses it needs an 8192-byte stack.** `radiocache`,
+  > `favcache`, `netTask`, `artTask` and `uiTask` all use it. The Spotify worker was given 6144,
+  > copied from the LINK task — which only ever holds a link code and a token — and survived 3-6 KB
+  > searches before rebooting on the first 15.7 KB browse. **Symptom to recognise: a coredump whose
+  > PC does not resolve in the ELF** — that is a corrupted return address, i.e. the stack, and the
+  > give-away that it is NOT a null dereference is the same PC appearing in two different builds.
+  > ⚠️ **NEVER `%s` a String that came off the network — use `smapi::cstr()`.** Arduino's `String`
+  > calls `invalidate()` on a failed allocation, setting its buffer to `nullptr`, so `c_str()`
+  > returns NULL and printf faults in ROM `strlen` (`_svfprintf_r`, `a0=0`, `a3=0x7f7f7f7f`). A
+  > LOG.printf added to *diagnose* an empty response turned the out-of-memory it was diagnosing
+  > into a reboot. The same guard later printed `(null)` and thereby identified a use-after-free
+  > without a coredump — a dangling String reads back the same way.
+  > ⚠️ **`readResponse()` moves the body and reserves exactly `Content-Length`.** It used to copy
+  > (`out = raw`, two body-sized buffers live at once — 32-48 KB for a 16-22 KB response, against a
+  > largest free block of ~36-43 KB) and to reserve 24 KB *before reading the headers*. Don't
+  > reintroduce either.
+  > ⚠️ **Tile artwork is a load profile, not just bytes.** `art_cache` had no pacing and drained its
+  > queue back to back, so a screen of rows was a screen of TLS handshakes — and Spotify's
+  > placeholder icons are PNG on a DIFFERENT host from its JPEG artwork, so a mixed list forced a
+  > fresh handshake per alternation against the one pooled client. That is the connect/close churn
+  > plans/07 blames for wedging the ESP-Hosted link, and it showed up as `health.lastReboot =
+  > "netlink"` with `resetReason 3` and no coredump. PNGs are not fetched (nothing here decodes
+  > them) and fetches are paced 120 ms. **Read `lastReboot` before assuming a blank screen was a
+  > crash.**
+  > ⚠️ **`artcache::keyOf()` is AMAZON-SHAPED and returns "" for anything else, and
+  > `artcache::get()` drops an empty key without queueing a fetch.** Every Spotify row silently
+  > requested no artwork at all until `artKey()` fell back to `keyOfUrl()`. Amazon must keep
+  > `keyOf`: its art URL is not stable (the `#chunk-` is minted per response) but the station KEY
+  > is. Sources with a stable art URL hash the URL, as Favourites always has. Spotify renditions are
+  > size-coded in the URL — album `ab67616d…b273`=640/`1e02`=300/`4851`=64, artist
+  > `ab676161…e5eb`=640/`5174`=320/`f178`=160, mosaic `/640/`→`/60/` — and tiles take the smallest;
+  > Now Playing and the screensaver never come through `thumbUrl()` at all.
   > ⚠️ **Amazon's station tree is CREDENTIAL-DEPENDENT — a RE-LINK IS A DOWNGRADE, which is why
   > publishing is a MERGE. Do not "simplify" it back to a swap.** Same account, same Prime tier, two
   > tokens: the jukebox's long-standing one enumerates **26 genres / ~1,045 stations** (verified on
@@ -246,6 +286,9 @@ Units share all Sonos control/discovery/browse/settings/net/OTA; they differ onl
 - The button on a XIAO ESP32S3 + why not the C6: **`plans/11-button-v2.md`**
 - Multi-unit reorg rationale + layout: **`plans/02-multi-unit-reorg.html`**
 - New form factor (jukebox) + design system: **`plans/07-sonos-jukebox.md`**
+- Jukebox Search + the Radio source toggle, and the six hardware-only bugs building them turned up:
+  **`plans/12-jukebox-search.md`** — §12 is the one to read before touching `core/spotify`,
+  `core/smapi` or `core/ui/art_cache`
 - Jukebox screensaver — what shipped, and the video/photo options that did not:
   **`plans/10-jukebox-screensaver.md`**. Read §1 before proposing anything that moves pixels: it
   has the measured budget, and the two facts that kill the obvious ideas — the P4's H.264 block is

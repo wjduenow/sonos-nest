@@ -1,25 +1,41 @@
 # 12 — jukebox Search, and a second source for Radio
 
-**Status: planned, nothing built.** The research this rests on is done and run-verified — see the
-**2026-09-04 re-investigation** in
-[`plans/08-music-service-integration.md`](08-music-service-integration.md). Read that first; this
-document assumes it.
+**Status: SHIPPED and running on hardware** (`feat/spotify-smapi`, jukebox on
+`v0.4.2-39-g06460d1`). Written as a plan, kept as a record: §§0-9 are what was designed, §12 is
+what building it actually taught, and every "untested" in the original text that has since been
+tested says so.
 
-## 0. What this adds
+The research it rests on is in
+[`plans/08-music-service-integration.md`](08-music-service-integration.md) — read the 2026-09-04
+re-investigation first.
 
-1. **A Search page on the jukebox** — type a query, get tracks / artists / albums / playlists from
-   a real music service, tap one to play it. Sixth entry on the nav rail.
-2. **A source choice on the Radio page** — Amazon Prime Stations (what ships today) *or* Spotify's
-   curated playlists, picked with a segmented control.
-3. ~~**A fix for a live bug**: Amazon moved from `DeviceLink` to `AppLink`, so
-   `core/amazon.cpp:linkBegin()` cannot create a new link any more.~~ **SHIPPED** — along with
-   three more that testing it uncovered; see §5, now a record rather than a plan.
-4. **A docs pass** — README and `docs/` are marketing/onboarding material and are already behind
-   (they don't mention the jukebox at all). Shipping the screens without updating them is not
-   "done"; §9 makes that an explicit gate.
+## 0. What this adds — all of it now built
+
+1. ~~**A Search page on the jukebox**~~ **SHIPPED.** Sixth rail entry. Two-pane: keyboard and
+   category chips left, results right. Search-as-you-type, and tapping a result plays a track or
+   descends into a container.
+2. ~~**A source choice on the Radio page**~~ **SHIPPED.** Amazon stations or Spotify, one at a
+   time, persisted, never intermingled.
+3. ~~**A fix for a live bug**~~ **SHIPPED** — Amazon's link ceremony, plus three more bugs testing
+   it uncovered. §5.
+4. **A docs pass** — still owed. §9 is the gate and it is not met: the README still does not
+   mention the jukebox or button-v2.
 
 **Not in scope: YouTube Music.** Its SMAPI endpoint is behind a Google API-key gateway that only
 Sonos's own app and firmware can pass. Closed, with evidence, in `plans/08`. Don't re-open it here.
+
+**Verified on hardware, in order of how much they were doubted:**
+
+- Linking Spotify from the device — QR, approve, token in NVS.
+- Search returning tracks / artists / albums / playlists, live, in under a second.
+- **Playing a searched track — `plans/08`'s long-standing "no playback command was ever sent" is
+  closed.**
+- Drilling into an artist: 50 items, and the artist's own radio among them.
+- Browsing the Spotify root and its containers on the Radio page.
+- Artwork on Search and Radio rows.
+
+**Still unverified:** playing an `x-sonosapi-radio:` STATION (artist radio). The URI is inferred
+from Amazon's working form plus the shared `itemType=program`; no Spotify station has been played.
 
 ---
 
@@ -256,10 +272,14 @@ that look identical, and the first bug report would be "why did tapping this one
   `Genres and Moods` (63 categories → playlists) · `Made For You` (DJ, daylist, On Repeat, Repeat
   Rewind — personalised to the linked account).
 
-> ⚠️ **Call them playlists, not stations.** Spotify's SMAPI tree has **no station or stream
-> itemType** — verified. Its algorithmic stations and mixes are gone at Spotify's end, not Sonos's
-> (plans/08). "Made For You" is the closest thing and it is still a playlist. A UI that promises
-> stations and delivers playlists is a bug report waiting to happen.
+> ⚠️ **CORRECTED — Spotify DOES have stations, one level down.** This section said its tree had no
+> station itemType. That came from reading only the ROOT, where there are none. Browse an artist and
+> the first child is `spotify:artistRadio:<id>` with **`itemType=program`** — the same item type
+> Amazon's Prime Stations use. So artist radio is reachable from any artist, from Search or from
+> Radio, and `spotify::playUri()` builds the `x-sonosapi-radio:` form for it.
+>
+> What remains true: the root's four lists are playlists, and Spotify's own API no longer exposes
+> the algorithmic mixes, so anything the ROOT offers should still be labelled a playlist.
 
 Persist the choice in NVS (`settingsRadioSource()`), default Amazon so nothing changes for an
 existing device. If a source is not linked, its segment renders disabled with a one-line "Link in
@@ -330,11 +350,16 @@ already uses) — read the expiry per service, don't share a constant.
 
 Nothing in the research so far has sent a playback command; these are the first.
 
-1. **Spotify track from search** — `SetAVTransportURI` + `Play` with the `x-sonos-spotify:` form
-   above. Highest confidence: the household has a working favourite of exactly this shape.
+1. ~~**Spotify track from search**~~ — **PASSED on hardware 2026-09-06.** Tapping a searched track
+   plays it. This is the first playback command sent in this entire line of work and it closes the
+   "no playback command was ever sent" caveat that had stood in `plans/08` since the beginning.
 2. **Amazon station from the Radio page** — still untested from plans/08, and free to do now.
-3. **Spotify playlist/album container** — only after 1 passes, and only with a captured sample of
-   the container prefix for that type.
+3. ~~**Spotify playlist/album container**~~ — **NOT NEEDED, and this was the wrong plan.**
+   Containers do not have to be constructed: they BROWSE. An album returns its tracks, a playlist
+   its tracks, an artist its top tracks, its radio and its albums. Drilling down is now what a
+   container tap does on both pages, and no `x-rincon-cpcontainer` prefix has to be guessed.
+4. **A Spotify STATION** (`x-sonosapi-radio:`, artist radio) — the one playback form still
+   untested. Inferred from Amazon's working station URI plus the shared `itemType=program`.
 4. **Amazon re-link** end to end via `getAppLink` (§5).
 
 A UPnP **402** on any of these means the DIDL is wrong (prefix / `desc` token), not the URI scheme —
@@ -382,31 +407,27 @@ The screens are not done until these are, in the same PR as the feature:
 
 ## 10. Task list
 
-**Phase 1 — plumbing (no UI)**
-1. Measure the flash delta of two new core files on `sleep-button`; decide `core/services/` or not.
-2. `core/smapi.{h,cpp}` — lift transport + XML helpers + the AppLink link state machine out of
-   `core/amazon.cpp`. `amazon` keeps its public API and its crawl.
-3. ~~Fix Amazon's ceremony onto `getAppLink` (§5). Re-link with the owner.~~ **DONE**, plus the
-   empty-index guard, the flat-root read and the merging swap — §5. One thing is still owed:
-   **run a real crawl on the device** (re-link Amazon in Settings, refresh) and confirm the merge
-   publishes ~27 genres rather than 1, i.e. that the ~945 fossils survived.
-4. `core/spotify.{h,cpp}` + NVS token + presentation-map category ids (§2.3).
-5. `settingsSetSpotifyAuth()` / `settingsRadioSource()` in `core/settings.cpp`.
+**Phase 1 — plumbing.** DONE. `core/smapi` extracted (transport, XML helpers, credentials);
+`core/spotify` written; NVS token and `settingsRadioSource()` added; Amazon's ceremony fixed (§5).
+Step 1 answered with a measurement: both new core files cost **1,340 bytes** on `sleep-button`
+(0.04% of its slot), so no `core/services/` subtree is warranted.
 
-**Phase 2 — linking UX**
-6. Settings rows + QR modal + the 5-minute countdown and auto re-mint (§6).
+**Phase 2 — linking UX.** DONE. A Spotify row in Settings sharing Amazon's QR overlay, with the
+5-minute countdown that Spotify's code lifetime demands.
 
-**Phase 3 — Search page**
-7. Fourth Lucide glyph; `PAGE_SEARCH` in the rail; page scaffold.
-8. Query field + category chips + async search + result rows + art.
-9. Track playback (§7 test 1).
+**Phase 3 — Search page.** DONE, and beyond the plan: two-pane layout, a reduced keymap, and
+search-as-you-type (§12).
 
-**Phase 4 — Radio second source**
-10. Source segmented control, Spotify browse lists, persisted choice, disabled-state hint.
-11. Container playback if §7 test 3 passes; otherwise tracks-only and say so.
+**Phase 4 — Radio second source.** DONE. Segmented control, persisted, Spotify browsed live.
+Container playback turned out not to need constructing at all (§7).
 
-**Phase 5 — ship**
-12. §9 in full: README, jukebox guide, screenshots, CLAUDE.md, plans/08 results.
+**Phase 5 — ship.** NOT DONE, and it is the only phase left:
+
+- §9 in full — README, a jukebox guide in `docs/`, screenshots, CLAUDE.md.
+- **Run a real Amazon crawl on the device** (re-link, refresh) to confirm the merging swap
+  publishes ~27 genres rather than 1, i.e. that the ~945 fossils survive. Still owed from §5.
+- **Play a Spotify station** (§7 test 4).
+- Open the PR.
 
 ---
 
@@ -420,8 +441,16 @@ The screens are not done until these are, in the same PR as the feature:
 - **Does the merge actually preserve the fossils on hardware?** Reasoned through and built, never
   run against a real card (§5). It is the one step that can still lose the ~945 stations, and the
   crash-safe swap is the net under it.
-- **Container URI prefixes** for Spotify albums/playlists — derivable only from a captured sample
-  per type (§3.4).
+- **Does an `x-sonosapi-radio:` station play with `sid=12`?** The last untested playback form
+  (§7 test 4). Tracks are proven, so a failure would be isolated to stations.
+- **How often does the art path provoke the netlink reboot?** One event, mitigated by pacing and by
+  not fetching PNGs, but the underlying ESP-Hosted fault is unresolved upstream and this feature is
+  the most network-active thing the jukebox does.
+- **Spotify's rate limit is unknown**, and search-as-you-type is the first thing here that makes
+  repeated calls. Debounced 400 ms with a three-character floor; if searches start failing after
+  fast typing, that is the cause.
+- ~~**Container URI prefixes** for Spotify albums/playlists~~ — **moot**. Containers browse into
+  tracks; nothing needs constructing (§7).
 - **Whether Spotify's Radio lists need a disk cache** — measure before building one (§4).
 - **The `catalog` namespace on the player's local Control API** (plans/08, re-investigation). It is
   the last unexplored surface that could make *any* service browsable through the player itself,
@@ -430,3 +459,65 @@ The screens are not done until these are, in the same PR as the feature:
 - **Other AppLink services** — Pandora, TuneIn (New), Plex and Audible all answer the same
   ceremony. If §2.3's runtime category mapping holds up, adding one is config, not code. Plex in
   particular would make the jukebox a browser for a local media server.
+
+---
+
+## 12. What building it taught — the hardware-only bugs
+
+Six faults, none of which a build could have caught, in the order they were found. Every one was
+identified from the device rather than by reading code, and the diagnostic that named each is worth
+as much as the fix.
+
+**A 6 KB stack against a 15.7 KB response.** The search worker was created with 6144 bytes, copied
+from the LINK task — which only ever holds a link code and a token. Search survived on 3-6 KB
+responses; the first browse of a real container rebooted the device. The coredump named it: task
+`spsearch`, `mcause 5`, and a PC that does not resolve in the ELF, which is what a corrupted return
+address looks like. **Every task here that holds a SOAP response and parses it uses 8192** —
+`radiocache`, `favcache`, `netTask`, `artTask`, `uiTask`. Measured margin at 8192 afterwards: 5,032
+bytes free. The link task was the wrong precedent to copy.
+
+**A diagnostic that turned an out-of-memory into a reboot.** Raising the stack did not fix it, and
+the SAME PC in a different build ruled the stack out. `_svfprintf_r`, `a0 = 0`, `a3 = 0x7f7f7f7f`:
+a `printf` with a NULL `%s`, faulting in ROM `strlen`. Arduino's `String` calls `invalidate()` when
+an allocation fails, setting its buffer to `nullptr`, so `c_str()` returns NULL — and the
+`LOG.printf` added to diagnose an empty browse passed that straight to `%s`. **`smapi::cstr()`
+exists so this cannot recur**, and it has since caught a second, unrelated NULL (below).
+
+**Two copies of every response.** `readResponse()` ended with `out = raw`, holding two body-sized
+buffers at once — 32-48 KB of contiguous internal heap for a 16-22 KB response, on a board whose
+largest free block is ~36-43 KB. It also reserved 24 KB *before reading the headers*, so a 1.9 KB
+response took 24 KB. Now a move, and a reserve of exactly `Content-Length`. Shared transport code,
+so Amazon got the fix too.
+
+**A use-after-free the log caught without a coredump.** `[spotify] browse (null) -> 344 B, fault:
+Action not found.` The `(null)` is `cstr()` reporting a dead String: the Radio page held a
+REFERENCE into `s_spItems`, and `radioShowSpotify()` clears that vector before building the
+request, so an empty id went out and Spotify rejected it. The Search page's equivalent took a copy,
+which is exactly why drilling into an artist worked there and not here — same feature, two call
+sites, one wrong. Fixed at both ends: the callback copies, and the function takes its strings **by
+value**, because a function that clears the container its arguments came from has no business
+borrowing them.
+
+**A page that asked the wrong thing about itself.** "Radio worked and then stopped" was the entry
+check testing whether the MODEL was empty when what goes blank is the LIST WIDGET. `radioClear()`
+runs from several paths and empties the list without touching the vector, so a cleared page looked
+"already loaded". It asks the widget now. A related one: the Radio page decided a browse had
+arrived by looking at `browseState()`, which the SEARCH page had already left in `Done` — two pages
+sharing one request slot, where "has a browse finished" is not "has MY browse finished".
+
+**Provoking the ESP-Hosted link fault.** A blank screen that was not a crash: `resetReason 3`, no
+coredump, `health.lastReboot = "netlink"` — the device rebooting itself under the known unresolved
+link fault. The art worker had **no pacing at all** and drained its queue back to back, so a screen
+of rows was a screen of TLS handshakes; and Spotify's placeholder icons are PNG on a DIFFERENT host
+from its artwork, so a mixed list forced a fresh handshake on every alternation against the one
+pooled client. PNGs are no longer fetched (they can never decode here) and fetches are paced 120 ms,
+as `radio_cache` has always paced its crawl. Neither cures the link fault; both stop provoking it.
+
+**The one that was not a bug at all:** "no art in Search" was not a rendition problem.
+`artcache::keyOf()` is Amazon-shaped — it extracts a station key from
+`catalog/stations/<KEY>/#chunk-` and returns `""` for anything else — and `artcache::get()` drops
+an empty key *before queueing a fetch*. Every Spotify row asked for no artwork at all, which is
+also why a rendition rule written the day before appeared to work and had in fact never run. Fix
+the call site before the CDN.
+
+---
