@@ -120,8 +120,8 @@ void endSession();
 // "" when the URI is not a Spotify track.
 String trackIdFromSonosUri(const String &uri);
 
-// The CDN cover URL for a track, at the smallest Spotify rendition of at least `px` on a side
-// (300 px for anything up to 300, else the 640 px original). BLOCKING HTTPS (one SMAPI call),
+// The CDN cover URL for a track: the 300 px rendition for any decode cap `px` under 640 (the
+// decoder would downscale the 640 original to 320 at most anyway), else the original. BLOCKING HTTPS (one SMAPI call),
 // "" when not linked, when the service has no art for the id, or on any transport failure — the
 // caller falls back to the /getaa URL it already had. The last answer is cached, so the fetcher's
 // retries of one track do not repeat the call.

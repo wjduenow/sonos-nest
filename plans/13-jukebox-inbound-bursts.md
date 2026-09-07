@@ -100,3 +100,27 @@ candidate 1 cannot touch.
   in both directions.
 - **Serial signature to look for:** `[gate] tile waited 1830 ms for spotify` lines around a browse
   where the old build printed a TLS connect timeout and then `RSSI 0`.
+
+## First hardware pass on candidates 1 + 4 (2026-09-07, evening) — three fixes it forced
+
+- **Candidate 1 works, and its first fetch was 167 KB.** `[art] 167572 B in 207 ms via cdn` — the
+  CDN path resolved and fetched, but `coverRendition()` only picked the 300 px rendition for a cap
+  of ≤300 and the jukebox cap is 320, so it kept the 640 original: 9 KB MORE than `/getaa`. Fixed:
+  any cap under 640 takes the 300 px rendition (the decoder would downscale the original to 320 at
+  most anyway). Later fetches of a smaller cover read `38716 B` at 8-413 ms.
+- **A death took 110 s to detect, not 7.** Diary: `netlink:fast dead=110s gapmax=24s@gena`. The
+  detector needed two RSSI-0 sightings within 20 s, but over a dead link every netTask stage blocks
+  on its own timeout — SOAP 3+4 s per call, the RSSI RPC 5 s, and a GENA renew's UNBOUNDED
+  `connect()` 24 s in lwIP's SYN retries — so consecutive sightings landed >20 s apart and the
+  detector reset every pass. That two minutes of frozen Now Playing is what the user reported as
+  "hung on the album art". Fixed twice: the pairing window is 120 s (a non-zero RSSI already resets
+  the episode, so the window was never the transient-0 guard), and GENA's connect is bounded at 4 s.
+- **The diary now carries the last art fetch**: `art=38716B/41ms cdn 12s ago`, so "did a cover
+  come down just before the death, how big, from where" survives the reboot. The mirror cannot
+  show it — the link dies and the TCP stream just stops.
+- **Gate behaviour so far:** 14 acquires, 0 waits, 0 timeouts, max hold 700 ms (`art`) across a
+  266 s run of track changes. No overlap has yet needed serialising in the runs observed; the
+  waits counter is what will show it earning its keep during a browse-then-play sequence.
+- **Still dying.** Deaths observed on the -70/-71 builds: during a Radio browse with tiles (before
+  Play All), and twice within a few tens of seconds of a Now Playing fetch. The count is not yet
+  a measurement — the reproduction has not been run five times on any one build.

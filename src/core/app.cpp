@@ -360,12 +360,22 @@ volatile uint32_t g_linkZones  = 0;
 // both inside 20 s, then the probe. Silent when no coordinator is known yet: there is nothing to
 // probe, and the slow path still covers boot.
 static uint32_t s_deadSinceMs = 0;   // first RSSI-0 sighting of the current episode (0 = none)
+// ⚠️ THE PAIRING WINDOW MUST BE LONGER THAN A FULL netTask PASS OVER A DEAD LINK. It was 20 s, and
+// a pass over a dead link is far longer than that: every stage blocks on its own timeout (SOAP
+// 3+4 s per call, the RSSI RPC 5 s, a GENA renew's connect 24 s), so the second sighting arrived
+// more than 20 s after the first, was thrown away as "an old sighting", and the detector started
+// over — every pass. Measured 2026-09-07: `netlink:fast dead=110s gapmax=24s@gena`, the user
+// watching a frozen Now Playing for near two minutes, on a detector built to fire in 7 s. The
+// window is not what protects against a transient 0 anyway: any non-zero reading resets the
+// episode on the first line below, and the TCP probe is the confirmation. 120 s only has to be
+// shorter than the supervisor's netstall reboot.
+static const uint32_t kDeadPairWindowMs = 120000;
 static bool deadLinkFast() {
   static uint32_t s_firstMs = 0;
   static int      s_seen = 0;
   if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; s_deadSinceMs = 0; return false; }
   const uint32_t now = millis();
-  if (s_seen && now - s_firstMs > 20000) s_seen = 0;       // an old sighting is not this fault
+  if (s_seen && now - s_firstMs > kDeadPairWindowMs) s_seen = 0;   // an old sighting is not this fault
   if (s_seen == 0) { s_firstMs = now; s_seen = 1; if (!s_deadSinceMs) s_deadSinceMs = now; return false; }
   if (now - s_firstMs < 3000) return false;                // let publishLinkStats() sample again
   if (s_zoneIp.length() == 0) return false;
@@ -418,10 +428,18 @@ uint32_t appNetGapMaxMs(const char **stage) {
 // What netLinkRecover() records for the far side of the reboot. Written while the link is dead,
 // so nothing on the wire can carry it — the NVS note is the whole diary.
 static String linkDeadNote(const char *path) {
-  return String("netlink:") + path +
+  String n = String("netlink:") + path +
          " dead=" + String(s_deadSinceMs ? (millis() - s_deadSinceMs) / 1000 : 0) + "s" +
          " gapmax=" + String(s_netGapMaxMs / 1000) + "s@" + (const char *)s_netGapMaxStage +
          " now=" + (const char *)s_netStage;
+#ifndef HEADLESS
+  // Was a cover just fetched? Deaths cluster at play time (issue #24); this is how the correlation
+  // survives the reboot. `dead=` is when the RSSI first read 0, so "N s ago" is measured from the
+  // reboot and the fetch preceded the death by (N - dead) seconds.
+  const String art = albumArtLastNote();
+  if (art.length()) n += " art=" + art;
+#endif
+  return n;
 }
 
 const char *appNetStage() { return (const char *)s_netStage; }

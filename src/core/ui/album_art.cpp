@@ -107,6 +107,16 @@ void albumArtDiag(AlbumArtDiag &out) {
   out.decodeFails = s_nDecodeFail; out.progressives = s_nProgressive;
 }
 
+// Last fetch, for the diary (albumArtLastNote). Scalars + a pointer to a string literal: written by
+// artTask, read by netTask on its way to a reboot, no lock needed.
+static volatile uint32_t    s_lastBytes = 0, s_lastMs = 0, s_lastAtMs = 0;
+static volatile const char *s_lastSrc   = "";
+String albumArtLastNote() {
+  if (!s_lastAtMs) return "";
+  return String((unsigned)s_lastBytes) + "B/" + String((unsigned)s_lastMs) + "ms " +
+         (const char *)s_lastSrc + " " + String((millis() - s_lastAtMs) / 1000) + "s ago";
+}
+
 // Second chance for anything TJpgDec would not take — in practice a progressive JPEG, which is
 // about half of what Amazon Prime Stations serve (issue #16). Decodes into the same back buffer
 // and reports the size it landed on, so the caller publishes it exactly as it does a TJpg decode.
@@ -245,6 +255,7 @@ bool albumArtFetch(const String &url) {
   // time. Correlate a `netlink` diary against the fetch just before it.
   LOG.printf("[art] %u B in %lu ms via %s%s\n", (unsigned)got, (unsigned long)(millis() - t0),
              src, n < 0 ? " (incomplete)" : "");
+  s_lastBytes = got; s_lastMs = millis() - t0; s_lastSrc = src; s_lastAtMs = millis();
   // Refuse an oversize cover loudly — no art beats wrong art, and the message says what to raise.
   if (sink.full) {
     LOG.printf("[art] TRUNCATED: cover exceeds JPEG_MAX=%u. Raise JPEG_MAX.\n", (unsigned)JPEG_MAX);

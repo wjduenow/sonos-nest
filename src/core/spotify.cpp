@@ -304,11 +304,17 @@ String trackIdFromSonosUri(const String &uri) {
 
 // Spotify encodes the rendition in the image id's prefix: for album/track covers b273 = 640 px,
 // 1e02 = 300 px, 4851 = 64 px (art_cache.cpp::thumbUrl has the artist family and the measured
-// sizes). Now Playing wants the smallest rendition that still fills its cap: 300 for a 320 px cap
-// decodes at scale 1 to 300 px, where the 640 original decoded at scale 2 to 320 — the same picture
-// for 9x fewer bytes. Anything above 300 keeps the original.
+// sizes). Now Playing wants the smallest rendition that the decoder would not have thrown away
+// anyway. TJpgDec scales by powers of two down to the cap (CLAUDE.md: the cap is a ceiling the
+// decoder undershoots), so for ANY cap under 640 the original decodes to at most 320 px — and a
+// 300 px rendition decodes to 300 for ~9x fewer bytes. Only a cap of 640 or more can use the
+// original's pixels.
+//
+// ⚠️ This was `px > 300` and the jukebox's cap is 320, so it kept the original: the very first
+// fetch on hardware logged `[art] 167572 B in 207 ms via cdn` — 9 KB MORE than the /getaa proxy
+// it was meant to replace. Test the threshold against the real cap, not the rendition size.
 static String coverRendition(const String &url, int px) {
-  if (url.indexOf("i.scdn.co/image/") < 0 || px > 300) return url;
+  if (url.indexOf("i.scdn.co/image/") < 0 || px >= 640) return url;
   String u = url;
   u.replace("ab67616d0000b273", "ab67616d00001e02");
   return u;

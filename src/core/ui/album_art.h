@@ -30,3 +30,8 @@ bool albumArtTake(const lv_image_dsc_t **dscOut);
 // unit that plays Amazon Prime Stations, either the content changed or the fallback is not wired in.
 struct AlbumArtDiag { uint32_t fetches, failures, clears, decodeFails, progressives; };
 void albumArtDiag(AlbumArtDiag &out);
+
+// The last fetch, for the reboot diary: "38716B/41ms cdn 12s ago". The jukebox's link deaths
+// cluster around play time and nothing on the wire survives one, so whether a cover had just come
+// down — and how big, from where — has to ride the NVS note (issue #24, plans/13). "" if none yet.
+String albumArtLastNote();
