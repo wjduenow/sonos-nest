@@ -13,6 +13,7 @@
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 #include "core/net/http_body.h"   // the yielding body reader — writeToStream() rebooted the jukebox
+#include "core/net/inbound_gate.h"   // one inbound transfer at a time (issue #24)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
@@ -173,6 +174,13 @@ bool albumArtFetch(const String &url) {
     return false;
   }
 
+  // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h) — taken here, AFTER the SMAPI resolve above,
+  // because the gate is not recursive and that resolve takes it itself. A cover is the single
+  // largest transfer this panel makes, so it must never land on top of a browse or a tile; ten
+  // seconds is generous next to any holder's timeout, and artTask retries a failed fetch anyway.
+  // Released explicitly after the body is read, so the decode does not keep the next reader waiting.
+  inbound::Guard gate("art", 10000);
+
   // BOTH CLIENTS ARE DECLARED BEFORE THE HTTPClient, and that ordering is load-bearing: locals
   // destruct in reverse, and ~HTTPClient calls _client->stop(). Getting this backwards in
   // updater.cpp cost a week of heap corruption (CLAUDE.md).
@@ -230,6 +238,7 @@ bool albumArtFetch(const String &url) {
   const size_t got = sink.len;
   heapwatch::note("art.fetch");
   http.end();
+  gate.release();                   // bytes are in; the decode below is local work
   // Logged because the size IS the finding: a Spotify cover through the speaker's /getaa is
   // ~158 KB, chunked, at LAN speed — the largest inbound burst this device ever takes over the
   // SDIO link, and the link deaths (esp-hosted-mcu #184, inbound flow control) cluster at play

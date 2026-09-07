@@ -1,6 +1,6 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status: **candidate 1 built, not yet measured** — tracked as
+Status: **candidates 1 and 4 built, not yet measured** — tracked as
 [issue #24](https://github.com/wjduenow/sonos-nest/issues/24), branch `fix/jukebox-inbound-bursts`.
 Started 2026-09-07 as a handoff stub at the end of the plans/12 work, so the next session starts
 from evidence instead of memory.
@@ -76,3 +76,27 @@ from evidence instead of memory.
 - Not covered: content the token cannot see (an unlinked device, or a track SMAPI has no art for),
   Amazon/TuneIn covers through `/getaa` (those were not the deaths), and the 158 KB the speaker
   still serves to anything else that asks. Candidates 2-4 stay open until the count says otherwise.
+
+## Candidate 4 — as built (2026-09-07, same day; the deaths moved the priority)
+
+Candidate 1 was flashed and the reproduction died at the **browse** step, before Play All was ever
+reached: Radio → Spotify → Featured Playlists (12 tiles start) → back to root, and at the next
+tile's TLS connect the link was gone. The diary read `netlink:fast dead=7s gapmax=5s@linkstats`, no
+`[art]` line anywhere near it. So the Now Playing cover is not the only burst that kills it, and
+the plan's candidate 4 went in next rather than waiting for a five-run count of a death that
+candidate 1 cannot touch.
+
+- **`core/net/inbound_gate.{h,cpp}`** — one FreeRTOS mutex, one slot, for every large inbound
+  reader in core. `inbound::Guard g("tag", maxWaitMs)`; the header has the rules.
+- **Holders:** `smapi::Client::post()` (Spotify browse/search/link and the Amazon crawl, 20 s
+  wait), `artcache::obtain()` (station tiles, 60 s — background work never gives up and bursts),
+  and `albumArtFetch()` (Now Playing art, 10 s — artTask retries). Now Playing takes the gate AFTER
+  its SMAPI resolve, because the gate is not recursive, and releases it before decoding.
+- **Not gated:** the Sonos SOAP poll, GENA, the registrar, pull-OTA. Reasons in the header.
+- **A timed-out wait proceeds ungated and is counted.** `health.inbound` in `/api/config` carries
+  `acquires / waits / timeouts / maxWaitMs / maxHeldMs+By / holder+heldMs`. `waits` is the number
+  of bursts that did not happen. `timeouts` must stay 0.
+- **`smapi::busy()` is gone.** It only ever let tiles wait for a browse; the gate covers every pair
+  in both directions.
+- **Serial signature to look for:** `[gate] tile waited 1830 ms for spotify` lines around a browse
+  where the old build printed a TLS connect timeout and then `RSSI 0`.

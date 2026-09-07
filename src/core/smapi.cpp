@@ -3,9 +3,10 @@
 // explaining which are kept with the code rather than left behind.
 #include "smapi.h"
 
+#include "net/inbound_gate.h"   // one inbound transfer at a time — see the header
+
 #include <WiFiClientSecure.h>
 
-#include <atomic>
 #include <utility>   // std::move
 
 #include "heap_watch.h"       // heapwatch::note — attribute the internal-heap low-water
@@ -90,11 +91,6 @@ String loginCreds(const String &token, const String &key, const String &househol
          "</key><householdId>" + escapeXml(householdId) +
          "</householdId></loginToken></credentials>";
 }
-
-// Atomic, not volatile: two Clients on two tasks each ++/-- this, and a lost update leaves
-// busy() stuck true, which silently stops the tile fetcher for good.
-static std::atomic<int> s_inFlight{0};
-bool busy() { return s_inFlight.load() > 0; }
 
 // --- Client --------------------------------------------------------------------------------------
 
@@ -216,8 +212,10 @@ bool Client::readResponse(String &out, bool &keepAlive) {
 
 String Client::post(const String &action, const String &header, const String &body) {
   Locked lk(mx_);
-  // Counted, not flagged: two Clients (Amazon, Spotify) may each be mid-request on different tasks.
-  struct InFlight { InFlight() { ++s_inFlight; } ~InFlight() { --s_inFlight; } } inFlight;
+  // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h). 20 s is longer than any other holder can keep
+  // it — a tile fetch is bounded at ~14 s, Now Playing art at ~19 s — so this only ever times out
+  // if something is wedged, and then it proceeds and the log says so.
+  inbound::Guard gate(tag_, 20000);
   const String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
                             "<s:Header>") + header + "</s:Header><s:Body>" + body +

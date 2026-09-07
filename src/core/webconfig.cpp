@@ -9,6 +9,7 @@
 #include "sonos/soap_client.h"   // soapDiag() — runtime SOAP counters for the health readout
 #include "sonos/gena.h"          // genaDiag() — eventing counters; stubbed out without GENA_EVENTS
 #include "heap_watch.h"          // heapwatch::worst() — which subsystem owns the heap low-water
+#include "net/inbound_gate.h"    // inbound::stats() — the one-transfer-at-a-time gate (issue #24)
 #include "crashlog.h"            // crashlog::toJson() — the last panic's task/pc, read from flash
 #include "app.h"                 // appNetStage()/appNetStallSec() — netTask liveness (see app.h)
 #ifndef HEADLESS
@@ -201,6 +202,22 @@ String webConfigJson() {
       w["largest"] = lw.largestFree;
       w["atSec"]   = lw.atMs / 1000;
     }
+  }
+
+  // The inbound gate (core/net/inbound_gate.h). `waits` is the number of bursts that did not
+  // happen; `timeouts` should stay 0 — anything else means a holder outlived its own timeout and a
+  // transfer went out ungated, which is the one way this gate can silently stop protecting the link.
+  {
+    inbound::Stats g;
+    inbound::stats(g);
+    JsonObject i = h["inbound"].to<JsonObject>();
+    i["acquires"]  = g.acquires;
+    i["waits"]     = g.waits;
+    i["timeouts"]  = g.timeouts;
+    i["maxWaitMs"] = g.maxWaitMs;
+    i["maxHeldMs"] = g.maxHeldMs;
+    i["maxHeldBy"] = g.maxHeldBy;
+    if (g.holder[0]) { i["holder"] = g.holder; i["heldMs"] = g.heldMs; }
   }
 
   // What the device BELIEVES is playing. Added after a bug where Now Playing sat on "Nothing
