@@ -1740,12 +1740,18 @@ static void radioShowSpotify(String id, String title) {
 static void radioSpotPaint() {
   radioClear();
   spotify::browseResults(s_spItems);
+  // "Play all" is built even when the listing is EMPTY. A playlist we could not enumerate is still
+  // a playlist the speaker can play — the container URI does not depend on having read its tracks —
+  // and reporting "nothing here" while hiding the one control that would have worked is the worst
+  // of both. The empty case is now a playable row plus an explanation, not a dead end.
+  LOG.printf("[ui    ] radio spotify: %u items, container=%s\n", (unsigned)s_spItems.size(),
+             s_spCurItem.id.length() ? s_spCurItem.id.c_str() : "(root)");
   if (s_spItems.empty()) {
-    lv_label_set_text(s_radioStatus, "Nothing here.");
+    lv_label_set_text(s_radioStatus, "No tracks listed. Play all still works.");
     lv_obj_remove_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
-    return;
+  } else {
+    lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
   }
-  lv_obj_add_flag(s_radioStatus, LV_OBJ_FLAG_HIDDEN);
   // A playlist or an album is a thing you usually want to START, not pick through. Offered as the
   // first row rather than as new chrome: it scrolls with everything else, it is the same 96 px
   // target, and it costs the page no layout.
