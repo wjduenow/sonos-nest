@@ -157,7 +157,14 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > plans/07 blames for wedging the ESP-Hosted link, and it showed up as `health.lastReboot =
   > "netlink"` with `resetReason 3` and no coredump. PNGs are not fetched (nothing here decodes
   > them) and fetches are paced 120 ms. **Read `lastReboot` before assuming a blank screen was a
-  > crash.**
+  > crash.** That was not enough: two more netlink deaths followed. **Two rules now stand.** The art
+  > fetcher checks `Content-Type` BEFORE reading a body — Spotify's user-uploaded covers negotiate
+  > **WebP** to a bare client and a 24 KB one was downloaded in full just to be refused — and it
+  > **never fetches while `smapi::busy()`**: a 15-29 KB browse plus tile TLS sessions plus the
+  > Sonos poll on the SDIO bridge at once is the death profile. Nothing is late; rows are not on
+  > screen until the browse lands. "Play all" on a playlist is PROVEN on hardware (the speaker
+  > expands `x-rincon-cpcontainer:1006206c` into its queue); artist radio is the one unverified
+  > playback form left.
   > ⚠️ **`artcache::keyOf()` is AMAZON-SHAPED and returns "" for anything else, and
   > `artcache::get()` drops an empty key without queueing a fetch.** Every Spotify row silently
   > requested no artwork at all until `artKey()` fell back to `keyOfUrl()`. Amazon must keep

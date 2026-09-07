@@ -34,8 +34,11 @@ Sonos's own app and firmware can pass. Closed, with evidence, in `plans/08`. Don
 - Browsing the Spotify root and its containers on the Radio page.
 - Artwork on Search and Radio rows.
 
+- Playing a whole playlist via "Play all" — the speaker expands it into a 38-track queue.
+
 **Still unverified:** playing an `x-sonosapi-radio:` STATION (artist radio). The URI is inferred
 from Amazon's working form plus the shared `itemType=program`; no Spotify station has been played.
+It is now the ONLY playback form left untested.
 
 ---
 
@@ -354,10 +357,12 @@ Nothing in the research so far has sent a playback command; these are the first.
    plays it. This is the first playback command sent in this entire line of work and it closes the
    "no playback command was ever sent" caveat that had stood in `plans/08` since the beginning.
 2. **Amazon station from the Radio page** — still untested from plans/08, and free to do now.
-3. ~~**Spotify playlist/album container**~~ — **NOT NEEDED, and this was the wrong plan.**
-   Containers do not have to be constructed: they BROWSE. An album returns its tracks, a playlist
-   its tracks, an artist its top tracks, its radio and its albums. Drilling down is now what a
-   container tap does on both pages, and no `x-rincon-cpcontainer` prefix has to be guessed.
+3. ~~**Spotify playlist/album container**~~ — **PASSED on hardware 2026-09-07**, and the plan was
+   wrong twice over. Containers BROWSE (a tap opens them; no prefix guessed for that), AND they
+   play as a whole via the "Play all" row using SoCo's ShareLinkPlugin wrappers
+   (`x-rincon-cpcontainer:1006206c` playlist / `1004206c` album). Verified on the speaker: Play all
+   on *This Is Morgan Wallen* left the Family Room coordinator `PLAYING` from
+   `x-rincon-queue:…#0` with **38 tracks in the queue** — the speaker expanded the playlist itself.
 4. **A Spotify STATION** (`x-sonosapi-radio:`, artist radio) — the one playback form still
    untested. Inferred from Amazon's working station URI plus the shared `itemType=program`.
 4. **Amazon re-link** end to end via `getAppLink` (§5).
@@ -505,7 +510,17 @@ runs from several paths and empties the list without touching the vector, so a c
 arrived by looking at `browseState()`, which the SEARCH page had already left in `Done` — two pages
 sharing one request slot, where "has a browse finished" is not "has MY browse finished".
 
-**Provoking the ESP-Hosted link fault.** A blank screen that was not a crash: `resetReason 3`, no
+**Provoking the ESP-Hosted link fault — three times.** The first fix (pacing, skipping PNGs)
+was not enough; two more deaths followed, each inside a Spotify browse-plus-artwork burst, and
+each time the play command died on the device with the speaker still holding the previous
+station. The trace named the rest: a 23,898-byte **WebP** (Spotify's user-uploaded playlist
+covers negotiate WebP to a bare client) downloaded in full before the decoder could refuse it, and
+tile fetches running **concurrently** with a 15-29 KB browse — two TLS sessions plus the Sonos
+poll on the SDIO bridge, the profile `smapi.h` already warned about. Now `Content-Type` is checked
+before a byte of body is read, and `smapi::busy()` gates the art worker so tiles never fetch
+under a browse. The very next attempt browsed fast and Play all reached the speaker.
+
+**The first time.** A blank screen that was not a crash: `resetReason 3`, no
 coredump, `health.lastReboot = "netlink"` — the device rebooting itself under the known unresolved
 link fault. The art worker had **no pacing at all** and drained its queue back to back, so a screen
 of rows was a screen of TLS handshakes; and Spotify's placeholder icons are PNG on a DIFFERENT host
