@@ -107,6 +107,26 @@ bool        browseResults(std::vector<Item> &out);
 // Drop the pooled TLS session once a burst is done — see smapi.h on why only one should be open.
 void endSession();
 
+// --- Now Playing artwork (issue #24) -------------------------------------------------------------
+// The speaker reports a Spotify cover as its own /getaa proxy URL, and that proxy serves the
+// 640 px original: 158 KB, chunked, at LAN speed — the largest inbound burst the jukebox ever takes
+// over its ESP-Hosted link, and where its link deaths cluster (plans/13). The CDN has a 300 px
+// rendition at ~18 KB, but only the track id is in the /getaa URL, so the CDN URL has to be asked
+// for: one small getMediaMetadata call returns the albumArtURI carrying the image hash.
+//
+// trackIdFromSonosUri() pulls the bare id ("6vLaKD0HUJ5UtIADG61Fa9") out of any of the forms it
+// appears in — a /getaa?...&u=x-sonos-spotify%3aspotify%253atrack%253a<id>... URL (the id is
+// percent-encoded TWICE there), the x-sonos-spotify: transport URI, or a native spotify:track: id.
+// "" when the URI is not a Spotify track.
+String trackIdFromSonosUri(const String &uri);
+
+// The CDN cover URL for a track, at the smallest Spotify rendition of at least `px` on a side
+// (300 px for anything up to 300, else the 640 px original). BLOCKING HTTPS (one SMAPI call),
+// "" when not linked, when the service has no art for the id, or on any transport failure — the
+// caller falls back to the /getaa URL it already had. The last answer is cached, so the fetcher's
+// retries of one track do not repeat the call.
+String trackArtUrl(const String &trackId, int px);
+
 // --- playback ------------------------------------------------------------------------------------
 
 // Fill in the household-derived values playback needs (the Sonos household id, and our Spotify

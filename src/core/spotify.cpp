@@ -14,6 +14,7 @@
 //     anything this module offers a Radio page is a playlist and should be labelled as one.
 #include "spotify.h"
 
+#include <ctype.h>   // isalnum — trackIdFromSonosUri
 #include <utility>   // std::move
 
 #include "smapi.h"
@@ -281,6 +282,61 @@ bool search(const String &term, Category cat, std::vector<Item> &out, int count)
   eachItem(request("search", body), out, count);
   heapwatch::note("spotify.search");
   return !out.empty();
+}
+
+// --- Now Playing artwork (issue #24) -------------------------------------------------------------
+
+String trackIdFromSonosUri(const String &uri) {
+  // "track" then the separator in whichever encoding depth this URI is at. Longest first, so the
+  // double-encoded form is not half-matched by the single-encoded one.
+  static const char *kSeps[] = {"track%253a", "track%253A", "track%3a", "track%3A", "track:"};
+  const int sp = uri.indexOf("spotify");
+  if (sp < 0) return "";
+  for (const char *sep : kSeps) {
+    const int at = uri.indexOf(sep, sp);
+    if (at < 0) continue;
+    int i = at + (int)strlen(sep), e = i;
+    while (e < (int)uri.length() && isalnum((unsigned char)uri[e])) e++;   // base62, 22 chars
+    return (e - i >= 16 && e - i <= 32) ? uri.substring(i, e) : String();
+  }
+  return "";
+}
+
+// Spotify encodes the rendition in the image id's prefix: for album/track covers b273 = 640 px,
+// 1e02 = 300 px, 4851 = 64 px (art_cache.cpp::thumbUrl has the artist family and the measured
+// sizes). Now Playing wants the smallest rendition that still fills its cap: 300 for a 320 px cap
+// decodes at scale 1 to 300 px, where the 640 original decoded at scale 2 to 320 — the same picture
+// for 9x fewer bytes. Anything above 300 keeps the original.
+static String coverRendition(const String &url, int px) {
+  if (url.indexOf("i.scdn.co/image/") < 0 || px > 300) return url;
+  String u = url;
+  u.replace("ab67616d0000b273", "ab67616d00001e02");
+  return u;
+}
+
+String trackArtUrl(const String &trackId, int px) {
+  if (!linked() || trackId.isEmpty()) return "";
+  // One entry: artTask asks for the same track on every retry (up to four per track change), and a
+  // GENA event plus a poll can each republish the same artUri. The call is small but it is still a
+  // TLS round trip on the link this exists to spare.
+  static String s_lastId, s_lastUrl;
+  if (trackId == s_lastId) return coverRendition(s_lastUrl, px);
+
+  const String id   = "spotify:track:" + trackId;
+  const String body = String("<getMediaMetadata xmlns=\"") + kNs + "\"><id>" + escapeXml(id) +
+                      "</id></getMediaMetadata>";
+  const String r   = request("getMediaMetadata", body);
+  const String art = unescapeXml(tagValue(r, "albumArtURI"));
+  heapwatch::note("spotify.trackart");
+  if (!art.startsWith("https://")) {
+    const String fault = unescapeXml(tagValue(r, "faultstring"));
+    LOG.printf("[spotify] getMediaMetadata %s -> %u B, no albumArtURI%s%s\n", smapi::cstr(id),
+               (unsigned)r.length(), fault.length() ? ", fault: " : "",
+               fault.length() ? smapi::cstr(fault) : "");
+    return "";
+  }
+  s_lastId = trackId; s_lastUrl = art;
+  return coverRendition(art, px);
 }
 
 // --- search, asynchronously ----------------------------------------------------------------------

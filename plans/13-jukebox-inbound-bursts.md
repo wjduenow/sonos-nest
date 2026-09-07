@@ -1,7 +1,9 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status: **not started** — tracked as [issue #24](https://github.com/wjduenow/sonos-nest/issues/24); a handoff stub written at the end of the plans/12 work (2026-09-07),
-so the next session starts from evidence instead of memory.
+Status: **candidate 1 built, not yet measured** — tracked as
+[issue #24](https://github.com/wjduenow/sonos-nest/issues/24), branch `fix/jukebox-inbound-bursts`.
+Started 2026-09-07 as a handoff stub at the end of the plans/12 work, so the next session starts
+from evidence instead of memory.
 
 ## What is known (all measured on hardware, 2026-09-07)
 
@@ -51,3 +53,26 @@ so the next session starts from evidence instead of memory.
 - One change per flash. Watch `[art]` bytes and `health.lastReboot` on each run.
 - Nothing touching the transport goes over the air (plans/07 and the packet-mode note in
   `platformio.ini`).
+
+## Candidate 1 — as built (2026-09-07, awaiting the five-run measurement)
+
+- `spotify::trackIdFromSonosUri()` pulls the track id out of the `/getaa` URL. The id sits in the
+  `u=` parameter percent-encoded **twice** (`spotify%253atrack%253a<id>`), so the extractor matches
+  the separator at every encoding depth, longest first.
+- `spotify::trackArtUrl(id, px)` is one `getMediaMetadata` call on the pooled SMAPI session, parsed
+  for `albumArtURI`, with the album-cover rendition prefix rewritten `b273` → `1e02` (640 → 300 px)
+  for a cap of 300 or under. One-entry cache, because artTask retries a track up to four times and
+  GENA + the poll can each republish the same `artUri`. "" on anything short of an https answer.
+- `albumArtFetch()` (jukebox only — `ALBUM_ART_TLS`) resolves any `/getaa?` URL that carries a
+  Spotify track id and fetches the CDN URL over TLS instead; every failure falls through to `/getaa`
+  unchanged, with a log line saying so. It also now refuses a non-JPEG `Content-Type` at the header,
+  the same guard the tile fetcher has.
+- The size log line names its path: `[art] N B in M ms via cdn` or `via getaa`. Correlate against
+  `health.lastReboot` per the method above — a death that follows a `via cdn` line at ~18 KB would
+  mean the cover was not the burst that matters.
+- Expected on the wire: ~158 KB chunked from the speaker → ~18 KB from `i.scdn.co`, plus a ~1-2 KB
+  SOAP round trip. Decoded size goes 320 px (640/2) → 300 px (300/1) under the 320 cap; visually
+  the same tile.
+- Not covered: content the token cannot see (an unlinked device, or a track SMAPI has no art for),
+  Amazon/TuneIn covers through `/getaa` (those were not the deaths), and the 158 KB the speaker
+  still serves to anything else that asks. Candidates 2-4 stay open until the count says otherwise.
