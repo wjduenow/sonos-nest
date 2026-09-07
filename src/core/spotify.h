@@ -117,7 +117,7 @@ void adopt();
 //
 // What each Kind can do:
 //   Track     plays — the x-sonos-spotify: form, proven on this household's own favourite
-//   Station   plays — x-sonosapi-radio:, artist radio (shape inferred from Amazon's, UNVERIFIED)
+//   Station   plays — x-sonosapi-radio:, artist radio. PROVEN on hardware 2026-09-07 (ABBA Radio)
 //   Album     plays as a whole — x-rincon-cpcontainer:1004206c
 //   Playlist  plays as a whole — x-rincon-cpcontainer:1006206c
 //   Artist, Container   nothing to play; they BROWSE

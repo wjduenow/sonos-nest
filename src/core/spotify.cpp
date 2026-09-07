@@ -17,6 +17,7 @@
 #include <utility>   // std::move
 
 #include "smapi.h"
+#include "heap_watch.h"   // heapwatch::note — attribute the internal-heap low-water
 #include "settings.h"
 #include "sonos/soap_client.h"
 #include "sonos/ssdp.h"
@@ -242,6 +243,7 @@ bool browse(const String &id, std::vector<Item> &out, int index, int count) {
                       "</count></getMetadata>";
   const String r = request("getMetadata", body);
   eachItem(r, out, count);
+  heapwatch::note("spotify.browse");   // response AND parsed rows both held — the heaviest point
   // An empty result is reported to the UI as a flat failure, which on a device with no serial port
   // is indistinguishable from a dead network. Say which it was: a transport failure returns "", a
   // rejected request returns a fault, and a genuinely empty container returns neither.
@@ -274,6 +276,7 @@ bool search(const String &term, Category cat, std::vector<Item> &out, int count)
                       "</id><term>" + escapeXml(term) + "</term><index>0</index><count>" +
                       String(count) + "</count></search>";
   eachItem(request("search", body), out, count);
+  heapwatch::note("spotify.search");
   return !out.empty();
 }
 
@@ -449,7 +452,8 @@ String playUri(const Item &it) {
   // Tracks use the form this household's existing favourite (FV:2/64) proves. Stations
   // (itemType=program, i.e. artist radio) take the x-sonosapi-radio: form that Amazon's stations
   // use — same item type, same scheme, and amazon::playUri is the working reference for it.
-  // UNVERIFIED for Spotify: nothing here has played one yet.
+  // PROVEN on hardware 2026-09-07: the Dining Room played "ABBA Radio" from
+  // x-sonosapi-radio:spotify%3aartistRadio%3a0LcJ...?sid=12&flags=8300&sn=10, started from Search.
   //
   // Containers still return "": album/artist/playlist need an x-rincon-cpcontainer 8-hex prefix
   // that cannot be derived from anything readable. They do not need one — they BROWSE into tracks

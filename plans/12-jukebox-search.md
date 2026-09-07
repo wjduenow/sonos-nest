@@ -36,7 +36,7 @@ Sonos's own app and firmware can pass. Closed, with evidence, in `plans/08`. Don
 
 - Playing a whole playlist via "Play all" — the speaker expands it into a 38-track queue.
 
-**Still unverified:** playing an `x-sonosapi-radio:` STATION (artist radio). The URI is inferred
+**Was still unverified — PROVEN 2026-09-07 (§12):** playing an `x-sonosapi-radio:` STATION (artist radio). The URI was inferred
 from Amazon's working form plus the shared `itemType=program`; no Spotify station has been played.
 It is now the ONLY playback form left untested.
 
@@ -320,7 +320,7 @@ as Amazon changing for everyone). So the link fix is exactly what puts the cache
 on should ask the same question first.
 
 **Verified on hardware 2026-09-05:** a Refresh now on the device crawled all 26 genres (25 fetched,
-one transient Jazz failure) and correctly deferred publishing to the next pass. **Still unverified:
+one transient Jazz failure) and correctly deferred publishing to the next pass. **Was still unverified until 2026-09-07:
 the merge**, which only does something once a crawl and the cache disagree — i.e. after a re-link.
 `6598a27` means a failed crawl keeps what is there, `f34c5cc` means a failed swap restores it.
 
@@ -534,5 +534,49 @@ as `radio_cache` has always paced its crawl. Neither cures the link fault; both 
 an empty key *before queueing a fetch*. Every Spotify row asked for no artwork at all, which is
 also why a rendition rule written the day before appeared to work and had in fact never run. Fix
 the call site before the CDN.
+
+**2026-09-07 — the day the link died three times in three runs, and what each death paid for.**
+
+*The one that was a crash.* Between two of the user's attempts the device rebooted on its own
+with a **task-watchdog panic in the `art` task** — Now Playing album art, not the tile cache.
+Decoding it needed the ELF of the build that crashed, which `pio run` had already overwritten;
+a rebuild of the same commit produces a different embedded SHA, and `esp_coredump` refuses the
+mismatch. The dump stores the SHA as 9 ASCII characters and a trailing CRC32, so patching both
+gets the loader past it. The unwind: `xQueueGenericSend` under lwIP's core lock, i.e. a loop
+that never slept. `HTTPClient::writeToStream()` reads each **chunk header** with
+`readStringUntil()` (Stream's busy-wait) and separates chunks with `delay(0)`, which never lets
+IDLE0 run — a cover proxied through the speaker's `/getaa` (what a station reports as its art)
+dribbles chunks, and the idle task starved *across* them with every single read under 5 s. The
+4 s per-read timeout in `album_art.cpp` was written against a stall *mid-header*; it bounds one
+read, not the gap between reads. `core/net/http_body.{h,cpp}` now owns the body loop for both
+art fetchers. Also fixed: the worker logged `found.size()` *after* `std::move(found)` — every
+browse reported `0 items`, which nearly sent the investigation after a phantom empty browse.
+
+*Detection took minutes, and the log could not say why.* The original RSSI-0 check lived inside
+the rediscovery path, reached only after three failed polls (15 s apart under GENA, each blocking
+for its SOAP timeout first): measured **3-4 minutes** of hung device per death, the Play All never
+leaving the device (the Dining Room still held a single stopped track from earlier) and a
+"Searching..." that could never finish. `deadLinkFast()` samples the symptom on every netTask
+pass and proves it with a 2 s TCP probe to the coordinator before acting. The second death still
+took ~4 minutes — and nothing on the wire can explain that, because the mirror dies with the
+link. So the reboot note became a **diary** written to NVS: which detector, how long dead,
+netTask's worst gap between stage stamps and where. The third death read
+`netlink:fast dead=7s gapmax=5s@linkstats` — caught in 7 s, the 5 s gap being the RPC timeout a
+dead-link RSSI read costs. The user's next run started on that fresh boot and everything worked:
+Play All on a playlist, tiles, Search, and **artist radio from Search — "ABBA Radio" playing
+from `x-sonosapi-radio:spotify%3aartistRadio%3a…`, the last unverified playback form.**
+
+*What the fault is.* Upstream esp-hosted-mcu **#184** names it: inbound flow control. Once the
+C6's Wi-Fi RX buffers fill with inbound TCP the SDIO host mishandles the backpressure and the
+link freezes; open, unfixed, workaround "pace inbound reads". Three for three at the same spot —
+Popular Playlists tiles on top of a 15-29 KB browse — is consistent with that, and the SDIO clock
+lead is closed (already 1-bit at 10 MHz; #167 says 20 MHz did not help). What is left: the C6
+firmware upgrade, and making inbound bursts smaller — a browse `count` of 24 was already one
+step in that direction.
+
+*One number to carry forward.* That clean run bottomed internal heap at **27 KB** (`heapMin`),
+below every tagged low-water (`gena.didl` at 44 KB) and ~10 KB above where TLS starts failing.
+The consumer is untagged; `spotify.browse` / `spotify.search` notes now sit where response and
+parsed rows are both held, so the next reading names it or rules it out.
 
 ---

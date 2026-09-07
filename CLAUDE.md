@@ -163,8 +163,20 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > **never fetches while `smapi::busy()`**: a 15-29 KB browse plus tile TLS sessions plus the
   > Sonos poll on the SDIO bridge at once is the death profile. Nothing is late; rows are not on
   > screen until the browse lands. "Play all" on a playlist is PROVEN on hardware (the speaker
-  > expands `x-rincon-cpcontainer:1006206c` into its queue); artist radio is the one unverified
-  > playback form left.
+  > expands `x-rincon-cpcontainer:1006206c` into its queue), and so is **artist radio**
+  > (`x-sonosapi-radio:spotify%3aartistRadio%3a…?sid=12&flags=8300&sn=…`, "ABBA Radio" from
+  > Search, 2026-09-07). Every Spotify playback form the UI offers has now played.
+  > ⚠️ **NEVER read an HTTP body with `HTTPClient::writeToStream()` here — use
+  > `core/net/http_body.h`.** On a chunked response it reads every chunk header with
+  > `readStringUntil()` (a busy-wait) and separates chunks with `delay(0)`, which yields only to
+  > EQUAL priority and never lets IDLE0 run — so a source that dribbles chunks (the speaker's
+  > `/getaa` proxying a station's cover) starves the watchdog ACROSS chunks while every single read
+  > stays under 5 s. A per-read timeout bounds one read, not the gap between them. Coredump
+  > 2026-09-07: task `art`, PC in `xQueueGenericSend` under lwIP's core lock. `httpbody::read()`
+  > owns the loop (chunked / Content-Length / read-to-close, real `delay(5)` sleeps, one deadline)
+  > and both art fetchers go through it. To decode a coredump against a REBUILT elf, patch the
+  > 9-char SHA the dump stores (`b"71dbb6bac"` → the rebuilt elf's) and recompute the trailing
+  > CRC32 — `esp_coredump` refuses the mismatch otherwise, and a rebuild never reproduces the SHA.
   > ⚠️ **`artcache::keyOf()` is AMAZON-SHAPED and returns "" for anything else, and
   > `artcache::get()` drops an empty key without queueing a fetch.** Every Spotify row silently
   > requested no artwork at all until `artKey()` fell back to `keyOfUrl()`. Amazon must keep
@@ -193,9 +205,30 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > hard `400 "householdId must not be blank or null!"`, so do not "fix" `amazon.cpp` to match the
   > schema. Full evidence: `plans/08` (2026-09-05).
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
-  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121.
+  > Recovered automatically by reboot, not cured — matches upstream esp-hosted-mcu #167/#121, and
+  > **#184 names the mechanism: inbound flow control.** Once the C6's Wi-Fi RX buffers fill with
+  > inbound TCP, the SDIO host driver mishandles the backpressure and the link freezes — open, no
+  > fix (reported on 2.12.0; this build's host library is **2.12.11**, `esp_hosted_host_fw_ver.h`),
+  > and the only workaround offered is pacing inbound reads. That is our profile exactly: it
+  > died **three runs out of three on 2026-09-07 at the same spot**, the Popular Playlists tiles
+  > landing on top of a 15-29 KB browse. **The "slower SDIO clock" lead is closed** — this board is
+  > already 1-bit at 10 MHz (`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000`), and #167 reports 20 MHz
+  > did not help either. Remaining leads: the C6 firmware upgrade, and shrinking inbound bursts.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
-  > users hard-freezes the device. Next leads are a slower SDIO clock and the C6 firmware upgrade.
+  > users hard-freezes the device.
+  > ⚠️ **Detection is in SECONDS now; keep it there.** The original check lived inside the
+  > rediscovery path, reached only after three failed polls — 15 s apart under GENA, each blocking
+  > for its SOAP timeout first — and measured **3-4 minutes** of hung device per death, the user
+  > watching a "Searching..." that could never finish. `deadLinkFast()` in `app.cpp` samples the
+  > RSSI `publishLinkStats()` already reads on every pass, needs two sightings 3 s apart, then
+  > PROVES it with a 2 s TCP probe to the coordinator (a roam that still connects never costs a
+  > reboot). Measured: `dead=7s`. **The reboot note is a diary** — `health.lastReboot` reads
+  > `netlink:fast dead=7s gapmax=5s@linkstats now=linkstats`: which detector, how long dead,
+  > netTask's worst gap between stage stamps and the stage it sat in. Nothing on the wire can carry
+  > that (the mirror dies with the link), so NVS is the channel. The `[health]` line prints the
+  > worst gap continuously as `netgap=Ns@stage`; a dead-link RSSI read costs the 5 s RPC timeout
+  > (`DEFAULT_RPC_RSP_TIMEOUT`), which is why `gapmax=5s@linkstats` is the healthy reading for a
+  > death, not a stall.
   > ⚠️ **Power-cycle after every upload**, and read the `[health]` heartbeat before diagnosing any
   > "hang" — it prints from `uiTick`, so its *absence* means the UI task is stuck (suspect the LVGL
   > pool, ~1 KB per list row) while its *presence* with `zones=0` means the link died. Two very
