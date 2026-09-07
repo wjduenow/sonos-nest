@@ -359,13 +359,14 @@ volatile uint32_t g_linkZones  = 0;
 // roam or a scan (which still connects) never costs a reboot. Two sightings at least 3 s apart,
 // both inside 20 s, then the probe. Silent when no coordinator is known yet: there is nothing to
 // probe, and the slow path still covers boot.
+static uint32_t s_deadSinceMs = 0;   // first RSSI-0 sighting of the current episode (0 = none)
 static bool deadLinkFast() {
   static uint32_t s_firstMs = 0;
   static int      s_seen = 0;
-  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; return false; }
+  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; s_deadSinceMs = 0; return false; }
   const uint32_t now = millis();
   if (s_seen && now - s_firstMs > 20000) s_seen = 0;       // an old sighting is not this fault
-  if (s_seen == 0) { s_firstMs = now; s_seen = 1; return false; }
+  if (s_seen == 0) { s_firstMs = now; s_seen = 1; if (!s_deadSinceMs) s_deadSinceMs = now; return false; }
   if (now - s_firstMs < 3000) return false;                // let publishLinkStats() sample again
   if (s_zoneIp.length() == 0) return false;
   WiFiClient probe;
@@ -396,7 +397,32 @@ static void publishLinkStats() {
 // another task. Deliberately cheap: netStage() is on the hot path of every loop iteration.
 static volatile uint32_t    s_netAliveMs = 0;     // 0 = netTask has not started yet
 static volatile const char *s_netStage   = "start";
-static inline void netStage(const char *s) { s_netStage = s; s_netAliveMs = millis(); }
+// The longest gap between two stamps since boot, and the stage netTask was in for it. This is the
+// instrument for "why did the dead-link detector take minutes": if netTask sat inside one stage
+// for 200 s, no sampler placed between stages could have run, and the stage names the blocker.
+static volatile uint32_t    s_netGapMaxMs    = 0;
+static volatile const char *s_netGapMaxStage = "start";
+static inline void netStage(const char *s) {
+  const uint32_t now = millis();
+  if (s_netAliveMs) {
+    const uint32_t gap = now - s_netAliveMs;
+    if (gap > s_netGapMaxMs) { s_netGapMaxMs = gap; s_netGapMaxStage = s_netStage; }
+  }
+  s_netStage = s; s_netAliveMs = now;
+}
+uint32_t appNetGapMaxMs(const char **stage) {
+  if (stage) *stage = (const char *)s_netGapMaxStage;
+  return s_netGapMaxMs;
+}
+
+// What netLinkRecover() records for the far side of the reboot. Written while the link is dead,
+// so nothing on the wire can carry it — the NVS note is the whole diary.
+static String linkDeadNote(const char *path) {
+  return String("netlink:") + path +
+         " dead=" + String(s_deadSinceMs ? (millis() - s_deadSinceMs) / 1000 : 0) + "s" +
+         " gapmax=" + String(s_netGapMaxMs / 1000) + "s@" + (const char *)s_netGapMaxStage +
+         " now=" + (const char *)s_netStage;
+}
 
 const char *appNetStage() { return (const char *)s_netStage; }
 uint32_t    appNetStallSec() {
@@ -464,7 +490,7 @@ static void netTask(void *) {
     netStage("linkstats");
     publishLinkStats();
     if (deadLinkFast()) {
-      if (netLinkRecover()) {   // may not return: on the jukebox this is a reboot
+      if (netLinkRecover(linkDeadNote("fast").c_str())) {   // may not return: on the jukebox this is a reboot
         wifiConnect();
         LOG.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
                       (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
@@ -525,9 +551,10 @@ static void netTask(void *) {
       }
       if (recovering && WiFi.status() == WL_CONNECTED && WiFi.RSSI() == 0) {
         if (s_deadLinkStreak == 0) s_deadLinkFirstMs = millis();
+        if (!s_deadSinceMs) s_deadSinceMs = millis();
         if (++s_deadLinkStreak >= 2) {
           LOG.println("[net] RSSI 0 while 'connected' twice — the radio link is dead");
-          if (netLinkRecover()) {   // may not return: see the board implementation
+          if (netLinkRecover(linkDeadNote("slow").c_str())) {   // may not return: see the board implementation
             wifiConnect();
             LOG.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
                           (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());

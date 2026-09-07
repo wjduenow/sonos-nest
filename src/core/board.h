@@ -40,7 +40,7 @@ bool      knobDown();              // true while the knob is held; false if no k
 // Wi-Fi — the normal reconnect path cannot fix a dead transport. Return true if the board did
 // something and the caller should re-associate; false (the default) means "nothing I can do",
 // which is correct for boards with an on-die radio.
-bool netLinkRecover();
+bool netLinkRecover(const char *note);   // note: what to record as the reboot reason (nullptr = "netlink")
 
 // --- UI feedback tones (optional; no-op on boards without a speaker) ---
 // Short non-musical confirmations for touch/press, NOT media playback — deliberately separate

@@ -3829,8 +3829,10 @@ void uiTick() {
       // be a blocking co-processor RPC and an unlocked read of a vector netTask rewrites, i.e.
       // this log would stall or crash the UI task in exactly the fault it exists to report.
       const uint32_t ip = g_linkIp;
+      const char *gapStage = "";
+      const uint32_t gapMs = appNetGapMaxMs(&gapStage);   // plain loads, same rule as g_link*
       LOG.printf("[health] up=%lus heap=%luKB min=%luKB psram=%luKB wifi=%d rssi=%d "
-                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu art=%s\n",
+                    "ip=%u.%u.%u.%u zones=%u lvgl_free=%uKB log=%d/%lu art=%s netgap=%lus@%s\n",
                     (unsigned long)(millis() / 1000),
                     (unsigned long)(ESP.getFreeHeap() / 1024),
                     (unsigned long)(ESP.getMinFreeHeap() / 1024),
@@ -3845,7 +3847,8 @@ void uiTick() {
                     // healthy while albumArtTake() has never handed anything over, and then the
                     // album-art screensaver silently shows a clock with no way to tell why from
                     // off-device. This is the answer to that exact question.
-                    s_artDsc ? "yes" : "none");
+                    s_artDsc ? "yes" : "none",
+                    (unsigned long)(gapMs / 1000), gapStage);
     }
   }
 
