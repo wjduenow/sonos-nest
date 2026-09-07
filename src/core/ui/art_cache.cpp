@@ -16,6 +16,7 @@
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
 #include "jpeg_decode.h" // progressive-JPEG fallback for tiles TJpgDec refuses
 #include "core/amazon.h"
+#include "core/smapi.h"      // smapi::busy — never fetch tiles under a browse
 #include "core/board.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water
@@ -211,8 +212,22 @@ static size_t obtain(const Req &r) {
   http.setReuse(true);
   http.setTimeout(12000);
   if (!http.begin(*cli, r.url)) return 0;
+  // Ask for the Content-Type up front and refuse anything that is not JPEG BEFORE reading a body.
+  // The decoders here are JPEG-only, and this used to download the whole file to find that out:
+  // Spotify's user-uploaded playlist covers (image-cdn-*.spotifycdn.com) come back as WebP — a
+  // 23,898-byte one was fetched in full and thrown away — and its placeholder icons are PNG. On a
+  // link that dies under load, a wasted 24 KB TLS transfer per row is not a rounding error.
+  static const char *kHdrs[] = {"Content-Type"};
+  http.collectHeaders(kHdrs, 1);
   const int code = http.GET();
   if (code != 200) { http.end(); return 0; }
+  const String ct = http.header("Content-Type");
+  if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
+    LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, ct.c_str());
+    http.end();
+    if (xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE) { markBad(r.key); xSemaphoreGive(s_lock); }
+    return 0;
+  }
   const int len = http.getSize();
   if (len > (int)kJpegMax) { http.end(); return 0; }
   WiFiClient *st = http.getStreamPtr();
@@ -275,6 +290,12 @@ static void worker(void *) {
     // at human speed and turns a burst into a trickle. It does not CURE the link fault — nothing
     // here does — it stops us provoking it.
     vTaskDelay(pdMS_TO_TICKS(120));
+
+    // NEVER under a browse. A Spotify listing is a 15-29 KB TLS transfer; starting tile fetches
+    // while it is still arriving puts two TLS sessions and the Sonos poll on the SDIO bridge at
+    // once, and that is the load profile that has killed the ESP-Hosted link three times in one
+    // evening. The tiles are not late — the rows are not on screen until the browse lands anyway.
+    while (smapi::busy()) vTaskDelay(pdMS_TO_TICKS(50));
 
     const size_t n = obtain(r);
     if (!n) continue;

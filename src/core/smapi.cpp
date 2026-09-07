@@ -87,6 +87,9 @@ String loginCreds(const String &token, const String &key, const String &househol
          "</householdId></loginToken></credentials>";
 }
 
+static volatile int s_inFlight = 0;
+bool busy() { return s_inFlight > 0; }
+
 // --- Client --------------------------------------------------------------------------------------
 
 Client::Client(const char *host, const char *path, const char *logTag)
@@ -197,6 +200,8 @@ bool Client::readResponse(String &out, bool &keepAlive) {
 }
 
 String Client::post(const String &action, const String &header, const String &body) {
+  // Counted, not flagged: two Clients (Amazon, Spotify) may each be mid-request on different tasks.
+  struct InFlight { InFlight() { ++s_inFlight; } ~InFlight() { --s_inFlight; } } inFlight;
   const String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
                             "<s:Header>") + header + "</s:Header><s:Body>" + body +
