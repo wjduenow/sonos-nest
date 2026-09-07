@@ -43,6 +43,7 @@
 #include "../../boards/crowpanel_p4_7in/bringup_console.h"   // no-op unless the
                                                             // bring-up flag is set
 #include "ui_scale.h"
+#include "latin_fonts.h"   // jbFontNN — montserrat + Latin-1, for anything showing metadata
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 
 // Two-glyph Lucide subset — see lv_font_lucide_28.c for why and how to regenerate.
@@ -87,6 +88,9 @@ static const lv_coord_t GAP       = 34;    // art -> text column
 // metadata line, which is exactly what it was doing.
 static const lv_coord_t NP_ART_TOP  = (SCREEN_H - ART) / 2;            // 160
 static const lv_coord_t NP_ART_BOT  = NP_ART_TOP + ART;                // 440
+// These are the BUILT-IN montserrat line heights, and they stay correct for jbFontNN: those
+// wrap the built-in and inherit its metrics, taking only missing glyphs from the Latin-1
+// supplement. See latin_fonts.h — that direction is chosen precisely to keep these numbers.
 static const lv_coord_t NP_TITLE_LH = 52;   // lv_font_montserrat_48 .line_height
 static const lv_coord_t NP_TITLE_H  = NP_TITLE_LH * 2;
 static const lv_coord_t NP_META_H   = 24;   // lv_font_montserrat_22 .line_height
@@ -216,7 +220,7 @@ static inline void setTextIfChanged(lv_obj_t *l, String &cache, const String &ne
 static void placeTitle() {
   if (!s_title || !s_textW) return;
   lv_point_t sz;
-  lv_text_get_size(&sz, lv_label_get_text(s_title), &lv_font_montserrat_48,
+  lv_text_get_size(&sz, lv_label_get_text(s_title), &jbFont48,
                    lv_obj_get_style_text_letter_space(s_title, LV_PART_MAIN),
                    lv_obj_get_style_text_line_space(s_title, LV_PART_MAIN),
                    s_textW, LV_TEXT_FLAG_NONE);
@@ -287,7 +291,7 @@ static void buildVolToast() {
   s_volToastIcon = label(s_volToast, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_20, JB_TEXT);
   lv_obj_align(s_volToastIcon, LV_ALIGN_LEFT_MID, 22, -12);
 
-  s_volToastPct = label(s_volToast, "0", &lv_font_montserrat_22, JB_TEXT);
+  s_volToastPct = label(s_volToast, "0", &jbFont22, JB_TEXT);
   lv_obj_align(s_volToastPct, LV_ALIGN_RIGHT_MID, -22, -12);
 
   lv_obj_t *track = panel(s_volToast, VT_BAR_W, 6, JB_SCREEN_ELEV_2, 3);
@@ -325,7 +329,7 @@ static lv_obj_t *transportBtn(lv_obj_t *parent, const char *sym, lv_coord_t d, b
                             LV_STATE_PRESSED);
   if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
 
-  lv_obj_t *l = label(b, sym, &lv_font_montserrat_24, solid ? JB_ACCENT_INK : JB_TEXT_MUTED);
+  lv_obj_t *l = label(b, sym, &jbFont24, solid ? JB_ACCENT_INK : JB_TEXT_MUTED);
   lv_obj_center(l);
   if (labelOut) *labelOut = l;
   return b;
@@ -350,9 +354,9 @@ static void buildRail(lv_obj_t *scr) {
   // of Lucide would be flash spent for no gain.
   const char *icons[PAGE_COUNT] = {LV_SYMBOL_AUDIO, ICON_HEART, ICON_RADIO, ICON_SEARCH,
                                    ICON_SPEAKER, LV_SYMBOL_SETTINGS};
-  const lv_font_t *iconFonts[PAGE_COUNT] = {&lv_font_montserrat_28, &lv_font_lucide_28,
+  const lv_font_t *iconFonts[PAGE_COUNT] = {&jbFont28, &lv_font_lucide_28,
                                             &lv_font_lucide_28, &lv_font_lucide_28,
-                                            &lv_font_lucide_28, &lv_font_montserrat_28};
+                                            &lv_font_lucide_28, &jbFont28};
   for (int i = 0; i < PAGE_COUNT; i++) {
     lv_obj_t *b = lv_button_create(scr);
     lv_obj_remove_style_all(b);
@@ -373,19 +377,19 @@ static void buildStatusBar() {
   s_dot = panel(s_content, 9, 9, JB_ACCENT, LV_RADIUS_CIRCLE);
   lv_obj_align(s_dot, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 6);
 
-  s_room = label(s_content, JB_DASH, &lv_font_montserrat_16, JB_TEXT);
+  s_room = label(s_content, JB_DASH, &jbFont16, JB_TEXT);
   lv_obj_align(s_room, LV_ALIGN_TOP_LEFT, 18, PAD_TOP);
 
   // The rest of the group, under the active room. Built but never written until now — the status
   // bar said "Dining Room" whether that speaker was alone or leading five others, which is exactly
   // the thing you need to know before touching the volume. Width-capped and ellipsised: nine rooms
   // would otherwise run under the Wi-Fi glyph on the right.
-  s_group = label(s_content, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_group = label(s_content, "", &jbFont12, JB_TEXT_DIM);
   lv_label_set_long_mode(s_group, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_group, SCREEN_W - RAIL_W - PAD_X * 2 - 18 - 40, 15);
   lv_obj_align(s_group, LV_ALIGN_TOP_LEFT, 18, PAD_TOP + 20);
 
-  s_clock = label(s_content, LV_SYMBOL_WIFI, &lv_font_montserrat_16, JB_TEXT_MUTED);
+  s_clock = label(s_content, LV_SYMBOL_WIFI, &jbFont16, JB_TEXT_MUTED);
   lv_obj_align(s_clock, LV_ALIGN_TOP_RIGHT, 0, PAD_TOP);
 }
 
@@ -396,7 +400,7 @@ static void buildNowPlaying() {
   lv_obj_align(s_art, LV_ALIGN_TOP_LEFT, 0, NP_ART_TOP);
   lv_obj_set_style_border_width(s_art, 1, 0);
   lv_obj_set_style_border_color(s_art, lv_color_hex(JB_SCREEN_LINE), 0);
-  s_artPh = label(s_art, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, JB_SCREEN_LINE);
+  s_artPh = label(s_art, LV_SYMBOL_AUDIO, &jbFont48, JB_SCREEN_LINE);
   lv_obj_center(s_artPh);
 
   // Real cover, decoded by the art task into a PSRAM buffer (core/album_art). Sits above the
@@ -411,19 +415,19 @@ static void buildNowPlaying() {
   const lv_coord_t textW = SCREEN_W - RAIL_W - PAD_X * 2 - textX;
   s_textW = textW;
 
-  s_badgeSrc = label(s_page[PAGE_NOW], "", &lv_font_montserrat_12, JB_ACCENT);
+  s_badgeSrc = label(s_page[PAGE_NOW], "", &jbFont12, JB_ACCENT);
   lv_obj_align(s_badgeSrc, LV_ALIGN_TOP_LEFT, textX, NP_BADGE_Y);
 
   // Two reserved lines, ellipsised past that (see NP_TITLE_H). placeTitle() re-centres a one-line
   // title inside the slot on every change so a short title isn't pinned to the top of a hole.
-  s_title = label(s_page[PAGE_NOW], "Sonos Jukebox", &lv_font_montserrat_48, JB_TEXT);
+  s_title = label(s_page[PAGE_NOW], "Sonos Jukebox", &jbFont48, JB_TEXT);
   lv_label_set_long_mode(s_title, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_title, textW, NP_TITLE_H);
   lv_obj_align(s_title, LV_ALIGN_TOP_LEFT, textX, NP_TITLE_Y);
 
   // Artist · album, ONE line. It used to be height-less too, so a long album name wrapped onto a
   // second line and landed on the scrubber.
-  s_meta = label(s_page[PAGE_NOW], "starting up", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_meta = label(s_page[PAGE_NOW], "starting up", &jbFont22, JB_TEXT_MUTED);
   lv_label_set_long_mode(s_meta, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_meta, textW, NP_META_H);
   lv_obj_align(s_meta, LV_ALIGN_TOP_LEFT, textX, NP_META_Y);
@@ -435,11 +439,11 @@ static void buildNowPlaying() {
   s_fill = panel(s_track, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_fill, LV_ALIGN_LEFT_MID, 0, 0);
 
-  s_elapsed = label(s_page[PAGE_NOW], "0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_elapsed = label(s_page[PAGE_NOW], "0:00", &jbFont12, JB_TEXT_DIM);
   lv_obj_align_to(s_elapsed, s_track, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
   // Right-aligned against the end of the track. The old fixed -44 offset guessed the width of the
   // string, so "-1:08" and "-12:08" did not end in the same place.
-  s_remain = label(s_page[PAGE_NOW], "-0:00", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_remain = label(s_page[PAGE_NOW], "-0:00", &jbFont12, JB_TEXT_DIM);
   lv_obj_align_to(s_remain, s_track, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 8);
 
   placeTitle();
@@ -457,7 +461,7 @@ static void buildTransport() {
   s_volFill = panel(volTrack, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_volFill, LV_ALIGN_LEFT_MID, 0, 0);
 
-  s_volPct = label(s_page[PAGE_NOW], "0", &lv_font_montserrat_12, JB_TEXT_MUTED);
+  s_volPct = label(s_page[PAGE_NOW], "0", &jbFont12, JB_TEXT_MUTED);
   lv_obj_align(s_volPct, LV_ALIGN_BOTTOM_LEFT, 306, rowY - 14);
 
   // 44px is the design system's --hit-min. These are the ONLY transport controls until the
@@ -737,7 +741,7 @@ static void rebuildRooms() {
     sonos::zonesSnapshot(zs);
     if (zs.empty()) {
       lv_obj_t *l = label(s_roomsWrap, "Searching for speakers" LV_SYMBOL_REFRESH,
-                          &lv_font_montserrat_22, JB_TEXT_MUTED);
+                          &jbFont22, JB_TEXT_MUTED);
       lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
       return;
     }
@@ -774,7 +778,7 @@ static void rebuildRooms() {
     lv_obj_set_style_bg_opa(u.check, LV_OPA_COVER, 0);
     lv_obj_align(u.check, LV_ALIGN_LEFT_MID, RX_CHECK, 0);
     lv_obj_add_event_cb(u.check, roomCheckCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    u.checkGlyph = label(u.check, LV_SYMBOL_OK, &lv_font_montserrat_16, JB_ACCENT_INK);
+    u.checkGlyph = label(u.check, LV_SYMBOL_OK, &jbFont16, JB_ACCENT_INK);
     lv_obj_center(u.checkGlyph);
 
     // The name is a button so the whole block is a comfortable target, not just the glyph.
@@ -784,15 +788,15 @@ static void rebuildRooms() {
     lv_obj_align(nameBtn, LV_ALIGN_LEFT_MID, RX_NAME, 0);
     lv_obj_add_event_cb(nameBtn, roomNameCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-    u.name = label(u.row, s_roomsData[i].name.c_str(), &lv_font_montserrat_16, JB_TEXT);
+    u.name = label(u.row, s_roomsData[i].name.c_str(), &jbFont16, JB_TEXT);
     lv_label_set_long_mode(u.name, LV_LABEL_LONG_DOT);
     lv_obj_set_width(u.name, RN_W);
     lv_obj_align(u.name, LV_ALIGN_LEFT_MID, RX_NAME, -10);
 
-    u.badge = label(u.row, "MAIN", &lv_font_montserrat_12, JB_ACCENT);
+    u.badge = label(u.row, "MAIN", &jbFont12, JB_ACCENT);
     lv_obj_align(u.badge, LV_ALIGN_LEFT_MID, RX_BADGE, -10);
 
-    u.caption = label(u.row, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+    u.caption = label(u.row, "", &jbFont12, JB_TEXT_DIM);
     lv_obj_align(u.caption, LV_ALIGN_LEFT_MID, RX_NAME, 12);
 
     lv_obj_t *track = panel(u.row, RV_W, 6, JB_SCREEN_ELEV_2, 3);
@@ -800,7 +804,7 @@ static void rebuildRooms() {
     u.volFill = panel(track, 0, 6, JB_ACCENT, 3);
     lv_obj_align(u.volFill, LV_ALIGN_LEFT_MID, 0, 0);
 
-    u.volPct = label(u.row, "--", &lv_font_montserrat_12, JB_TEXT_DIM);
+    u.volPct = label(u.row, "--", &jbFont12, JB_TEXT_DIM);
     lv_obj_align(u.volPct, LV_ALIGN_LEFT_MID, RX_VPCT, 0);
 
     u.minus = roomStepBtn(u.row, LV_SYMBOL_MINUS, R_STEP_SZ, roomVolDownCb, i);
@@ -974,20 +978,20 @@ static void buildRooms() {
   lv_obj_set_style_border_width(bar, 1, 0);
   lv_obj_set_style_border_color(bar, lv_color_hex(JB_SCREEN_LINE), 0);
 
-  s_grpCount = label(bar, "--", &lv_font_montserrat_24, JB_TEXT);
+  s_grpCount = label(bar, "--", &jbFont24, JB_TEXT);
   lv_obj_align(s_grpCount, LV_ALIGN_TOP_LEFT, 18, 14);
-  s_grpMembers = label(bar, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_grpMembers = label(bar, "", &jbFont12, JB_TEXT_DIM);
   lv_label_set_long_mode(s_grpMembers, LV_LABEL_LONG_DOT);
   lv_obj_set_width(s_grpMembers, 260);
   lv_obj_align(s_grpMembers, LV_ALIGN_TOP_LEFT, 18, 48);
 
-  lv_obj_t *gvl = label(bar, "GROUP VOLUME", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_t *gvl = label(bar, "GROUP VOLUME", &jbFont12, JB_TEXT_DIM);
   lv_obj_align(gvl, LV_ALIGN_TOP_LEFT, 300, 18);
   lv_obj_t *gtrack = panel(bar, 320, 6, JB_SCREEN_ELEV_2, 3);
   lv_obj_align(gtrack, LV_ALIGN_TOP_LEFT, 300, 46);
   s_grpVolFill = panel(gtrack, 0, 6, JB_ACCENT, 3);
   lv_obj_align(s_grpVolFill, LV_ALIGN_LEFT_MID, 0, 0);
-  s_grpVolPct = label(bar, "--", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_grpVolPct = label(bar, "--", &jbFont12, JB_TEXT_DIM);
   lv_obj_align(s_grpVolPct, LV_ALIGN_TOP_LEFT, 628, 42);
 
   s_grpUngroup = lv_button_create(bar);
@@ -1001,7 +1005,7 @@ static void buildRooms() {
   lv_obj_set_style_bg_color(s_grpUngroup, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
   lv_obj_align(s_grpUngroup, LV_ALIGN_RIGHT_MID, -(16 + R_PLAY_SZ + 10), 0);
   lv_obj_add_event_cb(s_grpUngroup, ungroupCb, LV_EVENT_CLICKED, nullptr);
-  s_grpUngroupLbl = label(s_grpUngroup, "UNGROUP", &lv_font_montserrat_12, JB_TEXT);
+  s_grpUngroupLbl = label(s_grpUngroup, "UNGROUP", &jbFont12, JB_TEXT);
   lv_obj_center(s_grpUngroupLbl);
 
   s_grpPlay = lv_button_create(bar);
@@ -1016,7 +1020,7 @@ static void buildRooms() {
   s_grpPlayLbl = label(s_grpPlay, LV_SYMBOL_PLAY, &lv_font_montserrat_20, JB_ACCENT_INK);
   lv_obj_center(s_grpPlayLbl);
 
-  lv_obj_t *sec = label(pg, "ALL ROOMS" JB_SEP "TAP THE BOX TO GROUP", &lv_font_montserrat_12,
+  lv_obj_t *sec = label(pg, "ALL ROOMS" JB_SEP "TAP THE BOX TO GROUP", &jbFont12,
                         JB_TEXT_DIM);
   lv_obj_align(sec, LV_ALIGN_TOP_LEFT, 2, RM_LIST_Y - 24);
 
@@ -1143,7 +1147,7 @@ static void favRenderRows() {
     lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
     s_favTiles.push_back(img);
 
-    lv_obj_t *t = label(row, s_favs[i].title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_t *t = label(row, s_favs[i].title.c_str(), &jbFont22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_width(t, w - 120);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, 0);
@@ -1176,7 +1180,7 @@ static void favBuildAz() {
     lv_obj_set_size(b, step, 44);
     lv_obj_set_pos(b, i * step, 0);
     char t[2] = {(char)('A' + i), 0};
-    lv_obj_t *l = label(b, t, &lv_font_montserrat_16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
+    lv_obj_t *l = label(b, t, &jbFont16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
     lv_obj_center(l);
     if (have[i]) lv_obj_add_event_cb(b, favAzJump, LV_EVENT_CLICKED, (void *)(intptr_t)('A' + i));
   }
@@ -1248,11 +1252,11 @@ static void buildFavourites() {
   lv_obj_set_size(s_favBack, 52, 52);
   lv_obj_align(s_favBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
   lv_obj_add_event_cb(s_favBack, favBackCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = label(s_favBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_t *bl = label(s_favBack, LV_SYMBOL_LEFT, &jbFont24, JB_TEXT);
   lv_obj_center(bl);
   lv_obj_add_flag(s_favBack, LV_OBJ_FLAG_HIDDEN);
 
-  s_favTitle = label(pg, "Favorites", &lv_font_montserrat_28, JB_TEXT);
+  s_favTitle = label(pg, "Favorites", &jbFont28, JB_TEXT);
   lv_obj_align(s_favTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
 
   s_favSearchBtn = lv_button_create(pg);
@@ -1266,7 +1270,7 @@ static void buildFavourites() {
   lv_obj_t *sb = label(s_favSearchBtn, LV_SYMBOL_LIST, &lv_font_montserrat_20, JB_TEXT_MUTED);
   lv_obj_center(sb);
 
-  s_favStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_favStatus = label(pg, "", &jbFont22, JB_TEXT_MUTED);
   lv_obj_align(s_favStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
 
   s_favList = lv_obj_create(pg);
@@ -1286,7 +1290,7 @@ static void buildFavourites() {
   lv_obj_set_style_bg_color(s_favSearchTa, lv_color_hex(JB_SCREEN_ELEV), 0);
   lv_obj_set_style_border_color(s_favSearchTa, lv_color_hex(JB_SCREEN_LINE), 0);
   lv_obj_set_style_text_color(s_favSearchTa, lv_color_hex(JB_TEXT), 0);
-  lv_obj_set_style_text_font(s_favSearchTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_text_font(s_favSearchTa, &jbFont22, 0);
   lv_obj_set_style_radius(s_favSearchTa, JB_R_MD, 0);
   lv_obj_add_event_cb(s_favSearchTa, favSearchCb, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_flag(s_favSearchTa, LV_OBJ_FLAG_HIDDEN);
@@ -1850,7 +1854,7 @@ static void radioShowGenres() {
     lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV), 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(JB_SCREEN_ELEV_2), LV_STATE_PRESSED);
     lv_obj_add_event_cb(b, radioGenreCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_t *l = label(b, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_t *l = label(b, title.c_str(), &jbFont22, JB_TEXT);
     lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
     lv_obj_set_width(l, w - 32);
     lv_obj_align(l, LV_ALIGN_LEFT_MID, 16, 0);
@@ -1882,13 +1886,13 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
   const lv_image_dsc_t *d = artcache::get(artKey(id, artUrl), artUrl);
   if (d) lv_image_set_src(img, d);
 
-  lv_obj_t *t = label(row, title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+  lv_obj_t *t = label(row, title.c_str(), &jbFont22, JB_TEXT);
   lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
   lv_obj_set_size(t, w - 120, 28);     // ONE line: LONG_DOT needs a fixed height or it wraps
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
   // The second line said "Prime Station" for every row, on both sources — right for Amazon, which
   // is all this page ever showed, and wrong for every Spotify playlist, album and artist.
-  lv_obj_t *sub = label(row, subtitle.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_t *sub = label(row, subtitle.c_str(), &jbFont12, JB_TEXT_DIM);
   lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
   lv_obj_set_width(sub, w - 120);
   lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
@@ -1946,7 +1950,7 @@ static void radioBuildAz() {
     lv_obj_set_size(b, step, 44);
     lv_obj_set_pos(b, i * step, 0);
     char t[2] = {(char)('A' + i), 0};
-    lv_obj_t *l = label(b, t, &lv_font_montserrat_16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
+    lv_obj_t *l = label(b, t, &jbFont16, have[i] ? JB_TEXT_MUTED : JB_SCREEN_LINE);
     lv_obj_center(l);
     if (have[i]) lv_obj_add_event_cb(b, radioAzJump, LV_EVENT_CLICKED, (void *)(intptr_t)('A' + i));
   }
@@ -2042,11 +2046,11 @@ static void buildRadio() {
   lv_obj_set_size(s_radioBack, 52, 52);
   lv_obj_align(s_radioBack, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 44);
   lv_obj_add_event_cb(s_radioBack, radioBackCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = label(s_radioBack, LV_SYMBOL_LEFT, &lv_font_montserrat_24, JB_TEXT);
+  lv_obj_t *bl = label(s_radioBack, LV_SYMBOL_LEFT, &jbFont24, JB_TEXT);
   lv_obj_center(bl);
   lv_obj_add_flag(s_radioBack, LV_OBJ_FLAG_HIDDEN);
 
-  s_radioTitle = label(pg, "Radio", &lv_font_montserrat_28, JB_TEXT);
+  s_radioTitle = label(pg, "Radio", &jbFont28, JB_TEXT);
   lv_obj_align(s_radioTitle, LV_ALIGN_TOP_LEFT, 62, PAD_TOP + 52);
 
   // Source segmented control, top right — out of the way of the title and the back button.
@@ -2063,14 +2067,14 @@ static void buildRadio() {
       lv_obj_set_style_radius(s_srcBtn[i], LV_RADIUS_CIRCLE, 0);
       lv_obj_set_style_bg_opa(s_srcBtn[i], LV_OPA_COVER, 0);
       lv_obj_add_event_cb(s_srcBtn[i], radioSrcCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-      lv_obj_t *l = label(s_srcBtn[i], name[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+      lv_obj_t *l = label(s_srcBtn[i], name[i], &jbFont16, JB_TEXT_MUTED);
       lv_obj_center(l);
     }
     s_radioSrc = settingsRadioSource() ? 1 : 0;
     radioSrcPaint();
   }
 
-  s_radioStatus = label(pg, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_radioStatus = label(pg, "", &jbFont22, JB_TEXT_MUTED);
   lv_obj_align(s_radioStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 176);
 
   s_radioList = lv_obj_create(pg);
@@ -2103,7 +2107,7 @@ static void buildRadio() {
   lv_obj_set_style_bg_color(s_searchTa, lv_color_hex(JB_SCREEN_ELEV), 0);
   lv_obj_set_style_border_color(s_searchTa, lv_color_hex(JB_SCREEN_LINE), 0);
   lv_obj_set_style_text_color(s_searchTa, lv_color_hex(JB_TEXT), 0);
-  lv_obj_set_style_text_font(s_searchTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_text_font(s_searchTa, &jbFont22, 0);
   lv_obj_set_style_radius(s_searchTa, JB_R_MD, 0);
   lv_obj_add_event_cb(s_searchTa, radioSearchCb, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_flag(s_searchTa, LV_OBJ_FLAG_HIDDEN);
@@ -2219,14 +2223,14 @@ static lv_obj_t *ssDropdown(lv_obj_t *parent, const char *opts, uint16_t sel,
   lv_obj_set_style_bg_color(d, lv_color_hex(JB_SCREEN_ELEV), 0);
   lv_obj_set_style_border_color(d, lv_color_hex(JB_SCREEN_LINE), 0);
   lv_obj_set_style_text_color(d, lv_color_hex(JB_TEXT), 0);
-  lv_obj_set_style_text_font(d, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(d, &jbFont16, 0);
   lv_obj_add_event_cb(d, cb, LV_EVENT_VALUE_CHANGED, nullptr);
 
   lv_obj_t *list = lv_dropdown_get_list(d);
   lv_obj_set_style_bg_color(list, lv_color_hex(JB_SCREEN_ELEV_2), 0);
   lv_obj_set_style_border_color(list, lv_color_hex(JB_SCREEN_LINE), 0);
   lv_obj_set_style_text_color(list, lv_color_hex(JB_TEXT), 0);
-  lv_obj_set_style_text_font(list, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(list, &jbFont16, 0);
   lv_obj_set_style_bg_color(list, lv_color_hex(JB_ACCENT), LV_PART_SELECTED | LV_STATE_CHECKED);
   return d;
 }
@@ -2436,9 +2440,9 @@ static void srchPaintRows() {
     lv_obj_set_style_bg_color(row, lv_color_hex(JB_ACCENT), 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_80, LV_STATE_PRESSED);
     lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)0);
-    lv_obj_t *t = label(row, "Play all", &lv_font_montserrat_22, JB_ACCENT_INK);
+    lv_obj_t *t = label(row, "Play all", &jbFont22, JB_ACCENT_INK);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 24, -11);
-    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &lv_font_montserrat_12,
+    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &jbFont12,
                          JB_ACCENT_INK);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(sl, w - 48);
@@ -2466,13 +2470,13 @@ static void srchPaintRows() {
     lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);
     s_srchTiles.push_back(img);
 
-    lv_obj_t *t = label(row, it.title.c_str(), &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_t *t = label(row, it.title.c_str(), &jbFont22, JB_TEXT);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_size(t, w - 88, 28);      // ONE line: LONG_DOT needs a fixed height or it wraps
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
 
     const String sub = spotifyKindLine(it);
-    lv_obj_t *sl = label(row, sub.c_str(), &lv_font_montserrat_12, JB_TEXT_DIM);
+    lv_obj_t *sl = label(row, sub.c_str(), &jbFont12, JB_TEXT_DIM);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(sl, w - 88);
     lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80, 15);
@@ -2523,7 +2527,7 @@ static void buildSearch() {
     lv_obj_set_style_radius(s_srchChip[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_srchChip[i], LV_OPA_COVER, 0);
     lv_obj_add_event_cb(s_srchChip[i], srchChipCb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_t *cl = label(s_srchChip[i], kSrchChipName[i], &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *cl = label(s_srchChip[i], kSrchChipName[i], &jbFont16, JB_TEXT_MUTED);
     lv_obj_center(cl);
   }
   srchChipPaint();
@@ -2547,7 +2551,7 @@ static void buildSearch() {
   lv_obj_set_size(s_srchList, SRCH_RIGHT_W, SCREEN_H - (SRCH_TOP + 32) - PAD_BOT);
   lv_obj_align(s_srchList, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 32);
 
-  s_srchStatus = label(pg, "Type a query.", &lv_font_montserrat_16, JB_TEXT_DIM);
+  s_srchStatus = label(pg, "Type a query.", &jbFont16, JB_TEXT_DIM);
   lv_label_set_long_mode(s_srchStatus, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(s_srchStatus, SRCH_RIGHT_W);
   lv_obj_align(s_srchStatus, LV_ALIGN_TOP_LEFT, SRCH_RIGHT_X, SRCH_TOP + 8);
@@ -2562,11 +2566,11 @@ static void buildSettings() {
   lv_obj_set_scroll_dir(pg, LV_DIR_VER);
   lv_obj_set_scrollbar_mode(pg, LV_SCROLLBAR_MODE_AUTO);
 
-  lv_obj_t *h = label(pg, "Settings", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_t *h = label(pg, "Settings", &jbFont28, JB_TEXT);
   lv_obj_align(h, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 56);
 
   // --- Device name ---
-  lv_obj_t *nl = label(pg, "Device name", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_t *nl = label(pg, "Device name", &jbFont16, JB_TEXT_MUTED);
   lv_obj_align(nl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 112);
 
   s_nameTa = lv_textarea_create(pg);
@@ -2577,7 +2581,7 @@ static void buildSettings() {
   lv_obj_set_style_bg_color(s_nameTa, lv_color_hex(JB_SCREEN_ELEV), 0);
   lv_obj_set_style_border_color(s_nameTa, lv_color_hex(JB_SCREEN_LINE), 0);
   lv_obj_set_style_text_color(s_nameTa, lv_color_hex(JB_TEXT), 0);
-  lv_obj_set_style_text_font(s_nameTa, &lv_font_montserrat_22, 0);
+  lv_obj_set_style_text_font(s_nameTa, &jbFont22, 0);
   lv_obj_set_style_radius(s_nameTa, JB_R_MD, 0);
   lv_obj_add_event_cb(s_nameTa, kbShowCb, LV_EVENT_FOCUSED, nullptr);
 
@@ -2590,14 +2594,14 @@ static void buildSettings() {
   lv_obj_set_style_bg_color(save, lv_color_hex(JB_ACCENT), 0);
   lv_obj_set_style_bg_opa(save, LV_OPA_80, LV_STATE_PRESSED);   // accent-filled: dim, don't recolour
   lv_obj_add_event_cb(save, saveNameCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *sl = label(save, "Save", &lv_font_montserrat_22, JB_ACCENT_INK);
+  lv_obj_t *sl = label(save, "Save", &jbFont22, JB_ACCENT_INK);
   lv_obj_center(sl);
 
-  s_saveHint = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  s_saveHint = label(pg, "", &jbFont16, JB_TEXT_DIM);
   lv_obj_align(s_saveHint, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 204);
 
   // --- On-device sound level ---
-  lv_obj_t *vl = label(pg, "Sound feedback (this device's speakers)", &lv_font_montserrat_16,
+  lv_obj_t *vl = label(pg, "Sound feedback (this device's speakers)", &jbFont16,
                        JB_TEXT_MUTED);
   lv_obj_align(vl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 250);
 
@@ -2612,15 +2616,15 @@ static void buildSettings() {
   lv_obj_add_event_cb(s_soundSlider, soundCb, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_event_cb(s_soundSlider, soundCb, LV_EVENT_RELEASED, nullptr);
 
-  s_soundVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+  s_soundVal = label(pg, "", &jbFont22, JB_TEXT);
   lv_obj_align(s_soundVal, LV_ALIGN_TOP_LEFT, 500, PAD_TOP + 284);
   lv_label_set_text_fmt(s_soundVal, "%d", settingsUiSound());
 
-  lv_obj_t *hint = label(pg, "0 turns feedback off.", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_t *hint = label(pg, "0 turns feedback off.", &jbFont12, JB_TEXT_DIM);
   lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 318);
 
   // --- Scroll feedback (separate from the master level above) ---
-  lv_obj_t *ssl = label(pg, "Clicks while scrolling", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_t *ssl = label(pg, "Clicks while scrolling", &jbFont16, JB_TEXT_MUTED);
   lv_obj_align(ssl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 352);
   lv_obj_t *ssw = lv_switch_create(pg);
   lv_obj_set_size(ssw, 72, 38);
@@ -2630,7 +2634,7 @@ static void buildSettings() {
   lv_obj_add_event_cb(ssw, scrollSoundCb, LV_EVENT_VALUE_CHANGED, nullptr);
 
   // --- Radio catalogue refresh ---
-  lv_obj_t *rl = label(pg, "Refresh radio stations daily at", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_t *rl = label(pg, "Refresh radio stations daily at", &jbFont16, JB_TEXT_MUTED);
   lv_obj_align(rl, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 410);
 
   lv_obj_t *rsw = lv_switch_create(pg);
@@ -2642,14 +2646,14 @@ static void buildSettings() {
 
   lv_obj_t *dn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, hourDownCb);
   lv_obj_align(dn, LV_ALIGN_TOP_LEFT, 400, PAD_TOP + 400);
-  s_hourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+  s_hourLbl = label(pg, "", &jbFont24, JB_TEXT);
   lv_obj_align(s_hourLbl, LV_ALIGN_TOP_LEFT, 462, PAD_TOP + 408);
   lv_label_set_text_fmt(s_hourLbl, "%02d:00", settingsRadioRefreshHour());
   lv_obj_t *up = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, hourUpCb);
   lv_obj_align(up, LV_ALIGN_TOP_LEFT, 556, PAD_TOP + 400);
 
   // Local time, so the label means what it says wherever the device lives.
-  lv_obj_t *rh = label(pg, "Device local time. ~500 KB once a day.", &lv_font_montserrat_12, JB_TEXT_DIM);
+  lv_obj_t *rh = label(pg, "Device local time. ~500 KB once a day.", &jbFont12, JB_TEXT_DIM);
   lv_obj_align(rh, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 438);
 
   lv_obj_t *rn = lv_button_create(pg);
@@ -2661,22 +2665,22 @@ static void buildSettings() {
   lv_obj_set_style_bg_color(rn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
   lv_obj_set_style_bg_color(rn, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
   lv_obj_add_event_cb(rn, refreshNowCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *rnl = label(rn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
+  lv_obj_t *rnl = label(rn, "Refresh now", &jbFont16, JB_TEXT);
   lv_obj_center(rnl);
 
-  s_radioMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+  s_radioMeta = label(pg, "", &jbFont12, JB_TEXT_DIM);
   lv_obj_align(s_radioMeta, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 462);
 
   // --- Amazon Music account ---
-  lv_obj_t *al = label(pg, "Amazon Music (for Radio stations)", &lv_font_montserrat_16, JB_TEXT_MUTED);
+  lv_obj_t *al = label(pg, "Amazon Music (for Radio stations)", &jbFont16, JB_TEXT_MUTED);
   lv_obj_align(al, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 500);
-  s_amzStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  s_amzStatus = label(pg, "", &jbFont16, JB_TEXT_DIM);
   lv_obj_align(s_amzStatus, LV_ALIGN_TOP_LEFT, 0, PAD_TOP + 528);
 
   // --- Favourites refresh (its own schedule; see settings.h for why it is not the radio one) ---
   {
     const lv_coord_t Y = PAD_TOP + 596;
-    lv_obj_t *fl = label(pg, "Refresh favourites daily at", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *fl = label(pg, "Refresh favourites daily at", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(fl, LV_ALIGN_TOP_LEFT, 0, Y + 10);
 
     lv_obj_t *fsw = lv_switch_create(pg);
@@ -2688,7 +2692,7 @@ static void buildSettings() {
 
     lv_obj_t *fdn = transportBtn(pg, LV_SYMBOL_MINUS, 48, false, favHourDownCb);
     lv_obj_align(fdn, LV_ALIGN_TOP_LEFT, 400, Y);
-    s_favHourLbl = label(pg, "", &lv_font_montserrat_24, JB_TEXT);
+    s_favHourLbl = label(pg, "", &jbFont24, JB_TEXT);
     lv_obj_align(s_favHourLbl, LV_ALIGN_TOP_LEFT, 462, Y + 8);
     lv_label_set_text_fmt(s_favHourLbl, "%02d:00", settingsFavRefreshHour());
     lv_obj_t *fup = transportBtn(pg, LV_SYMBOL_PLUS, 48, false, favHourUpCb);
@@ -2703,16 +2707,16 @@ static void buildSettings() {
     lv_obj_set_style_bg_color(fn, lv_color_hex(JB_SCREEN_ELEV_2), 0);
     lv_obj_set_style_bg_color(fn, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
     lv_obj_add_event_cb(fn, favRefreshNowCb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *fnl = label(fn, "Refresh now", &lv_font_montserrat_16, JB_TEXT);
+    lv_obj_t *fnl = label(fn, "Refresh now", &jbFont16, JB_TEXT);
     lv_obj_center(fnl);
 
     // Pick a different hour from the stations — running both at once is more internal SRAM than
     // this board has spare (see kMinHeap in fav_cache.cpp).
     lv_obj_t *fh = label(pg, "Keep this on a different hour from the stations.",
-                         &lv_font_montserrat_12, JB_TEXT_DIM);
+                         &jbFont12, JB_TEXT_DIM);
     lv_obj_align(fh, LV_ALIGN_TOP_LEFT, 0, Y + 38);
 
-    s_favMeta = label(pg, "", &lv_font_montserrat_12, JB_TEXT_DIM);
+    s_favMeta = label(pg, "", &jbFont12, JB_TEXT_DIM);
     lv_obj_align(s_favMeta, LV_ALIGN_TOP_LEFT, 0, Y + 62);
   }
 
@@ -2722,10 +2726,10 @@ static void buildSettings() {
   // them; an open dropdown list would otherwise sit under it.
   {
     const lv_coord_t Y = PAD_TOP + 700;
-    lv_obj_t *sh = label(pg, "Screensaver", &lv_font_montserrat_22, JB_TEXT);
+    lv_obj_t *sh = label(pg, "Screensaver", &jbFont22, JB_TEXT);
     lv_obj_align(sh, LV_ALIGN_TOP_LEFT, 0, Y);
 
-    lv_obj_t *brl = label(pg, "Screen brightness", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *brl = label(pg, "Screen brightness", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(brl, LV_ALIGN_TOP_LEFT, 0, Y + 44);
 
     lv_obj_t *brs = lv_slider_create(pg);
@@ -2739,11 +2743,11 @@ static void buildSettings() {
     lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(brs, ssBrightCb, LV_EVENT_RELEASED, nullptr);   // the one that writes NVS
 
-    s_ssBrightVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+    s_ssBrightVal = label(pg, "", &jbFont22, JB_TEXT);
     lv_obj_align(s_ssBrightVal, LV_ALIGN_TOP_LEFT, 700, Y + 46);
     lv_label_set_text_fmt(s_ssBrightVal, "%d", settingsBrightness());
 
-    lv_obj_t *ml = label(pg, "Show when idle", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *ml = label(pg, "Show when idle", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(ml, LV_ALIGN_TOP_LEFT, 0, Y + 108);
     // Same order as kOrder in ssModeCb — change both or neither.
     static const uint8_t kOrder[] = {SAVER_AUTO, SAVER_COVER, SAVER_CLOCK, SAVER_OFF};
@@ -2752,17 +2756,17 @@ static void buildSettings() {
     ssDropdown(pg, "Album art when available\nAlbum art\nClock\nNothing", modeSel,
                ssModeCb, 300, Y + 100, 420);
 
-    lv_obj_t *dl = label(pg, "Appears after", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *dl = label(pg, "Appears after", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(dl, LV_ALIGN_TOP_LEFT, 0, Y + 172);
     ssDropdown(pg, kSaverDelayOpts,
                nearestIdx(kSaverDelays, 7, settingsSaverDelaySec()), ssDelayCb, 300, Y + 164, 200);
 
-    lv_obj_t *bl = label(pg, "Screen off after", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *bl = label(pg, "Screen off after", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(bl, LV_ALIGN_TOP_LEFT, 0, Y + 236);
     ssDropdown(pg, kSaverBlankOpts,
                nearestIdx(kSaverBlanks, 7, settingsSaverBlankMin()), ssBlankCb, 300, Y + 228, 200);
 
-    lv_obj_t *il = label(pg, "Brightness while it is up", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *il = label(pg, "Brightness while it is up", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(il, LV_ALIGN_TOP_LEFT, 0, Y + 300);
 
     lv_obj_t *sl = lv_slider_create(pg);
@@ -2776,11 +2780,11 @@ static void buildSettings() {
     lv_obj_add_event_cb(sl, ssDimCb, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(sl, ssDimCb, LV_EVENT_RELEASED, nullptr);
 
-    s_ssDimVal = label(pg, "", &lv_font_montserrat_22, JB_TEXT);
+    s_ssDimVal = label(pg, "", &jbFont22, JB_TEXT);
     lv_obj_align(s_ssDimVal, LV_ALIGN_TOP_LEFT, 700, Y + 302);
     lv_label_set_text_fmt(s_ssDimVal, "%d", settingsSaverDimPct());
 
-    lv_obj_t *pl = label(pg, "Keep the screen on while playing", &lv_font_montserrat_16,
+    lv_obj_t *pl = label(pg, "Keep the screen on while playing", &jbFont16,
                          JB_TEXT_MUTED);
     lv_obj_align(pl, LV_ALIGN_TOP_LEFT, 0, Y + 356);
     lv_obj_t *psw = lv_switch_create(pg);
@@ -2793,7 +2797,7 @@ static void buildSettings() {
     lv_obj_t *sn = label(pg,
         "A touch or a turn of the dial wakes it, even with the screen off. Keeping the screen on\n"
         "while playing overrides both timers above.",
-        &lv_font_montserrat_12, JB_TEXT_DIM);
+        &jbFont12, JB_TEXT_DIM);
     lv_obj_align(sn, LV_ALIGN_TOP_LEFT, 0, Y + 400);
   }
 
@@ -2801,14 +2805,14 @@ static void buildSettings() {
   // Below the screensaver block, which ends near PAD_TOP + 1100; the page scrolls.
   {
     const lv_coord_t Y = PAD_TOP + 1160;
-    lv_obj_t *sl = label(pg, "Spotify (for Search)", &lv_font_montserrat_16, JB_TEXT_MUTED);
+    lv_obj_t *sl = label(pg, "Spotify (for Search)", &jbFont16, JB_TEXT_MUTED);
     lv_obj_align(sl, LV_ALIGN_TOP_LEFT, 0, Y);
-    s_spStatus = label(pg, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+    s_spStatus = label(pg, "", &jbFont16, JB_TEXT_DIM);
     lv_obj_align(s_spStatus, LV_ALIGN_TOP_LEFT, 0, Y + 28);
     lv_obj_t *sh = label(pg,
         "Browses and searches with an account this device links for itself. Playback still uses\n"
         "the Spotify account linked in the Sonos app, so the two need not match.",
-        &lv_font_montserrat_12, JB_TEXT_DIM);
+        &jbFont12, JB_TEXT_DIM);
     lv_obj_align(sh, LV_ALIGN_TOP_LEFT, 0, Y + 56);
 
     s_spBtn = lv_button_create(pg);
@@ -2820,7 +2824,7 @@ static void buildSettings() {
     lv_obj_set_style_bg_color(s_spBtn, lv_color_hex(JB_ACCENT), 0);
     lv_obj_set_style_bg_opa(s_spBtn, LV_OPA_80, LV_STATE_PRESSED);
     lv_obj_add_event_cb(s_spBtn, spBtnCb, LV_EVENT_CLICKED, nullptr);
-    s_spBtnLbl = label(s_spBtn, "Link account", &lv_font_montserrat_16, JB_ACCENT_INK);
+    s_spBtnLbl = label(s_spBtn, "Link account", &jbFont16, JB_ACCENT_INK);
     lv_obj_center(s_spBtnLbl);
   }
 
@@ -2832,7 +2836,7 @@ static void buildSettings() {
   lv_obj_set_style_bg_opa(s_amzBtn, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(s_amzBtn, lv_color_hex(JB_ACCENT), 0);
   lv_obj_add_event_cb(s_amzBtn, amzBtnCb, LV_EVENT_CLICKED, nullptr);
-  s_amzBtnLbl = label(s_amzBtn, "Link account", &lv_font_montserrat_16, JB_ACCENT_INK);
+  s_amzBtnLbl = label(s_amzBtn, "Link account", &jbFont16, JB_ACCENT_INK);
   lv_obj_center(s_amzBtnLbl);
 
   // Link overlay, covering the content area so the QR is the only thing to look at.
@@ -2840,7 +2844,7 @@ static void buildSettings() {
   lv_obj_align(s_linkPanel, LV_ALIGN_TOP_LEFT, -PAD_X, -PAD_TOP);
   lv_obj_add_flag(s_linkPanel, LV_OBJ_FLAG_HIDDEN);
 
-  s_linkTitle = label(s_linkPanel, "Link account", &lv_font_montserrat_28, JB_TEXT);
+  s_linkTitle = label(s_linkPanel, "Link account", &jbFont28, JB_TEXT);
   lv_obj_align(s_linkTitle, LV_ALIGN_TOP_MID, 0, 40);
 
   s_linkQr = lv_qrcode_create(s_linkPanel);
@@ -2850,7 +2854,7 @@ static void buildSettings() {
   lv_obj_align(s_linkQr, LV_ALIGN_CENTER, 0, -10);
   lv_obj_add_flag(s_linkQr, LV_OBJ_FLAG_HIDDEN);
 
-  s_linkMsg = label(s_linkPanel, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_linkMsg = label(s_linkPanel, "", &jbFont22, JB_TEXT_MUTED);
   lv_obj_align(s_linkMsg, LV_ALIGN_BOTTOM_MID, 0, -110);
   lv_obj_set_style_text_align(s_linkMsg, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -2863,7 +2867,7 @@ static void buildSettings() {
   lv_obj_set_style_bg_color(lc, lv_color_hex(JB_SCREEN_ELEV_2), 0);
   lv_obj_set_style_bg_color(lc, lv_color_hex(JB_ACCENT), LV_STATE_PRESSED);
   lv_obj_add_event_cb(lc, linkCloseCb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *lcl = label(lc, "Close", &lv_font_montserrat_16, JB_TEXT);
+  lv_obj_t *lcl = label(lc, "Close", &jbFont16, JB_TEXT);
   lv_obj_center(lcl);
 
   // Keyboard last so it draws above everything, hidden until the field is focused.
@@ -3104,20 +3108,20 @@ void saverBuild() {
   s_saverClock = label(s_saverGrp, "--:--", &lv_font_clock_120, JB_TEXT);
   lv_obj_align(s_saverClock, LV_ALIGN_TOP_MID, 0, 0);
 
-  s_saverAmPm = label(s_saverGrp, "", &lv_font_montserrat_28, JB_TEXT_MUTED);
+  s_saverAmPm = label(s_saverGrp, "", &jbFont28, JB_TEXT_MUTED);
 
-  s_saverDate = label(s_saverGrp, "", &lv_font_montserrat_22, JB_TEXT_MUTED);
+  s_saverDate = label(s_saverGrp, "", &jbFont22, JB_TEXT_MUTED);
   lv_obj_align(s_saverDate, LV_ALIGN_TOP_MID, 0, 98);
 
   // Both ellipsise on one line, for the reason the Now Playing labels do: a height-less LONG_DOT
   // label grows downwards instead of truncating, and here it would grow off the group.
-  s_saverTitle = label(s_saverGrp, "", &lv_font_montserrat_28, JB_TEXT);
+  s_saverTitle = label(s_saverGrp, "", &jbFont28, JB_TEXT);
   lv_label_set_long_mode(s_saverTitle, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_saverTitle, SAVER_W, 34);
   lv_obj_set_style_text_align(s_saverTitle, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(s_saverTitle, LV_ALIGN_TOP_MID, 0, 150);
 
-  s_saverMeta = label(s_saverGrp, "", &lv_font_montserrat_16, JB_TEXT_DIM);
+  s_saverMeta = label(s_saverGrp, "", &jbFont16, JB_TEXT_DIM);
   lv_label_set_long_mode(s_saverMeta, LV_LABEL_LONG_DOT);
   lv_obj_set_size(s_saverMeta, SAVER_W, 18);
   lv_obj_set_style_text_align(s_saverMeta, LV_TEXT_ALIGN_CENTER, 0);
@@ -3879,7 +3883,7 @@ void uiTick() {
 
 void uiProvisioning(const char *apSsid) {
   s_provisioning = panel(lv_screen_active(), SCREEN_W, SCREEN_H, JB_SCREEN_BG, 0);
-  lv_obj_t *l = label(s_provisioning, "", &lv_font_montserrat_28, JB_TEXT);
+  lv_obj_t *l = label(s_provisioning, "", &jbFont28, JB_TEXT);
   lv_label_set_text_fmt(l, "Join \"%s\"\non your phone to set up Wi-Fi", apSsid);
   lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(l);
