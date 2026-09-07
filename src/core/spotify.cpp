@@ -352,6 +352,7 @@ static void searchTask(void *) {
       // over a link that dies under load, parsed into 240 internal-heap Strings the page then has
       // to hold. Paging past this is a "More" row, not a bigger first request.
       const bool ok = browse(id, found, 0, 24);
+      const unsigned n = (unsigned)found.size();      // BEFORE the move — it is empty after
       xSemaphoreTake(s_searchMx, portMAX_DELAY);
       s_browseResults = std::move(found);
       xSemaphoreGive(s_searchMx);
@@ -361,7 +362,7 @@ static void searchTask(void *) {
       // The margin, every time, because the way this task fails is a reboot with no log line and a
       // PC that does not resolve. Anything under ~1 KB here means the next larger response is a
       // crash rather than a slow list.
-      LOG.printf("[spotify] browse %s: %d items, stack free %u B\n", smapi::cstr(id), (int)found.size(),
+      LOG.printf("[spotify] browse %s: %u items, stack free %u B\n", smapi::cstr(id), n,
                  (unsigned)(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t)));
       continue;
     }

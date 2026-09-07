@@ -1779,6 +1779,17 @@ static void radioOnEnter() {
   // root, so coming back to the page does not lose your place.
   const bool listEmpty = (lv_obj_get_child_count(s_radioList) == 0);
   if (s_radioSrc == 1) {
+    // A browse this page started can be CONSUMED BY THE OTHER PAGE: the Search page's drill-down
+    // reads the same slot, so if Radio was mid-browse when the user switched to Search, the answer
+    // lands while Search is the one ticking, Search's gate ignores it, the gen still moves on, and
+    // Radio comes back "awaiting" a result that will never arrive. That is a page that refuses to
+    // load with no error. If nothing is actually in flight, stop waiting and ask again.
+    if (s_spAwaiting && spotify::browseState() != spotify::SearchState::Running) {
+      LOG.println("[ui    ] radio spotify: was awaiting a browse that already landed elsewhere — re-asking");
+      s_spAwaiting = false;
+    }
+    LOG.printf("[ui    ] radio enter: src=spotify listEmpty=%d awaiting=%d state=%d cur=%s\n",
+               (int)listEmpty, (int)s_spAwaiting, (int)spotify::browseState(), s_spCurId.c_str());
     if (listEmpty && !s_spAwaiting) radioShowSpotify(s_spCurId, s_spTitle);
   } else if (listEmpty) {
     radioShowGenres();
