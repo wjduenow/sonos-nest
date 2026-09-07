@@ -3,7 +3,8 @@
 #include "app.h"
 
 #include <Arduino.h>
-#include <WiFi.h>          // link-health check in the recovery path (see netTask)
+#include <WiFi.h>
+#include <WiFiClient.h>   // the dead-link TCP probe          // link-health check in the recovery path (see netTask)
 
 #include "player_state.h"
 #include "unit.h"                 // uiTick() — provided by whichever unit the build links
@@ -348,6 +349,35 @@ volatile int      g_linkRssi   = 0;
 volatile uint32_t g_linkIp     = 0;
 volatile uint32_t g_linkZones  = 0;
 
+// Fast dead-link detection. The recovery branch inside the rediscovery path below is correct but
+// SLOW TO REACH: it is only consulted after notePollResult() has seen three failed polls, and under
+// GENA the poll backstop is 15 s with each failed SOAP call blocking for its timeout first.
+// Measured 2026-09-07: the link died at up=140 s and the reboot came ~3 minutes later, with the
+// user staring at a "Searching..." that could never finish and a Play All that never left the
+// device. This samples the same symptom on every pass — the RSSI publishLinkStats() already reads —
+// and CONFIRMS with a 2 s TCP probe to the coordinator before acting, so a transient 0 around a
+// roam or a scan (which still connects) never costs a reboot. Two sightings at least 3 s apart,
+// both inside 20 s, then the probe. Silent when no coordinator is known yet: there is nothing to
+// probe, and the slow path still covers boot.
+static bool deadLinkFast() {
+  static uint32_t s_firstMs = 0;
+  static int      s_seen = 0;
+  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; return false; }
+  const uint32_t now = millis();
+  if (s_seen && now - s_firstMs > 20000) s_seen = 0;       // an old sighting is not this fault
+  if (s_seen == 0) { s_firstMs = now; s_seen = 1; return false; }
+  if (now - s_firstMs < 3000) return false;                // let publishLinkStats() sample again
+  if (s_zoneIp.length() == 0) return false;
+  WiFiClient probe;
+  IPAddress ip;
+  if (!ip.fromString(s_zoneIp)) return false;
+  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_seen = 0; return false; }   // alive after all
+  LOG.printf("[net] RSSI 0 while 'connected' for %lus and %s does not answer TCP — the radio link is dead\n",
+             (unsigned long)((now - s_firstMs) / 1000), s_zoneIp.c_str());
+  s_seen = 0;
+  return true;
+}
+
 static void publishLinkStats() {
   static uint32_t s_last = 0;
   if (s_last && millis() - s_last < 2000) return;
@@ -433,6 +463,14 @@ static void netTask(void *) {
     if (otaActive()) { vTaskDelay(pdMS_TO_TICKS(200)); continue; }  // yield bandwidth to OTA
     netStage("linkstats");
     publishLinkStats();
+    if (deadLinkFast()) {
+      if (netLinkRecover()) {   // may not return: on the jukebox this is a reboot
+        wifiConnect();
+        LOG.printf("[net] link rebuilt: wifi=%d rssi=%d ip=%s\n", (int)WiFi.status(),
+                      (int)WiFi.RSSI(), WiFi.localIP().toString().c_str());
+      }
+      continue;
+    }
 
     // Wi-Fi supervisor: a transient outage (router reboot, DHCP renewal, AP roam) is near-certain
     // over a multi-day uptime and must self-heal, or the unit sits alive-but-wedged until a power
