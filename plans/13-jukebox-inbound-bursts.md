@@ -185,3 +185,39 @@ this device is "poll at 1 Hz" until the listener is fixed — plans/09's traffic
 worth a reboot per play. The fix, when built, is on the receive side: read the whole NOTIFY into a
 PSRAM buffer at socket speed and answer 200 BEFORE parsing anything, so the socket is drained the
 moment bytes arrive; parse afterwards on the same task.
+
+## Bisection 3 — tiles ON, GENA off (v0.4.2-77, 21:37-21:41): DIED at 3.5 min
+
+Diary: `netlink:fast dead=7s gapmax=24s@gena art=25089B/5ms cdn 43s ago`. The mirror shows the
+last minute as continuous gate traffic — tile / spotify / art taking turns at 0.3-1.2 s waits —
+through Genres & Moods → a category → a 24-row playlist, with two covers (42 KB, 25 KB). Internal
+heap `min=34KB` at that point, the lowest of the evening.
+
+## Conclusion of the bisection (2026-09-07)
+
+| tiles | GENA | result |
+|---|---|---|
+| on | on | dies within ~1 min of play — six for six |
+| off | on | dies (14 s after a 12 KB cover, at play) |
+| on | off | dies at 3.5 min, mid tile+browse+cover traffic |
+| **off** | **off** | **survives 10 min of the reproduction** |
+
+**Neither source is THE trigger; any sustained inbound stream over the SDIO link is.** This is
+esp-hosted-mcu #184 as described — the fault is in the transport, and the only lever on our side
+is inbound VOLUME and RATE. The gate (candidate 4) serialises overlaps but does not reduce bytes,
+which is why it was visibly working and did not save the link. Candidate 1 removed 146 KB per
+track and did not save it either. Detection is now reliably 7 s (that part is done).
+
+**What ships until upstream fixes the driver:**
+1. Eventing OFF on the jukebox (`-DGENA_EVENTS` commented out). The 1 Hz poll is a few KB/s of
+   small SOAP replies and the user found it *more* responsive. plans/09's 15x traffic saving was
+   for the speaker's benefit, not the panel's, and it is not worth a reboot per play.
+2. Tile artwork OFF (`-DEXPERIMENT_NO_TILES`) until **candidate 3** lands: fetch tiles for the
+   VISIBLE rows only (24 → ~5 per list), repaint on scroll, and pace at ≥400 ms — the SD cache
+   already makes every list after the first free. Then re-run the reproduction with tiles on.
+3. Candidate 1 stays (a 12-48 KB cover is still the biggest single transfer per track) and so does
+   the gate (an overlap is still worse than no overlap); neither is the fix.
+4. Untested but cheap, after 2: drop the two idle TLS sessions a cover fetch leaves open.
+
+Left for another day: the Radio-page artist radio that never plays (Search's does); `heapMin`
+34 KB during tiles+browse — where that goes.
