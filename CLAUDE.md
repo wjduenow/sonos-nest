@@ -764,9 +764,10 @@ Consequences worth knowing:
   an idle device polls Sonos fine, so a "does the network work?" control test that isn't playing
   anything proves nothing. Always test the *streaming* path.
 - **A corrupt incremental build looks like "every model silently scores 0.00"** — not a compile
-  error. This machine has a known hardware fault (BIOS update pending; random SIGKILL/ICE under
-  load). If detection dies after a change that couldn't affect it, **`pio run -t clean` before
-  debugging the code** — a clean rebuild of identical source restored it. Build with `-j 2`.
+  error. It happened once while the dev machine had a BIOS fault that crashed it under load (fixed
+  2026-09-08; full-parallel builds are fine again). The lesson outlives the fault: if detection dies
+  after a change that couldn't affect it, **`pio run -t clean` before debugging the code** — a clean
+  rebuild of identical source restored it.
 - **Wake-word testing: the mic needs LOUD, close speech (pcmRms >~10000) to fire.** At pcmRms ~4000
   *nothing* fires — with any kernel set. Several hours were lost concluding "esp-nn miscomputes"
   from tests that were really just too quiet. Always check `pcmRms` in the heartbeat before
