@@ -402,6 +402,13 @@ bool init(int tilePx, int slots) {
 uint32_t generation() { return s_gen; }
 
 const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
+#ifdef EXPERIMENT_NO_TILES
+  // BISECTION BUILD (issue #24): no tile artwork at all, so no CDN TLS traffic from lists. If the
+  // ESP-Hosted link stops dying under the browse-then-play reproduction, tiles are the trigger and
+  // viewport-only fetching (plans/13 candidate 3) is the fix; if it still dies, they never were.
+  (void)stationKey; (void)artUrl;
+  return nullptr;
+#endif
   if (!s_slots || stationKey.isEmpty()) return nullptr;
   const lv_image_dsc_t *hit = nullptr;
   bool bad = false;
