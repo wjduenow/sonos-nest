@@ -13,7 +13,7 @@
 # the mirror image: SCons does not treat a changed -D as a dependency, so the three files that USE
 # the version kept their stale string across commits and had to be touched by hand.
 #
-# A header fixes both (warm-cache timings in PR #28, second pass). Only the three files that include "generated/fw_version.h" depend on it, so
+# A header fixes both (warm-cache timings in PR #28, second pass; exact-key sdkconfig cache verified). Only the three files that include "generated/fw_version.h" depend on it, so
 # a new commit recompiles three objects and the cache serves the rest; and SCons sees the header
 # change, so those three always carry the current string. The file is written only when its content
 # changes, because rewriting an identical file would bump its mtime and recompile them for nothing.
