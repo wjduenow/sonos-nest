@@ -30,6 +30,10 @@
 #define LCD_WIDTH           172      // native, portrait
 #define LCD_HEIGHT          320
 
+// ✅ VERIFIED ON HARDWARE 2026-09-08 (bring-up run 1): 320x172 landscape draws correctly with
+// this offset — six equal-width colour bars reaching both ends of the long axis with no wrapped
+// strip, which a wrong offset cannot produce.
+//
 // ⚠️ THE PANEL IS OFFSET INSIDE THE CONTROLLER'S RAM, AND GETTING THIS WRONG IS NOT A CRASH.
 // The ST7789 has 240 columns of GRAM; this glass only has 172 of them, wired to columns 34..205.
 // Every address window therefore needs +34 on X. Omit it and the picture still draws — shifted,
@@ -46,6 +50,9 @@
 // wall at all. Portrait (0) is one edit here plus a re-derive of the case cutout.
 #define DISPLAY_ROTATION      1
 // The panel wants colour inversion on (the ST7789 "ips" flag), same as the es3c28p's ILI9341.
+// ✅ VERIFIED ON HARDWARE 2026-09-08: the bring-up's bars render red/green/blue/cyan/magenta/
+// yellow in that order, so there is no R-B swap and this flag is correct. It was a guess carried
+// over from the other SPI panel; it happened to be right.
 #define LCD_INVERT_COLORS  true
 
 // --- Shared I2C: QMI8658 6-axis IMU ---
@@ -53,6 +60,8 @@
 #define PIN_I2C_SCL          47
 #define I2C_FREQ_HZ      400000
 
+// ✅ VERIFIED ON HARDWARE 2026-09-08: this board answers at 0x6B and returns WHO_AM_I = 0x05.
+//
 // ⚠️ 7-BIT. The QMI8658 datasheet quotes 0xD6/0xD4, which are 8-BIT addresses; Arduino's Wire is
 // 7-bit, so they are 0x6B/0x6A here. The vendor demo agrees (Gyro_QMI8658.h). This is the same
 // off-by-a-shift that cost real time on the jukebox's Modulino dial — see CLAUDE.md.
@@ -106,6 +115,8 @@
 //
 // GP2 and GP4 are both RTC- and ADC-capable, so deep-sleep wake stays available if anyone ever
 // runs one off the VBAT pad.
+// ✅ GP2 VERIFIED ON HARDWARE 2026-09-08: idle reads HIGH with the internal pull-up and nothing
+// wired, so it is a sound button pin. GP4/the ring is still unproven — nothing is soldered yet.
 #define PIN_BUTTON            2
 #define PIN_RING_GATE         4
 

@@ -12,11 +12,16 @@
 #include <Wire.h>
 #include "core/net/logmirror.h"     // LOG — this unit is headless; serial alone is invisible
 
-// Set to 1 to print a live jerk histogram every second. THIS IS THE TUNING TOOL — the threshold
-// below is a starting guess made without the hardware in hand, and the only way to set it properly
-// is to watch real numbers while knocking the real case. Same role WAKE_DEBUG plays in
-// boards/es3c28p/wake_word.cpp, and the same advice applies: check the idle floor before
-// concluding a threshold is wrong.
+// Set to 1 to print a live jerk peak every second. THIS IS THE TUNING TOOL, and the threshold
+// below came out of it. Same role WAKE_DEBUG plays in boards/es3c28p/wake_word.cpp, and the same
+// advice applies: check the IDLE FLOOR before concluding a threshold is wrong.
+//
+// That advice earned itself immediately. The first hardware run showed a bimodal resting signal —
+// a 53-70 floor plus a second mode sitting constantly at 250-300 — and the tempting explanation
+// was the 500 Hz ODR beating against the ~200 Hz poll, i.e. differencing non-adjacent samples.
+// It was not: a second capture with the board genuinely untouched showed a clean 44-95 floor and
+// no second mode at all. The first run was simply a board being handled. No data-ready gating is
+// needed, and free-running the poll is fine.
 #define TAP_DEBUG 0
 
 // --- Registers (vendor demo Gyro_QMI8658.h, which agrees with the datasheet) ---
@@ -56,11 +61,23 @@ static const uint32_t REFRACTORY_MS = 400;
 // through the accelerometer, and a phantom tap at boot would light the screen for no reason.
 static const uint32_t SETTLE_MS    = 750;
 
-// ⚠️ A GUESS, MADE WITHOUT THE HARDWARE. At +/-8 g one g is 4096 LSB, so this is ~0.55 g of
-// summed axis-to-axis change between consecutive samples. Gravity cancels in the difference and
-// normal handling is slow, so the idle floor should sit near zero — but "should" is doing real
-// work in that sentence. Set TAP_DEBUG 1 and measure before trusting it.
-static const int32_t  TAP_JERK_LSB = 2250;
+// MEASURED ON HARDWARE 2026-09-08 (bring-up, bare board on a desk, 45 s capture):
+//
+//   idle, untouched, 25 s   44 - 95 LSB, with ONE excursion to 471 (a desk bump)
+//   deliberate fingertip taps   3674 - 80123 LSB, median ~10k, weakest 3674
+//
+// So the real separation is about 8x, far wider than the 2250 originally guessed here — and the
+// guess was in the wrong direction, high enough that a lightly-tapped case might have missed.
+// 1200 is ~2.5x above the worst idle excursion and ~3x below the weakest tap, which spends the
+// margin on the side that matters: a tap that does nothing is a broken feature, whereas a false
+// wake merely lights the screen for 20 s.
+//
+// ⚠️ RE-MEASURE AGAINST THE PRINTED CASE. Every number above is a bare PCB struck directly. In a
+// case the PCB sits on ledges and the knock lands on a wall instead, which attenuates it — if 3x
+// of attenuation is possible then the weakest tap lands right on this threshold. The case is also
+// where false positives will come from (a nightstand drawer, a glass set down), so both sides of
+// the margin move. Set TAP_DEBUG 1 and repeat the capture once there is a case.
+static const int32_t  TAP_JERK_LSB = 1200;
 
 static uint8_t  s_addr      = 0;
 static bool     s_have      = false;

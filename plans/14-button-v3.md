@@ -18,13 +18,26 @@ It exists because a headless button cannot answer two questions:
    camera-point away instead of a hunt through a router lease table.
 
 > ## Status — 2026-09-08
-> **Software complete and build-verified on all six envs; NOTHING RUN ON HARDWARE YET.**
-> Written against the vendor drawings and demo sources, with the board on the bench but not wired.
-> - ✅ `lib/qrcodegen/` vendored, `core/board.h` extended, all five existing boards stubbed,
->   `waveshare_s3_lcd147/` written, three envs, both unit-id ladders, CI matrix row.
+> **Phase 0 bring-up RUN ON HARDWARE. Panel, IMU and button pin all confirmed; the board is not
+> yet wired to a switch or a ring.**
+> - ✅ Software: `lib/qrcodegen/` vendored, `core/board.h` extended, all five existing boards
+>   stubbed, `waveshare_s3_lcd147/` written, three envs, both unit-id ladders, CI matrix row.
 > - ✅ Builds: `button-v3` 1,136,505 B flash / 53,308 B static RAM. `nest`, `sleep-machine`,
 >   `sleep-button`, `button-v2`, `sonos-jukebox` all still build.
-> - ⬜ Phase 0 bring-up not run. **Everything below marked ⚠️ is unverified.**
+> - ✅ **Hardware, bring-up run 1:** 16 MB flash / 8189 KB PSRAM / 359 KB heap (env correct);
+>   ST7789 draws 320x172 with **the 34-px column offset correct** and **colour order correct**
+>   (no R-B swap, so `ips=true` is right); **QMI8658 ACKs at 0x6B, `WHO_AM_I = 0x05`**; GP2 idles
+>   HIGH on its pull-up.
+> - ✅ **Bug found and fixed by the bring-up:** it reported `press #1 — held 4210 ms` on a board
+>   with nothing wired to GP2. The debounce state was seeded to "pressed" instead of read from the
+>   pin, so the first loop saw a phantom release and printed uptime as hold time.
+>   `button_common/button.cpp` seeds correctly; the bring-up copy did not.
+> - ✅ **`TAP_JERK_LSB` measured, not guessed** (45 s capture): idle floor **44-95** with one
+>   excursion to 471; deliberate taps **3674-80123**, median ~10k. Set to **1200**. The original
+>   guess of 2250 was too HIGH — a lightly-tapped case could have missed.
+> - ✅ The "bimodal noise" seen in run 1 was **the board being handled**, not ODR aliasing. A clean
+>   capture has no second mode, so the poll needs no data-ready gating.
+> - ⬜ Ring + switch still unwired; WS2812 bead still unobserved.
 
 ---
 
@@ -158,9 +171,13 @@ polls the accelerometer (±8 g @ 500 Hz) every 5 ms from `uiTick` and fires on s
 Gravity cancels in the difference, so it needs no baseline and no orientation assumption — the box
 can be mounted any way up.
 
-> ⚠️ **`TAP_JERK_LSB` is a guess made without hardware.** Set `TAP_DEBUG 1` in `imu.cpp` (or read
-> the bring-up's live jerk print) and measure the **idle floor** as well as the knock peaks — the
-> gap between them is the whole margin. Same role `WAKE_DEBUG` plays for the wake word.
+> ⚠️ **`TAP_JERK_LSB` = 1200, measured on a BARE BOARD — re-measure against the printed case.**
+> 45 s capture, 2026-09-08: idle 44-95 LSB with one 471 excursion; deliberate fingertip taps
+> 3674-80123, weakest 3674. That is ~8x of separation, so 1200 sits ~2.5x above the worst idle and
+> ~3x below the weakest tap. In a case the PCB sits on ledges and the knock lands on a wall
+> instead — if attenuation is 3x, the weakest tap arrives right at the threshold. The case is also
+> where false positives live (a drawer, a glass set down), so both sides of the margin move.
+> `TAP_DEBUG 1` in `imu.cpp` repeats the capture. Same role `WAKE_DEBUG` plays for the wake word.
 
 ### The unit id — do not merge it back
 
@@ -222,7 +239,7 @@ accelerometer jerk peaks.
 
 ## 4. Open
 
-- **Everything in the Status block marked ⬜.** No line of this has run on the hardware.
+- **Everything in the Status block marked ⬜** — chiefly the ring, which is the last thing that could still force a BOM change.
 - ⚠️ **`TAP_JERK_LSB`** — a guess. Measure it against the printed case, not a bare board: a case
   transmits a knock quite differently from a PCB on a desk.
 - ⚠️ **Mounting-hole centres.** The board is **36.37 × 20.32 mm** with four **M2** corner holes
@@ -236,7 +253,10 @@ accelerometer jerk peaks.
   the active area is ~32.4 × 17.4 mm and its long axis has to lie along the box's long axis to fit
   a side wall at all. One edit in `pins.h` plus a re-derived cutout if the case says otherwise.
 - **The QMI8658 INT line** is undocumented; the hardware tap engine is the upgrade path if the
-  software detector proves jumpy. Needs the schematic (`poppler-utils` is not installed here).
+  software detector proves jumpy on a real case. Needs the schematic (`poppler-utils` is not
+  installed here). The measured 8x margin makes this look unnecessary for now.
+- ~~The 250-300 resting mode might be ODR/poll aliasing~~ — **disproven** 2026-09-08. A genuinely
+  untouched board has a clean 44-95 floor and no second mode; run 1 was a board being handled.
 - **microSD is not mounted.** The pins are recorded so nobody reuses them; `localStorageRoot()`
   returns nullptr. Nothing on this unit wants storage yet.
 - **The WS2812 bead is unused by the app.** It is inside the case once assembled, so it is a

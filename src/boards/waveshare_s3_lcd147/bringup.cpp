@@ -174,8 +174,13 @@ void waveshareBringupRun() {
   Serial.println("    Use the jerk peaks to set TAP_JERK_LSB in imu.cpp — note the IDLE floor");
   Serial.println("    as well as the knock peaks; the gap between them is the whole margin.");
 
-  bool     raw = true, stable = true;
-  uint32_t lastChange = millis(), pressedAt = 0, nextReport = millis() + 1000;
+  // Seed from the ACTUAL pin, not from a constant. Seeding these `true` (= pressed) made the very
+  // first loop see a state change to "released" and report a phantom `press #1 — held 4210 ms`,
+  // with the held time being however long the board had been up — on a board with nothing wired to
+  // GP2 at all. button_common/button.cpp gets this right (`s_raw = s_stable = rawDown()`); this
+  // file did not. Caught on the first hardware run, 2026-09-08.
+  bool     raw = (digitalRead(PIN_BUTTON) == LOW), stable = raw;
+  uint32_t lastChange = millis(), pressedAt = millis(), nextReport = millis() + 1000;
   int16_t  px = 0, py = 0, pz = 0;
   bool     havePrev = false;
   int32_t  peak = 0;
