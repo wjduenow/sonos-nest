@@ -221,3 +221,36 @@ track and did not save it either. Detection is now reliably 7 s (that part is do
 
 Left for another day: the Radio-page artist radio that never plays (Search's does); `heapMin`
 34 KB during tiles+browse — where that goes.
+
+## Upstream state of the art (read 2026-09-07 evening; corrects the repo's stale notes)
+
+- **#184 is CLOSED (2026-05-19), not open.** Its reporter's inbound stall vanished when they
+  replaced consumer 2.4 GHz access points with UniFi WiFi 7 units; they closed it as "root cause
+  was the wireless side". Espressif's parting advice: tune `CONFIG_WIFI_RMT_*` and `CONFIG_LWIP_*`
+  per `docs/performance_optimization.md`. So "#184 names the mechanism" was never established.
+- **#167 / #121 are the `sdmmc 0x107` / `Unrecoverable host sdio state` family** — command
+  timeouts on the bus. Espressif suspects hardware (signal integrity, power). **We never log those
+  lines.** Our signature is different: writes to the C6 succeed, nothing comes back (RPC
+  `Response not received`, RSSI reads 0), no bus error at all.
+- **#220 (2026-07-28) is our signature**: "under sustained inbound traffic the SDIO link dies…
+  no error, no restart, no further log output… the host keeps running and looks healthy". Espressif
+  root-caused it as a dropped RX read that deadlocked the RX path (plus an all-ones bus read that
+  was never declared a failure) and fixed it in **esp_hosted 2.12.12** (commit `0985253`,
+  2026-07-31, "fix(sdio): recover a dropped RX read instead of deadlocking"; also in 2.12.13 and
+  3.0.7). The reporter's overnight measurement: **43 wedges in 21 h on 2.12.11 → 0 in 14.5 h
+  patched**, 196 GB inbound.
+- **We are on 2.12.11 on both sides** — the last version WITHOUT that fix. pioarduino's newest
+  platform (55.03.311, 2026-07-24) shipped a week before the fix landed; there is no newer
+  pioarduino release yet. The host driver is inside the prebuilt `framework-arduinoespressif32-libs`,
+  so it cannot be swapped without rebuilding the Arduino libs, and the slave (C6) firmware needs the
+  matching version too (`jukebox-c6` probe env flashes it).
+- Also relevant: **#221** (slave Wi-Fi task wedges with `portMAX_DELAY` under overload; measured
+  community fixes, open), **#197** (RX mempool exhaustion under sustained load; 2.12.7 made it a
+  watchdog reboot rather than a hard wedge), **#240** (a wedged C6 is not recovered by CHIP_PU reset
+  on 3.0.6, only by power cycle — matches "power-cycle after every upload"), **#210** (closed: a
+  double-free in streaming-mode RX, fixed in 2.12.11 — we have that one).
+
+**Consequence for this plan:** everything above on our side is mitigation of a driver bug that is
+already fixed upstream. The real fix is esp_hosted ≥ 2.12.12 on host AND slave, which for this
+build means waiting for (or building) a pioarduino/Arduino core that bundles it. Until then: GENA
+off, tiles off, detector at 7 s.
