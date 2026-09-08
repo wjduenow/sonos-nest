@@ -212,10 +212,12 @@ bool Client::readResponse(String &out, bool &keepAlive) {
 
 String Client::post(const String &action, const String &header, const String &body) {
   Locked lk(mx_);
-  // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h). 20 s is longer than any other holder can keep
-  // it — a tile fetch is bounded at ~14 s, Now Playing art at ~19 s — so this only ever times out
-  // if something is wedged, and then it proceeds and the log says so.
-  inbound::Guard gate(tag_, 20000);
+  // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h). The wait must exceed the LONGEST any holder
+  // can keep the gate, or a slow-but-legitimate holder makes this proceed ungated — the one thing
+  // the gate exists to prevent. Worst cases: a tile is a 12 s GET timeout PLUS a separate 12 s body
+  // deadline (~26 s with the connect); Now Playing art is 4+4+15 s (~23 s). 45 s clears both with
+  // margin, so a timeout here means something is wedged, and then it proceeds and the log says so.
+  inbound::Guard gate(tag_, 45000);
   const String env = String("<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">"
                             "<s:Header>") + header + "</s:Header><s:Body>" + body +

@@ -1,9 +1,11 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status: **candidates 1 and 4 built, not yet measured** — tracked as
-[issue #24](https://github.com/wjduenow/sonos-nest/issues/24), branch `fix/jukebox-inbound-bursts`.
-Started 2026-09-07 as a handoff stub at the end of the plans/12 work, so the next session starts
-from evidence instead of memory.
+Status (2026-09-08): **bisected and root-caused — the fault is esp-hosted-mcu #220, fixed upstream
+in esp_hosted 2.12.12; we ship 2.12.11.** Candidates 1 (CDN cover) and 4 (inbound gate) are built
+and kept on merit but do not cure it; the jukebox runs with GENA eventing and tile artwork OFF until
+host AND C6 are on ≥ 2.12.12 — the upgrade is [issue #26](https://github.com/wjduenow/sonos-nest/issues/26),
+watched weekly. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
+stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
 
 ## What is known (all measured on hardware, 2026-09-07)
 

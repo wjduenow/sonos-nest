@@ -128,6 +128,25 @@ static bool decodeFallback(size_t got) {
   return true;
 }
 
+#ifdef ALBUM_ART_TLS
+// True when the URL's host is media-amazon.com / ssl-images-amazon.com or a subdomain of either.
+// A plain substring test would also match "media-amazon.com.example.net"; the art URLs come from
+// the speaker and the CDN, but a host check costs nothing and says what it means.
+static bool hostIsAmazon(const String &url) {
+  const int a = url.indexOf("://");
+  if (a < 0) return false;
+  const int e = url.indexOf('/', a + 3);
+  String host = (e < 0) ? url.substring(a + 3) : url.substring(a + 3, e);
+  const int at = host.indexOf('@');    if (at >= 0)    host = host.substring(at + 1);   // userinfo
+  const int colon = host.indexOf(':'); if (colon >= 0) host = host.substring(0, colon); // port
+  host.toLowerCase();
+  static const char *kHosts[] = {"media-amazon.com", "ssl-images-amazon.com"};
+  for (const char *h : kHosts)
+    if (host == h || host.endsWith(String(".") + h)) return true;
+  return false;
+}
+#endif
+
 bool albumArtFetch(const String &url) {
   ++s_nFetch;
   if (!s_jpeg) { ++s_nFail; return false; }
@@ -165,10 +184,10 @@ bool albumArtFetch(const String &url) {
     // which is fine only because the libjpeg fallback exists now. Before that this would have
     // fetched perfectly and then failed to decode.
     //
-    // Amazon hosts only. i.scdn.co URLs have no extension so artThumbUrl() happened to leave them
-    // alone, but "happened to" is not a contract; the rewrite is Amazon's and is named as such.
-    if (u.indexOf("media-amazon.com") >= 0 || u.indexOf("ssl-images-amazon.com") >= 0)
-      u = amazon::artThumbUrl(u, ART_MAX);
+    // Amazon HOSTS only — matched on the host, not by substring anywhere in the URL. i.scdn.co URLs
+    // have no extension so artThumbUrl() happened to leave them alone, but "happened to" is not a
+    // contract; the rewrite is Amazon's and is named as such.
+    if (hostIsAmazon(u)) u = amazon::artThumbUrl(u, ART_MAX);
     tls = true;
   }
 #endif
@@ -186,10 +205,13 @@ bool albumArtFetch(const String &url) {
 
   // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h) — taken here, AFTER the SMAPI resolve above,
   // because the gate is not recursive and that resolve takes it itself. A cover is the single
-  // largest transfer this panel makes, so it must never land on top of a browse or a tile; ten
-  // seconds is generous next to any holder's timeout, and artTask retries a failed fetch anyway.
-  // Released explicitly after the body is read, so the decode does not keep the next reader waiting.
-  inbound::Guard gate("art", 10000);
+  // largest transfer this panel makes, so it must never land on top of a browse or a tile. 45 s,
+  // longer than the longest legitimate hold (a tile's 12 s GET + 12 s body deadline, ~26 s): the
+  // first cut waited 10 s and then proceeded UNGATED behind a slow tile — exactly the overlap the
+  // gate exists to prevent. A timed-out wait now FAILS the fetch instead; artTask retries. Released
+  // explicitly after the body is read, so the decode does not keep the next reader waiting.
+  inbound::Guard gate("art", 45000);
+  if (!gate.held) { LOG.println("[art] inbound gate not free — retrying later"); ++s_nFail; return false; }
 
   // BOTH CLIENTS ARE DECLARED BEFORE THE HTTPClient, and that ordering is load-bearing: locals
   // destruct in reverse, and ~HTTPClient calls _client->stop(). Getting this backwards in
@@ -234,9 +256,13 @@ bool albumArtFetch(const String &url) {
   httpbody::prepare(http, kHdrs, 1);
   int code = http.GET();
   if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
+  // An ABSENT Content-Type is refused too, not waved through: the speaker's /getaa always sends
+  // `image/jpeg` (checked 2026-09-08) and so do the CDNs, so a 200 with no type is not a cover — and
+  // reading it "to see" would be exactly the unvalidated inbound burst this check exists to avoid.
   const String ct = http.header("Content-Type");
-  if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
-    LOG.printf("[art] %s: %.40s — not JPEG, not fetched\n", src, ct.c_str() ? ct.c_str() : "?");
+  if (ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
+    LOG.printf("[art] %s: %.40s — not JPEG, not fetched\n", src,
+               ct.length() ? (ct.c_str() ? ct.c_str() : "?") : "(no Content-Type)");
     http.end(); ++s_nFail; return false;
   }
   // NOT http.writeToStream(): that de-chunks, but with a busy-wait per chunk header and delay(0)

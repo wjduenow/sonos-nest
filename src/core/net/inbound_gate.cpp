@@ -10,17 +10,18 @@ namespace inbound {
 // A mutex rather than a binary semaphore for the priority inheritance: the art tile worker sits at
 // priority 1 and netTask-adjacent callers higher, and a low-priority holder being pre-empted while
 // it holds the only slot is exactly the stall this must not add.
-static SemaphoreHandle_t s_mx = nullptr;
+// Created at static-initialisation time, NOT lazily on first acquire(): the first callers are three
+// tasks (artTask, the Spotify worker, the tile worker) that can all reach the gate in the same
+// millisecond at boot, and a lazy `if (!s_mx) s_mx = create()` lets two of them create two mutexes —
+// one of which release() then gives back to the wrong owner, and the gate is broken for good. Static
+// init on ESP32 Arduino runs inside app_main's task with the scheduler up, so FreeRTOS calls are legal
+// here; smapi::Client's static instances create their mutexes the same way.
+static SemaphoreHandle_t    s_mx        = xSemaphoreCreateMutex();
 static const char *volatile s_holder    = "";
 static volatile uint32_t    s_heldSince = 0;
 static Stats                s_st        = {0, 0, 0, 0, 0, "", "", 0};
 
-static void ensure() {
-  if (!s_mx) s_mx = xSemaphoreCreateMutex();
-}
-
 bool acquire(const char *tag, uint32_t maxWaitMs) {
-  ensure();
   if (!s_mx) return false;
   const uint32_t t0 = millis();
   // Try without waiting first so an uncontended take costs nothing and is not counted as a wait.

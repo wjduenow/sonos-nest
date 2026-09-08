@@ -374,18 +374,25 @@ static uint32_t s_deadSinceMs = 0;   // first RSSI-0 sighting of the current epi
 // real death is caught in under 10 s no matter how long the surrounding stages block. Silent when
 // no coordinator is known yet — nothing to probe, and the slow path still covers boot.
 static bool deadLinkFast() {
-  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_deadSinceMs = 0; return false; }
+  // The snapshot publishLinkStats() just took, not a fresh WiFi.status(): one read of link state per
+  // pass, so both fields describe the same instant and nothing here re-enters the radio stack.
+  if (g_linkStatus != WL_CONNECTED || g_linkRssi != 0) { s_deadSinceMs = 0; return false; }
   const uint32_t now = millis();
   if (!s_deadSinceMs) s_deadSinceMs = now;
-  if (s_zoneIp.length() == 0) return false;
+  // Probe the COORDINATOR — the transport target, and what a dead link actually costs the user.
+  // s_coordIp falls back to s_zoneIp when the room is its own coordinator (selectZoneByIp), so this
+  // never probes nothing. Probing the selected speaker instead would reboot a healthy panel when
+  // that one speaker is off while its group coordinator keeps playing.
+  const String &target = s_coordIp.length() ? s_coordIp : s_zoneIp;
+  if (target.length() == 0) return false;
   WiFiClient probe;
   IPAddress ip;
-  if (!ip.fromString(s_zoneIp)) return false;
+  if (!ip.fromString(target)) return false;
   if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_deadSinceMs = 0; return false; }   // alive after all
   const int again = (int)WiFi.RSSI();
   if (again != 0) { g_linkRssi = again; s_deadSinceMs = 0; return false; }                // it came back
-  LOG.printf("[net] RSSI 0 twice and %s does not answer TCP (%lus into the episode) — the radio link is dead\n",
-             s_zoneIp.c_str(), (unsigned long)((millis() - s_deadSinceMs) / 1000));
+  LOG.printf("[net] RSSI 0 twice and coordinator %s does not answer TCP (%lus into the episode) — the radio link is dead\n",
+             target.c_str(), (unsigned long)((millis() - s_deadSinceMs) / 1000));
   return true;
 }
 
