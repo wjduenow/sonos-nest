@@ -144,3 +144,25 @@ candidate 1 cannot touch.
   CDN fetch opening a SECOND idle TLS socket (the SMAPI resolve leaves its session open for 30 s,
   the art client keeps its i.scdn.co connection for reuse). Untested lead: drop both sessions after
   a Now Playing fetch and see whether the play-time death moves.
+
+## Bisection 1 — tiles OFF (v0.4.2-75, 2026-09-07 21:xx): STILL DIES. Tiles are cleared.
+
+Radio → Spotify → New Releases → album → play; then Search → artist radio → Play All (that one
+played). Diary: `netlink:fast dead=7s gapmax=6s@gena art=11830B/11ms cdn 21s ago` — the cover came
+down 14 s before the link died, with zero tile traffic in the build. Detection: 7 s, as designed.
+
+Tally of the last six deaths: five landed 7-40 s after a Now Playing cover fetch (sizes 38, 11.8,
+11.8, 31.9, 11.8 KB — size is irrelevant); one landed at `coord-refresh` 81 min after any fetch.
+Play time is the profile. What play time does on the wire, inbound: the SOAP replies to
+SetAVTransportURI/Play (small), an immediate poll, the cover fetch (small now), and a BURST OF GENA
+NOTIFYs — several KB each of LastChange DIDL, unsolicited, arriving into a 4 KB-stack listener on
+core 1 that parses each body as it reads. That is the closest match in this firmware to #184's
+mechanism (inbound the host drains slowly → the C6's RX buffers fill → the SDIO link freezes).
+
+**Bisection 2 (next flash): GENA OFF, tiles still off** — one variable at a time. Poll returns to
+1 Hz. If the play-time death disappears, eventing is the trigger and the fix is on the listener's
+read path (drain the socket into a buffer FIRST, parse afterwards; or ack-and-defer). If it still
+dies, what is left is the poll + the cover fetch, and the next bisection is the cover.
+
+Separate bug seen on the way: "the radio station from the Radio link never played" while the same
+kind of item from Search did. Not investigated; the two pages must build the Item differently.
