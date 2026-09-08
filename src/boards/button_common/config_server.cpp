@@ -59,6 +59,17 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
     usually plenty.</div>
 </div>
 
+<div class=card id=screencard hidden>
+  <div class=row>
+    <label for=brightbtn>Screen brightness</label>
+    <button id=brightbtn>&hellip;</button>
+  </div>
+  <input type=range id=bright min=10 max=100 step=5>
+  <div class=hint>The screen is dark until you tap the case or press the button, then shows this
+    device's QR code for 20 seconds. It will not go below 10% &mdash; blanking it would hide the
+    code you need to get back here.</div>
+</div>
+
 <div class=card>
   <div class=row>
     <label for=room>Sonos room</label>
@@ -209,6 +220,13 @@ function draw(){
   $('#ringbtn').classList.toggle('on', on);
   $('#ring').value = st.ring;
 
+  // Only button-v3 has a panel; on the other two boards this card would write a setting nothing
+  // reads. hidden, not removed, because /api/config is re-fetched and the answer cannot change
+  // for a running device.
+  $('#screencard').hidden = !st.hasScreen;
+  $('#brightbtn').textContent = `${st.brightness}%`;
+  $('#bright').value = st.brightness;
+
   fill($('#room'), (st.zones||[]).map(z=>z.name), st.room, '(no rooms found yet)');
 
   const pls = st.playlists||[];
@@ -270,6 +288,7 @@ $('#ringbtn').onclick=()=>{
   if(st.ring>0){ last=st.ring; post('ring',0); } else { post('ring',last||100); }
 };
 $('#ring').onchange=e=>post('ring',e.target.value);
+$('#bright').onchange=e=>post('brightness',e.target.value);
 $('#room').onchange=e=>post('room',e.target.value);
 $('#playlist').onchange=e=>post('playlist',e.target.value);
 $('#playlist2').onchange=e=>post('playlist2',e.target.value);

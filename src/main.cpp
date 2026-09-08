@@ -9,7 +9,8 @@
 // don't link the core/board/unit — so skip the app headers (and their LVGL/TJpg deps) in those
 // builds.
 #if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && \
-    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP) && !defined(BUTTON_V2_BRINGUP)
+    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP) && !defined(BUTTON_V2_BRINGUP) && \
+    !defined(BUTTON_V3_BRINGUP)
 #include "core/player_state.h"
 #include "core/board.h"        // boardInit(), backlightSet()
 #include "core/unit.h"         // uiInit()  (this build's unit)
@@ -49,6 +50,9 @@
 #ifdef BUTTON_V2_BRINGUP
 #include "boards/xiao_esp32s3/bringup.h"
 #endif
+#ifdef BUTTON_V3_BRINGUP
+#include "boards/waveshare_s3_lcd147/bringup.h"
+#endif
 
 // Per-unit mDNS/OTA name; set by the build env (-DDEVICE_HOSTNAME). Default keeps
 // non-env builds working.
@@ -80,6 +84,8 @@ void setup() {
   camBringupRun(); // does not return — ESP32-S3-CAM button + LED + memory self-test
 #elif defined(BUTTON_V2_BRINGUP)
   xiaoBringupRun(); // does not return — XIAO ESP32S3 LED polarity + button + ring self-test
+#elif defined(BUTTON_V3_BRINGUP)
+  waveshareBringupRun(); // does not return — ST7789 offset + QMI8658 + ring + button self-test
 #else
   playerStateInit();
   settingsInit();       // NVS (persisted room, brightness, cached zones)
@@ -110,7 +116,8 @@ void setup() {
 
 void loop() {
 #if !defined(SD_MSC_MODE) && !defined(AUDIO_BRINGUP) && !defined(MIC_BRINGUP) && \
-    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP) && !defined(BUTTON_V2_BRINGUP)
+    !defined(WAKE_BRINGUP) && !defined(BUTTON_BRINGUP) && !defined(BUTTON_V2_BRINGUP) && \
+    !defined(BUTTON_V3_BRINGUP)
   // The loopTask hosts the OTA handler; everything else runs in dedicated tasks.
   otaHandle();
   // ...and watches netTask, which has been observed stopping while every other task keeps running

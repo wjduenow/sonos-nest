@@ -110,6 +110,10 @@ String webConfigJson() {
   doc["room"]       = settingsRoom();
   doc["ring"]       = settingsRing();
   doc["brightness"] = settingsBrightness();   // screen units (nest); the unit applies changes
+  // Does this board have a panel for "brightness" to mean anything? The button config page is
+  // shared by all three button boards and only one of them has one, so it hides the control
+  // rather than offering a slider that writes NVS nothing will ever read.
+  doc["hasScreen"]  = infoScreenPresent();
   // The button's three press slots. playlist/volume stay un-suffixed for slot 1 (single press) so
   // the field names the config page has always posted keep working; 2 and 3 are double and triple.
   doc["playlist"]   = settingsPlaylist(1);
@@ -348,6 +352,8 @@ String registrationJson() {
   doc["unit"] = "jukebox"; doc["board"] = "crowpanel_p4_7in";
 #elif defined(UNIT_BUTTON_V2)
   doc["unit"] = "button2"; doc["board"] = "xiao_esp32s3";
+#elif defined(UNIT_BUTTON_V3)
+  doc["unit"] = "button3"; doc["board"] = "waveshare_s3_lcd147";
 #elif defined(HEADLESS)
   doc["unit"] = "button";  doc["board"] = "esp32s3cam";
 #else

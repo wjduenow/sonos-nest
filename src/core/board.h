@@ -17,6 +17,19 @@ bool boardInit();
 // Backlight 0..100%. No-op on boards without a controllable backlight.
 void backlightSet(uint8_t pct);
 
+// Button ring 0..100% — the illuminated bezel on the sonos-button family. No-op elsewhere.
+//
+// Split out from backlightSet() when button-v3 arrived. On the two screenless buttons the ring IS
+// "the backlight" — the only light on the box — so they map it onto backlightSet() and that reuse
+// cost nothing. button-v3 has a real LCD backlight AND a ring, so the two had to become separate
+// calls. The screenless boards keep backlightSet() delegating here, which is what lets main.cpp's
+// boot-time backlightSet(settingsBrightness()) go on meaning the right thing on them.
+//
+// The two levels come from different settings, deliberately: settingsRing() floors at 0 (a ring
+// may be fully off) while settingsBrightness() floors at 10, so nobody can blank an LCD and lose
+// the UI needed to un-blank it.
+void ringSet(uint8_t pct);
+
 // --- Rotary input (optional; neutral values on boards without an encoder/knob) ---
 int32_t encoderDelta();            // signed detents since last call; 0 if no encoder
 
@@ -34,6 +47,13 @@ KnobEvent knobEvent();             // next queued press event; None if no knob
 bool      knobPressed();           // true once per Short press; false if no knob
 bool      knobDown();              // true while the knob is held; false if no knob
 
+// One-shot: has the board's motion sensor seen a TAP? False on boards without an IMU.
+// The board samples inside this call, so it must be polled STEADILY (every uiTick) rather than
+// only when a caller happens to care — a gap in the polling is a gap in the detection.
+// button-v3 wakes its info screen on this — that board has no touch panel, and knocking the case
+// is the only gesture that reaches a sealed box.
+bool      tapDetected();
+
 // --- Network link recovery (optional) ---
 // Boards whose Wi-Fi is a separate co-processor can have the HOST believe it is associated while
 // the radio is actually gone. Recovery there means resetting the co-processor, not reconnecting
@@ -41,6 +61,30 @@ bool      knobDown();              // true while the knob is held; false if no k
 // something and the caller should re-associate; false (the default) means "nothing I can do",
 // which is correct for boards with an on-die radio.
 bool netLinkRecover(const char *note);   // note: what to record as the reboot reason (nullptr = "netlink")
+
+// --- Info screen (optional; no-op on boards without a small status panel) ---
+// A tiny, mostly-dark signpost display: one QR code, a caption, and a few lines of text. This is
+// NOT the LVGL screen a full unit draws. It is deliberately dumb, because the only board with one
+// (button-v3) is otherwise HEADLESS and must not link LVGL — see lib/qrcodegen/VENDORING.md for
+// what that would have cost. The board owns rendering INCLUDING encoding the QR, which is what
+// keeps the encoder and the graphics library inside that one env's lib_deps instead of reaching
+// the other two buttons through +<core/>.
+//
+// The layering is the usual one: the unit decides WHAT to show and WHEN (it is the layer allowed
+// to read settings/g_player), the board decides how it looks.
+//
+// infoScreenShow() is synchronous and self-flushing — uiProvisioning() calls it before any UI task
+// exists, so it cannot depend on one. lines/nLines may be nullptr/0 (QR and caption only); all
+// strings are consumed before it returns, so callers may pass temporaries.
+//
+// show() LIGHTS the panel and off() darkens it — the caller must not reach for backlightSet() to
+// do that, because on the two screenless buttons running this same unit backlightSet() is the
+// BUTTON RING and the screen brightness would come out of the ring. The level is read from
+// settingsBrightness() by the board, the same way uiSoundPlay() reads settingsUiSound().
+bool infoScreenPresent();
+void infoScreenShow(const char *qrText, const char *caption,
+                    const char *const *lines, uint8_t nLines);
+void infoScreenOff();
 
 // --- UI feedback tones (optional; no-op on boards without a speaker) ---
 // Short non-musical confirmations for touch/press, NOT media playback — deliberately separate

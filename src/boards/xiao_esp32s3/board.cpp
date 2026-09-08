@@ -57,12 +57,13 @@ bool boardInit() {
   return true;                               // no display to fail
 }
 
-// The ring, driven through the backlight HAL. On a screenless box "the backlight" is the only
-// light there is, so this reuses the existing call rather than adding one every other board
-// would have to stub — the same instinct as mapping the button onto knobEvent() below.
+// The ring. INVERTED, because low-side: pct 100 -> duty 0 -> pin held LOW -> fully lit.
 //
-// INVERTED, because low-side: pct 100 -> duty 0 -> pin held LOW -> fully lit.
-void backlightSet(uint8_t pct) {
+// This used to BE backlightSet() — on a screenless box "the backlight" is the only light there is,
+// so mapping the ring onto it cost nothing. button-v3 has both a real LCD backlight and a ring, so
+// core/board.h split them. backlightSet() below still delegates here, which keeps main.cpp's
+// boot-time backlightSet(settingsBrightness()) meaning what it always meant on this board.
+void ringSet(uint8_t pct) {
   if (pct > 100) pct = 100;
 
   if (pct == 0) {
@@ -79,14 +80,24 @@ void backlightSet(uint8_t pct) {
   ledcWrite(RING_CH, 255 - ((uint32_t)pct * 255 / 100));
 }
 
+// No screen on this board, so no backlight of its own — the ring is the only light. Kept
+// delegating rather than made a no-op: main.cpp applies settingsBrightness() through this at boot,
+// and on a screenless unit that is still meant to reach the ring.
+void backlightSet(uint8_t pct) { ringSet(pct); }
+
 // --- Rotary input: there is no encoder, but the button IS a press-classified momentary, which
 // is exactly what the knob HAL describes. Mapping onto it costs no core change (plans/04 §5).
 int32_t   encoderDelta() { return 0; }
 KnobEvent knobEvent()    { return buttonEvent(); }
 bool      knobPressed()  { return buttonEvent() == KnobEvent::Short; }
 bool      knobDown()     { return buttonDown(); }
+bool      tapDetected()  { return false; }   // no IMU on this board
 
 // --- Everything this board doesn't have -------------------------------------------------
+bool infoScreenPresent() { return false; }   // no panel — the ring is the whole indicator
+void infoScreenShow(const char *, const char *, const char *const *, uint8_t) {}
+void infoScreenOff() {}
+
 bool localAudioPlay(const char *)     { return false; }
 void localAudioStop()                 {}
 bool localAudioActive()               { return false; }

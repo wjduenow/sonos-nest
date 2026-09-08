@@ -28,6 +28,15 @@ bool boardInit() {
   return ok;
 }
 
+// --- Ring, tap, info screen: peripherals of the sonos-button family, none of them on this board.
+// See core/board.h for what each one means.
+void ringSet(uint8_t /*pct*/) {}                 // no illuminated button ring
+bool tapDetected() { return false; }             // no IMU
+bool infoScreenPresent() { return false; }       // this board has a REAL screen; the info screen
+                                                 // HAL is the button-v3 signpost panel, not this
+void infoScreenShow(const char *, const char *, const char *const *, uint8_t) {}
+void infoScreenOff() {}
+
 // No onboard audio codec/speaker on this board — local playback is a no-op here.
 bool localAudioPlay(const char * /*path*/) { return false; }
 void localAudioStop() {}

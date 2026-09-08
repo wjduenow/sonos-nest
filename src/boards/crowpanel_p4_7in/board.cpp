@@ -69,6 +69,15 @@ bool boardInit() {
 // The board DOES have speakers, but this contract means "play a file off local storage", which
 // this unit has no concept of. UI feedback tones are a separate, smaller thing — see the
 // UI-sound-feedback section of plans/07-sonos-jukebox.md — and live in ui_sound.cpp instead.
+// --- Ring, tap, info screen: peripherals of the sonos-button family, none of them on this board.
+// See core/board.h for what each one means.
+void ringSet(uint8_t /*pct*/) {}                 // no illuminated button ring
+bool tapDetected() { return false; }             // no IMU
+bool infoScreenPresent() { return false; }       // this board has a REAL screen; the info screen
+                                                 // HAL is the button-v3 signpost panel, not this
+void infoScreenShow(const char *, const char *, const char *const *, uint8_t) {}
+void infoScreenOff() {}
+
 bool localAudioPlay(const char *)   { return false; }
 void localAudioStop()               {}
 bool localAudioActive()             { return false; }

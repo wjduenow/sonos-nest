@@ -109,6 +109,10 @@ jobs:
           # Same product as sleep-button on a XIAO ESP32S3, and NOT pin-compatible with it, so it
           # ships as its own asset under its own id. `button` and `button2` must never be merged.
           - { env: button-v2,     unit: button2, release: true }
+          # Same product again, on a Waveshare ESP32-S3-LCD-1.47B with a small ST7789. Pin-
+          # incompatible with BOTH of the above, so it ships under its own id. `button`, `button2`
+          # and `button3` must never be merged — see the ladder check in the guard job.
+          - { env: button-v3,     unit: button3, release: true }
           - { env: sonos-jukebox, unit: jukebox, release: true }
     steps:
       - uses: actions/checkout@v4

@@ -76,6 +76,39 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > The u.FL antenna is not optional, and the case holds the PCB with ledges + a lid rib bearing on
   > the RF shield can — so the lid is structural, and USB-C cable force is taken by pinch ribs
   > rather than by screws. See `hardware/button-v2/README.md` §3.
+- **sonos-button-v3** (`button-v3` env) — **the same product again, on a Waveshare
+  ESP32-S3-LCD-1.47B**, plus a 1.47" ST7789 (172x320, no touch) that is **dark by default** and
+  wakes on a tap or a press to show a **QR code** for 20 s: the Wi-Fi setup AP before provisioning,
+  this device's own `:8080` page after. It runs `units/sleep_button/` unchanged — one UX, three
+  boards — and shares `boards/button_common/`. Plan: `plans/14-button-v3.md`.
+  > ⚠️ **`backlightSet()` USED TO BE THE RING, and this board broke that.** On both screenless
+  > buttons the ring is the only light on the box, so it was mapped onto the backlight HAL. This one
+  > has a ring AND an LCD backlight, so `core/board.h` now has **`ringSet()`**; the two screenless
+  > boards keep `backlightSet()` delegating to it, which is what makes `main.cpp`'s boot-time
+  > `backlightSet(settingsBrightness())` still mean the right thing there. **A unit must never call
+  > `backlightSet()` to light the screen** — on the other two boards that moves the ring.
+  > `infoScreenShow()` owns the backlight and reads `settingsBrightness()` itself, the way
+  > `uiSoundPlay()` reads `settingsUiSound()`.
+  > ⚠️ **THREE units are HEADLESS now, so the unit-id rule below is three-way.** `-DUNIT_BUTTON_V3`
+  > -> `"button3"` must sit **above** the `HEADLESS` fallback in **both** `updater.cpp:unitId()` and
+  > `webconfig.cpp:registrationJson()`.
+  > ⚠️ **The screen code is INLINE in `units/sleep_button/screens.cpp` behind `#ifdef
+  > BUTTON_SCREEN`, on purpose.** A new *file* in that directory would be swept into all three
+  > button envs by the `units/<unit>/` glob, and only this one links a graphics library — the
+  > `core/ui/` trap, one level down. Same technique as `core/sonos/gena.cpp`'s empty TU.
+  > ⚠️ **The panel is offset 34 px inside the ST7789's 240-column RAM, and a wrong offset is not an
+  > error.** The picture still draws, shifted, with a garbage band at one edge — which reads as bad
+  > hardware. Arduino_GFX 1.3.1 takes it as a constructor argument (`col_offset1`), and the
+  > bring-up's 1-px border against all four edges is the only thing that reveals it.
+  > ⚠️ **It does NOT link LVGL** — the QR encoder is `lib/qrcodegen/` (Nayuki's, vendored from
+  > LVGL's own copy and de-LVGL-ified). LVGL's 96 KB `LV_MEM_SIZE` pool out of ~243 KB of internal
+  > heap, for a QR and five text lines, is a bad trade; see `lib/qrcodegen/VENDORING.md`.
+  > ⚠️ **Flashing is button-v2's story again**: USB-Serial-JTAG (`303a:1001`), no UART bridge, so
+  > `upload_speed = 115200` + `--no-stub`, and it re-enumerates `ttyACM0` -> `ttyACM1` on every
+  > reset. 16 MB flash here though, so `default_16MB.csv`, not the other buttons' 8 MB table.
+  > ⚠️ **Tap wake is SOFTWARE** (accelerometer jerk polled from `uiTick`), because the QMI8658's INT
+  > line is undocumented on this board. `TAP_JERK_LSB` in `boards/waveshare_s3_lcd147/imu.cpp` is
+  > still a GUESS — set `TAP_DEBUG 1` and measure the idle floor as well as the knock peaks.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone
@@ -393,7 +426,9 @@ hardware self-test), **`nest-phase1`** (interactive SOAP test), **`nest-ota`** /
 **`sleep-machine-ota`** (espota WiFi upload). Also standalone es3c28p bring-ups: **`sleep-machine-audio`**
 (ES8311 speaker playback), **`sleep-machine-mic`** (ES8311 mic capture — prints a live level meter),
 **`sleep-machine-sdreader`** (SD-as-USB), **`sleep-machine-wake`** (microWakeWord wake-word trial —
-mic → TFLM; see Phase-1 note below). Each env selects one board + one unit + the
+mic → TFLM; see Phase-1 note below). The three button envs are **`sleep-button`** /
+**`button-v2`** / **`button-v3`**, each with an `-ota` variant, plus **`button-v3-bringup`**
+(ST7789 offset + QMI8658 + ring + button self-test). Each env selects one board + one unit + the
 core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name).
 
 > ⚠️ **Env switching across silicon is solved by `tools/pio` — use it and this whole class of
@@ -541,6 +576,7 @@ its caller is how you freeze the UI task with the very thing meant to explain th
 |---|---|---|---|
 | **sonos-jukebox** | 98 / 74 KB | **yes** | wall-mounted; rear port is power-only, so this and OTA are the only ways in |
 | **sleep-button** | 243 / 226 KB | **yes** | **headless** — no screen at all, so without a cable it is unobservable; also the most headroom of any unit |
+| **button-v3** | ~243 KB (est.) | **yes** | its screen shows a QR code and four lines — a signpost, not a console. Same reasoning as sleep-button |
 | sonos-nest | 78 / 60 KB | no | has a screen showing its own state; `heapLargest` still unknown on it (pre-`ccfe157` firmware). Viable later — read that first |
 | sleep-machine | 30 / **14.5 KB** | **no** | 14.5 KB min is already the range where LWIP cannot get socket buffers and the symptom is Sonos **`connection refused`**. Also has a screen and sits within cable reach |
 
@@ -561,15 +597,16 @@ bringup · phase1_test) and `src/boards/es3c28p/` (display · touch · sd_card �
 `mic_test` are standalone bring-up envs, excluded from the app build). Units: `src/units/sonos_nest/`
 (round/rotary screens + ui_scale.h) and `src/units/sleep_machine/` (touch screens + ui_scale.h).
 
-The two headless button boards — `src/boards/esp32s3cam/` and `src/boards/xiao_esp32s3/` (each
-just `pins.h` · `board.cpp` · `bringup.cpp`) — share **`src/boards/button_common/`**: the press
+The three button boards — `src/boards/esp32s3cam/`, `src/boards/xiao_esp32s3/` (each just
+`pins.h` · `board.cpp` · `bringup.cpp`) and `src/boards/waveshare_s3_lcd147/` (those plus
+`display.{h,cpp}` and `imu.{h,cpp}` for its info screen) — share **`src/boards/button_common/`**: the press
 classifier (`button.{h,cpp}`, `buttonInit(pin)`) and the `:8080` config page
 (`config_server.{h,cpp}`, ~13 KB of embedded HTML, zero board coupling). **That directory is
 deliberately NOT in `core/`** — `+<core/>` sweeps into every env, so `<WebServer.h>` there would
 land in nest/sleep-machine/jukebox, which is the `core/ui/` rule running the other way. It defines
 no `boardInit()`/`uiInit()`, so it doesn't trip the one-board-per-env link guard; an env opts in
-with `+<boards/button_common/>`. See its README. **Both boards run the same unit**,
-`src/units/sleep_button/`.
+with `+<boards/button_common/>`. See its README. **All three run the same unit**,
+`src/units/sleep_button/`, whose screen code is inline behind `#ifdef BUTTON_SCREEN`.
 
 nest UI screens: Now Playing (home), Menu hub, Rooms, Group, Playlists/Favorites (shared browse
 list), Settings, Clock. From Now Playing: **swipe right** (drag in from the left edge) = Menu,
@@ -803,8 +840,10 @@ button is headless. Hold the knob/button through power-on to re-provision. Also 
 - Keep `hardware/` commits separate from firmware — the user owns that work. Layout:
   `hardware/round-nest-2.8/` (original round CrowPanel unit: `wall/` mount),
   `hardware/rec-2.8/` (ES3C28P rectangular board: `countertop/` nightstand stand),
-  `hardware/cam-button/` (`shell/` — the ESP32-S3-CAM button) and `hardware/button-v2/`
-  (`shell/` — the XIAO ESP32S3 button, half the volume). All of `hardware/` is Python CSG
+  `hardware/cam-button/` (`shell/` — the ESP32-S3-CAM button), `hardware/button-v2/`
+  (`shell/` — the XIAO ESP32S3 button, half the volume) and `hardware/button-v3/` (not started —
+  screen on a side wall, button on top; the board is 36.37 x 20.32 mm with four **M2** corner
+  holes, but its hole CENTRES are unmeasured, see `plans/14`). All of `hardware/` is Python CSG
   (trimesh + manifold3d) under `conda run -n img23d`, never OpenSCAD; each part directory derives
   its dimensions in a `*_params.py` and asserts its own clearances at build time.
 - Test loop: build → flash (USB or `/ota`) → user confirms on device → commit + push.

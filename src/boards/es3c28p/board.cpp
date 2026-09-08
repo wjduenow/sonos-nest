@@ -34,6 +34,15 @@ bool boardInit() {
   return ok;
 }
 
+// --- Ring, tap, info screen: peripherals of the sonos-button family, none of them on this board.
+// See core/board.h for what each one means.
+void ringSet(uint8_t /*pct*/) {}                 // no illuminated button ring
+bool tapDetected() { return false; }             // no IMU
+bool infoScreenPresent() { return false; }       // this board has a REAL screen; the info screen
+                                                 // HAL is the button-v3 signpost panel, not this
+void infoScreenShow(const char *, const char *, const char *const *, uint8_t) {}
+void infoScreenOff() {}
+
 // No rotary encoder / knob on this board — the touch-first UX drives everything.
 int32_t   encoderDelta() { return 0; }
 KnobEvent knobEvent()    { return KnobEvent::None; }
