@@ -360,32 +360,32 @@ volatile uint32_t g_linkZones  = 0;
 // both inside 20 s, then the probe. Silent when no coordinator is known yet: there is nothing to
 // probe, and the slow path still covers boot.
 static uint32_t s_deadSinceMs = 0;   // first RSSI-0 sighting of the current episode (0 = none)
-// ⚠️ THE PAIRING WINDOW MUST BE LONGER THAN A FULL netTask PASS OVER A DEAD LINK. It was 20 s, and
-// a pass over a dead link is far longer than that: every stage blocks on its own timeout (SOAP
-// 3+4 s per call, the RSSI RPC 5 s, a GENA renew's connect 24 s), so the second sighting arrived
-// more than 20 s after the first, was thrown away as "an old sighting", and the detector started
-// over — every pass. Measured 2026-09-07: `netlink:fast dead=110s gapmax=24s@gena`, the user
-// watching a frozen Now Playing for near two minutes, on a detector built to fire in 7 s. The
-// window is not what protects against a transient 0 anyway: any non-zero reading resets the
-// episode on the first line below, and the TCP probe is the confirmation. 120 s only has to be
-// shorter than the supervisor's netstall reboot.
-static const uint32_t kDeadPairWindowMs = 120000;
+// ⚠️ DETECTION MUST NOT DEPEND ON A SECOND netTask PASS. The first design paired two RSSI-0
+// sightings from consecutive passes, and a pass over a DEAD link is ~50 s: every stage blocks on
+// its own timeout, and on this board every WiFi.status()/RSSI() is an RPC to the C6 that times out
+// at 5 s when the link is gone. Measured 2026-09-07: `dead=110s` with a 20 s pairing window (the
+// second sighting was discarded as stale every pass), then `dead=57s gapmax=36s@gena` with the
+// window widened — one full pass, exactly as predicted. The user watches a frozen Now Playing for
+// all of it.
+//
+// So: on the FIRST 0 reading, probe the coordinator over TCP right away (2 s), and if that fails
+// confirm with one more RSSI read (another RPC, ~5 s when dead). A roam or a scan that still
+// connects never costs a reboot; a transient 0 with a working TCP path clears on the probe; and a
+// real death is caught in under 10 s no matter how long the surrounding stages block. Silent when
+// no coordinator is known yet — nothing to probe, and the slow path still covers boot.
 static bool deadLinkFast() {
-  static uint32_t s_firstMs = 0;
-  static int      s_seen = 0;
-  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; s_deadSinceMs = 0; return false; }
+  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_deadSinceMs = 0; return false; }
   const uint32_t now = millis();
-  if (s_seen && now - s_firstMs > kDeadPairWindowMs) s_seen = 0;   // an old sighting is not this fault
-  if (s_seen == 0) { s_firstMs = now; s_seen = 1; if (!s_deadSinceMs) s_deadSinceMs = now; return false; }
-  if (now - s_firstMs < 3000) return false;                // let publishLinkStats() sample again
+  if (!s_deadSinceMs) s_deadSinceMs = now;
   if (s_zoneIp.length() == 0) return false;
   WiFiClient probe;
   IPAddress ip;
   if (!ip.fromString(s_zoneIp)) return false;
-  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_seen = 0; s_deadSinceMs = 0; return false; }   // alive after all
-  LOG.printf("[net] RSSI 0 while 'connected' for %lus and %s does not answer TCP — the radio link is dead\n",
-             (unsigned long)((now - s_firstMs) / 1000), s_zoneIp.c_str());
-  s_seen = 0;
+  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_deadSinceMs = 0; return false; }   // alive after all
+  const int again = (int)WiFi.RSSI();
+  if (again != 0) { g_linkRssi = again; s_deadSinceMs = 0; return false; }                // it came back
+  LOG.printf("[net] RSSI 0 twice and %s does not answer TCP (%lus into the episode) — the radio link is dead\n",
+             s_zoneIp.c_str(), (unsigned long)((millis() - s_deadSinceMs) / 1000));
   return true;
 }
 

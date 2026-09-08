@@ -124,3 +124,23 @@ candidate 1 cannot touch.
 - **Still dying.** Deaths observed on the -70/-71 builds: during a Radio browse with tiles (before
   Play All), and twice within a few tens of seconds of a Now Playing fetch. The count is not yet
   a measurement — the reproduction has not been run five times on any one build.
+
+## Second pass (2026-09-07, later) — the gate works, detection was still a full pass
+
+- **Gate, observed:** `[gate] tile waited 279 ms for spotify` / `spotify waited 494 ms for tile`
+  during a New Releases → album → artist browse. Overlaps are being serialised.
+- **Death #N, on v0.4.2-73:** Search → ABBA → Artists → ABBA Radio → Play All. Diary:
+  `netlink:fast dead=57s gapmax=36s@gena now=linkstats art=11830B/0ms cdn 64s ago`. So the cover
+  came down (11.8 KB, CDN) about 7 s before RSSI first read 0. The speaker was left in
+  Transitioning on the new track and then Stopped — the user saw "nothing played".
+- **Why 57 s with a 120 s window:** because a netTask pass over a dead link IS ~50 s. On this board
+  `WiFi.status()`/`RSSI()` are RPCs to the C6 that time out at 5 s when the link is gone, and
+  `genaTick()` calls one before its (now bounded) connects. The two-sightings design needed the
+  NEXT pass. `deadLinkFast()` now probes on the first 0, confirms with one more RSSI read, and is
+  independent of pass length (<10 s).
+- **Correlation so far:** the last three deaths each followed a Now Playing cover fetch by
+  7-20 s — sizes 38 KB, 11.8 KB, 11.8 KB — so the size is not what matters at play time. What else
+  play time does: SOAP SetAVTransportURI+Play, a burst of GENA NOTIFYs, an immediate poll, and the
+  CDN fetch opening a SECOND idle TLS socket (the SMAPI resolve leaves its session open for 30 s,
+  the art client keeps its i.scdn.co connection for reuse). Untested lead: drop both sessions after
+  a Now Playing fetch and see whether the play-time death moves.
