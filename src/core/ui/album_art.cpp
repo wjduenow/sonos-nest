@@ -208,8 +208,9 @@ bool albumArtFetch(const String &url) {
   // largest transfer this panel makes, so it must never land on top of a browse or a tile. 45 s,
   // longer than the longest legitimate hold (a tile's 12 s GET + 12 s body deadline, ~26 s): the
   // first cut waited 10 s and then proceeded UNGATED behind a slow tile — exactly the overlap the
-  // gate exists to prevent. A timed-out wait now FAILS the fetch instead; artTask retries. Released
-  // explicitly after the body is read, so the decode does not keep the next reader waiting.
+  // gate exists to prevent. A timed-out wait FAILS the fetch (the gate's rule for a caller that can
+  // retry — inbound_gate.h); artTask retries. Released explicitly after the body is read, so the
+  // decode does not keep the next reader waiting.
   inbound::Guard gate("art", 45000);
   if (!gate.held) { LOG.println("[art] inbound gate not free — retrying later"); ++s_nFail; return false; }
 
@@ -259,7 +260,8 @@ bool albumArtFetch(const String &url) {
   // An ABSENT Content-Type is refused too, not waved through: the speaker's /getaa always sends
   // `image/jpeg` (checked 2026-09-08) and so do the CDNs, so a 200 with no type is not a cover — and
   // reading it "to see" would be exactly the unvalidated inbound burst this check exists to avoid.
-  const String ct = http.header("Content-Type");
+  String ct = http.header("Content-Type");
+  ct.toLowerCase();               // the media-type token is case-insensitive ("Image/JPEG" is valid)
   if (ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
     LOG.printf("[art] %s: %.40s — not JPEG, not fetched\n", src,
                ct.length() ? (ct.c_str() ? ct.c_str() : "?") : "(no Content-Type)");

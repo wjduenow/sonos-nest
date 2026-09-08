@@ -210,6 +210,9 @@ static size_t obtain(const Req &r) {
   // waiting on them, so they wait as long as it takes — a minute is far past any holder's own
   // timeout, and a give-up here would be a burst, which is the one thing a tile must never cause.
   inbound::Guard gate("tile", 60000);
+  // Timed out: skip, never proceed ungated (inbound_gate.h — a caller that can retry must not).
+  // The row asks again on the next UI pass if it is still on screen; nothing is lost.
+  if (!gate.held) return 0;
 
   // HTTPS is mandatory — Amazon 403s plain HTTP on both image hosts. One client, reused across
   // requests, because a fresh TLS handshake per tile would dominate the cost of a browse.
@@ -228,7 +231,8 @@ static size_t obtain(const Req &r) {
   httpbody::prepare(http, kHdrs, 1);   // collectHeaders() replaces the list, so ask through the reader
   const int code = http.GET();
   if (code != 200) { http.end(); return 0; }
-  const String ct = http.header("Content-Type");
+  String ct = http.header("Content-Type");
+  ct.toLowerCase();               // the media-type token is case-insensitive ("Image/JPEG" is valid)
   if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
     LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, smapi::cstr(ct));
     http.end();

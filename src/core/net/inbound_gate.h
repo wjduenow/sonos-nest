@@ -21,10 +21,13 @@
 // albumArtFetch() resolving a Spotify CDN URL (an SMAPI call) BEFORE it takes the gate for the
 // body; keep that order if you touch it.
 //
-// A wait that times out PROCEEDS WITHOUT THE GATE rather than failing: a browse that fails because
-// a tile fetch hung is worse for the user than a burst, and every holder here is bounded by its own
-// HTTP timeout anyway. It is counted (`timeouts`) and read back in /api/config → health.inbound,
-// so if it ever happens you will know without a serial cable.
+// THE GATE REPORTS; THE CALLER DECIDES. acquire() returns false when the wait timed out, counts it
+// (`timeouts`, read back in /api/config → health.inbound), and does nothing else. The policy is per
+// caller and follows one rule: **a caller that can retry must not proceed ungated** — Now Playing
+// art fails its fetch (artTask retries), a tile skips (the UI re-requests any row still on screen).
+// A caller that cannot retry proceeds: an SMAPI browse whose user is watching a spinner is worse
+// failed than overlapped, and every wait here is longer than any legitimate hold (45-60 s against
+// a worst case of ~26 s), so a timeout means something is wedged, not merely busy.
 #pragma once
 
 #include <Arduino.h>
