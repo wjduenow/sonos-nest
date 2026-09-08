@@ -432,7 +432,13 @@ core via `build_src_filter` and sets `-DDEVICE_HOSTNAME` (per-unit mDNS/OTA name
 > ⚠ **COMMIT BEFORE YOU BUILD what you are about to flash.** `FW_VERSION` comes from `git describe`
 > at build time, so a binary built from a dirty tree reports `<previous-tag>-dirty` and cannot be
 > tied back to a commit — which is exactly what `health.crash`'s `elfSha` and the whole coredump
-> workflow depend on. Cost two needless reflashes to get a truthful version string.
+> workflow depend on. Cost two needless reflashes to get a truthful version string. The string
+> arrives through a **generated header**, `include/generated/fw_version.h` (gitignored, written by
+> `tools/git_version.py`), NOT a `-D` flag: as a global define it sat on every compile command, so
+> every commit changed the build-cache key of every object and CI recompiled all ~2700 files per
+> push with zero cache hits — while locally the three files that use it did NOT recompile, because
+> SCons ignores a changed `-D`. With the header a commit recompiles exactly three objects, locally
+> and in CI. Don't move it back.
 
 ### WSL gotchas (this repo is developed on WSL2 — these will bite you)
 - **USB needs usbipd.** From Windows admin PowerShell: `usbipd attach --wsl --busid <id>`.

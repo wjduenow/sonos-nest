@@ -152,8 +152,29 @@ jobs:
           path: |
             ${{ steps.pio.outputs.core_dir }}
             ~/.platformio-build-cache
-          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini', 'tools/git_version.py', '.github/workflows/firmware.yml') }}
           restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
+
+      # The generated sdkconfig files for the P4 envs, in their OWN cache with an EXACT key and NO
+      # restore-keys. Why they are cached at all: pioarduino decides whether to run "*** Reinstall
+      # Arduino framework ***" by comparing the `# TASMOTA__<hash>` first line of the project's
+      # `sdkconfig.defaults` with the marker inside the framework package (matching_custom_sdkconfig()
+      # in its builder/frameworks/arduino.py); with no file on a fresh runner it reinstalled both
+      # framework packages and re-ran the IDF lib build on EVERY jukebox job — 155 s of a 217 s warm
+      # build, measured 2026-09-08. Why NOT in the cache above: that one falls back to an older entry
+      # via restore-keys after a platformio.ini change, and ESP-IDF gives `sdkconfig.<env>` priority
+      # over the regenerated defaults — so a stale configuration could survive a config change, which
+      # is exactly the silent failure CLAUDE.md warns about ("verify by grepping the generated
+      # sdkconfig, not the ini"). Exact key only: a config change misses, regenerates cleanly (one
+      # reinstall), and saves under the new key. Harmless for the S3 envs (no such files: the step
+      # warns and continues).
+      - name: Cache generated sdkconfig (exact key, P4 envs)
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdkconfig.defaults
+            sdkconfig.${{ matrix.env }}
+          key: sdkconfig-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini', 'tools/git_version.py', '.github/workflows/firmware.yml') }}
 
       # PIN PlatformIO CORE. Core resolves `tool-scons` itself, so an unpinned `pip install
       # platformio` lets a Core release change a build tool under a platform this repo pins by URL.
@@ -188,11 +209,24 @@ jobs:
       # Release units get the `firmware-` artifact prefix; that prefix is exactly what the
       # release job globs for, so a `release: false` env is downloadable from the run but can
       # never leak into a Release or the manifest.
-      - uses: actions/upload-artifact@v4
+      # Two attempts, because GitHub's artifact service intermittently fails the FINAL step of an
+      # upload with `FinalizeArtifact ... (403) Forbidden` after a successful compile — three jobs in
+      # one afternoon (2026-09-08), each fixed by a manual re-run. The second step runs only when the
+      # first failed and overwrites whatever partial upload exists.
+      - id: upload
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ${{ matrix.release && 'firmware' || 'build' }}-${{ matrix.unit }}
           path: firmware-${{ matrix.unit }}.bin
           if-no-files-found: error
+      - if: steps.upload.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release && 'firmware' || 'build' }}-${{ matrix.unit }}
+          path: firmware-${{ matrix.unit }}.bin
+          if-no-files-found: error
+          overwrite: true
 
   release:
     needs: build
