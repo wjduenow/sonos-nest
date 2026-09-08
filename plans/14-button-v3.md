@@ -18,8 +18,8 @@ It exists because a headless button cannot answer two questions:
    camera-point away instead of a hunt through a router lease table.
 
 > ## Status — 2026-09-08
-> **Phase 0 bring-up RUN ON HARDWARE. Panel, IMU and button pin all confirmed; the board is not
-> yet wired to a switch or a ring.**
+> **WORKING ON HARDWARE. The whole feature is proven end to end: the screen wakes on a single tap
+> and the QR scans. What is left is the harness (switch + ring) and the case.**
 > - ✅ Software: `lib/qrcodegen/` vendored, `core/board.h` extended, all five existing boards
 >   stubbed, `waveshare_s3_lcd147/` written, three envs, both unit-id ladders, CI matrix row.
 > - ✅ Builds: `button-v3` 1,136,505 B flash / 53,308 B static RAM. `nest`, `sleep-machine`,
@@ -37,7 +37,14 @@ It exists because a headless button cannot answer two questions:
 >   guess of 2250 was too HIGH — a lightly-tapped case could have missed.
 > - ✅ The "bimodal noise" seen in run 1 was **the board being handled**, not ODR aliasing. A clean
 >   capture has no second mode, so the poll needs no data-ready gating.
+> - ✅ **App on hardware** (`v0.4.2-96-g535fbef`): Wi-Fi as `sonos-button3` @ 192.168.68.103, zone
+>   discovery (8 zones, Master Bedroom), 15 playlists published, portal registration, log mirror on
+>   :2323, `heap 233 KB free / 213 KB min`. `hasScreen=true`, so the brightness card renders.
+> - ✅ **The screen works as designed.** Lights for 20 s at boot, goes dark, and **ONE TAP wakes
+>   it** — the measured 1200 threshold is right on a bare board. **The QR scans** and opens
+>   `http://<ip>:8080`. 29x29 modules at 4 px/module is comfortably readable by a phone.
 > - ⬜ Ring + switch still unwired; WS2812 bead still unobserved.
+> - ⬜ The **provisioning QR path is untested** — see Open.
 
 ---
 
@@ -207,8 +214,8 @@ can be mounted any way up.
 |---|---|---|
 | A | Software: board, unit, envs, ladders, CI | ✅ build-verified |
 | B | Phase-0 bring-up on hardware | ⬜ |
-| C | App on hardware: QR scans, screen sleeps, tap + press wake | ⬜ |
-| D | Provisioning QR joins the setup AP | ⬜ |
+| C | App on hardware: QR scans, screen sleeps, tap wake | ✅ 2026-09-08 |
+| D | Provisioning QR joins the setup AP | ⬜ blocked on the switch |
 | E | Case, `hardware/button-v3/` | ⬜ |
 
 ### Phase B, in order
@@ -239,7 +246,13 @@ accelerometer jerk peaks.
 
 ## 4. Open
 
-- **Everything in the Status block marked ⬜** — chiefly the ring, which is the last thing that could still force a BOM change.
+- **The harness: switch on GP2, ring on GP4.** The ring is the last thing that could still force a
+  BOM change — the 5 V low-side drive is proven on two other boards but not on this one's header.
+- **The provisioning QR (`uiProvisioning`) has never run.** It cannot: `include/secrets.h` bakes in
+  `WIFI_SSID`, so `wifiHaveCreds()` is always true and the portal is only reachable by holding the
+  button through power-on — which needs the switch wired. Test it as soon as it is. Until then the
+  `WIFI:` payload and its SSID escaping are code-reviewed only.
+- **Press-wake is untested** for the same reason; only tap-wake has run.
 - ⚠️ **`TAP_JERK_LSB`** — a guess. Measure it against the printed case, not a bare board: a case
   transmits a knock quite differently from a PCB on a desk.
 - ⚠️ **Mounting-hole centres.** The board is **36.37 × 20.32 mm** with four **M2** corner holes
