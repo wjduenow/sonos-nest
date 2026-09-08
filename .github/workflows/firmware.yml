@@ -149,9 +149,17 @@ jobs:
         with:
           # Second path is platformio.ini's build_cache_dir — compiled objects, keyed by compiler
           # invocation, so a stale entry can only miss and never poison a build.
+          # Third path: the generated sdkconfig for the P4 envs. It is gitignored on purpose (the
+          # config of record is platformio.ini), but pioarduino compares custom_sdkconfig against it
+          # and, finding no file on a fresh runner, ran "*** Reinstall Arduino framework ***" on
+          # EVERY jukebox build — a nested 93 s IDF build plus ~800 managed-component objects that
+          # the SCons cache does not cover (measured 2026-09-08). Cached alongside the package tree
+          # it was generated for, under the same platformio.ini-keyed entry, it is always consistent
+          # with it; a config change busts both together. Harmless for the S3 envs (no such file).
           path: |
             ${{ steps.pio.outputs.core_dir }}
             ~/.platformio-build-cache
+            sdkconfig.${{ matrix.env }}
           key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
@@ -188,11 +196,24 @@ jobs:
       # Release units get the `firmware-` artifact prefix; that prefix is exactly what the
       # release job globs for, so a `release: false` env is downloadable from the run but can
       # never leak into a Release or the manifest.
-      - uses: actions/upload-artifact@v4
+      # Two attempts, because GitHub's artifact service intermittently fails the FINAL step of an
+      # upload with `FinalizeArtifact ... (403) Forbidden` after a successful compile — three jobs in
+      # one afternoon (2026-09-08), each fixed by a manual re-run. The second step runs only when the
+      # first failed and overwrites whatever partial upload exists.
+      - id: upload
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ${{ matrix.release && 'firmware' || 'build' }}-${{ matrix.unit }}
           path: firmware-${{ matrix.unit }}.bin
           if-no-files-found: error
+      - if: steps.upload.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release && 'firmware' || 'build' }}-${{ matrix.unit }}
+          path: firmware-${{ matrix.unit }}.bin
+          if-no-files-found: error
+          overwrite: true
 
   release:
     needs: build

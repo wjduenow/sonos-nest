@@ -14,6 +14,8 @@
 
 # Secrets — real WiFi/Sonos config (commit secrets.example.h instead)
 include/secrets.h
+# Written by tools/git_version.py on every build (FW_VERSION); never commit it.
+include/generated/
 
 # Python (hardware build scripts)
 __pycache__/

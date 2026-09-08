@@ -40,6 +40,9 @@ static inline IPAddress mdnsResultIp(int idx) {
 
 // Firmware version string — injected per build by tools/git_version.py (git describe). Default
 // keeps a plain `pio run` from any checkout compiling; the real value comes from the build flag.
+#if __has_include("generated/fw_version.h")
+#include "generated/fw_version.h"   // written by tools/git_version.py from `git describe` (pre-script)
+#endif
 #ifndef FW_VERSION
 #define FW_VERSION "dev"
 #endif

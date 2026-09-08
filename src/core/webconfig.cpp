@@ -24,7 +24,10 @@
 #include <WiFi.h>          // WiFi.localIP() — the registration payload's ip field
 
 // Firmware version — injected per build by tools/git_version.py (git describe). Default lets a
-// bare `pio run` compile; the real string arrives via the -DFW_VERSION build flag.
+// bare compile without the pre-script; the real string arrives via the generated header.
+#if __has_include("generated/fw_version.h")
+#include "generated/fw_version.h"   // written by tools/git_version.py from `git describe` (pre-script)
+#endif
 #ifndef FW_VERSION
 #define FW_VERSION "dev"
 #endif

@@ -13,6 +13,9 @@
 // Firmware version — injected per build by tools/git_version.py (git describe). The manifest's
 // version is string-compared against this: CI only publishes clean tags, so a device on the
 // blessed release reads equal (no update), and anything else (older tag, dirty dev build) differs.
+#if __has_include("generated/fw_version.h")
+#include "generated/fw_version.h"   // written by tools/git_version.py from `git describe` (pre-script)
+#endif
 #ifndef FW_VERSION
 #define FW_VERSION "dev"
 #endif
