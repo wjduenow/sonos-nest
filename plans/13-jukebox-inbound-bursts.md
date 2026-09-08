@@ -166,3 +166,22 @@ dies, what is left is the poll + the cover fetch, and the next bisection is the 
 
 Separate bug seen on the way: "the radio station from the Radio link never played" while the same
 kind of item from Search did. Not investigated; the two pages must build the Item differently.
+
+## Bisection 2 — GENA OFF, tiles off (v0.4.2-76, 2026-09-07 21:21-21:31): SURVIVED
+
+Ten minutes, eight browses (root, New Releases, two albums incl. 19 tracks, an artist, Charts, a
+24-row playlist), six play starts across four tracks, transports changing — **zero deaths**, on a
+board that died within a minute of play on every eventing build today (six for six). Gate:
+22 acquires, 0 waits. The user's unprompted remark: "seems much more responsive."
+
+**Eventing is the trigger.** It fits #184 exactly: a NOTIFY is unsolicited inbound of several KB
+that lands whenever the speaker feels like it — at play start, several in a row — and our listener
+reads it line by line and parses as it goes on a 4 KB-stack task at priority 1 on core 1. Inbound
+the host drains slowly is precisely the condition under which the C6's RX buffers fill and the
+SDIO host driver freezes.
+
+**Bisection 3 (next flash): tiles back ON, GENA still off.** If it survives, the stable build for
+this device is "poll at 1 Hz" until the listener is fixed — plans/09's traffic saving is not
+worth a reboot per play. The fix, when built, is on the receive side: read the whole NOTIFY into a
+PSRAM buffer at socket speed and answer 200 BEFORE parsing anything, so the socket is drained the
+moment bytes arrive; parse afterwards on the same task.
