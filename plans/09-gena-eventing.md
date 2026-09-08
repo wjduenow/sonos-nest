@@ -1,7 +1,12 @@
 # Plan 09 — UPnP GENA eventing instead of polling (Now Playing first)
 
-Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **SHIPPED on the jukebox
-and merged to main.** Not enabled on any other unit — see §2 for why.
+Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **BUILT AND MERGED for the
+jukebox, then DISABLED at the flag.** `-DGENA_EVENTS` is commented out in `platformio.ini` as of
+`6ef9b70` (PR #27) — inbound NOTIFY bursts turned out to be half the load profile that wedges the
+esp_hosted 2.12.11 SDIO link ([#24](https://github.com/wjduenow/sonos-nest/issues/24)), so the
+jukebox is back on the 1 Hz poll until host **and** C6 run esp_hosted ≥ 2.12.12
+([#26](https://github.com/wjduenow/sonos-nest/issues/26)). See §8. Not enabled on any other unit —
+see §2 for why.
 
 Replace the continuous 1 Hz SOAP poll behind Now Playing with UPnP GENA eventing — subscribe once
 per coordinator, let Sonos push changes — keeping a slow poll as a backstop.
@@ -115,7 +120,8 @@ nobody builds by habit. Guarding it means the S3 units pay nothing and cannot br
 
 ## 6. What actually shipped, and what it cost
 
-Everything in §4 was built. Beyond it:
+Everything in §4 was built, and everything below was measured on hardware with eventing live. It
+is all still true of the code; it is just not compiled in right now (§8).
 
 - **Renewal works.** Confirmed at the 30-minute mark: `renewals=2, resubscribes=0, failures=0`.
   The 412 fallback exists but has never had to fire.
@@ -159,5 +165,33 @@ first, the fix landed first time; where symptoms were reasoned about, it took th
   real memory conversation on this board, not a freebie.
 - **The nest is still a maybe.** It needs `heapLargest` read off a live device first (it runs
   firmware predating that field). `core/sonos/gena.*` is device-agnostic; only `-DGENA_EVENTS` and
-  a callback listener port are per-env.
+  a callback listener port are per-env. Note the jukebox's reason for being off does **not** apply
+  to the nest — the S3 has no ESP-Hosted bridge to wedge, so the nest port is blocked on heap
+  headroom alone.
 - **The sleep-machine is a no.** 14.5 KB minimum free heap — see §2.
+
+---
+
+## 8. Why it is switched off on the jukebox (2026-09)
+
+The argument in §1 was that polling is the load profile that kills the ESP-Hosted link. That was
+half right. Bisecting the link deaths under
+[#24](https://github.com/wjduenow/sonos-nest/issues/24) — commits `0da011f`, `98ca8fb`, `00a46c6`,
+landing as `04a0ed0` — showed **inbound** bursts are what the esp_hosted 2.12.11 SDIO host driver
+mishandles, and a GENA `NOTIFY` is inbound: a 6.5 KB body the speaker pushes at us, arriving
+alongside station tiles and browses. Upstream esp-hosted-mcu #184 names the mechanism (inbound
+flow control) and the only workaround offered is pacing inbound reads. Eventing cannot be paced —
+the speaker decides when to push.
+
+So the 1 Hz poll, whose steady-state cost eventing was meant to remove, has the one property that
+matters on this bridge today: every transfer is **outbound-initiated and small**, and the device
+chooses when to make it. `core/net/inbound_gate.h` serialises everything we *can* control; NOTIFY
+is not one of those things.
+
+**This is a deferral, not a retraction.** The code is merged, proven on hardware, and costs
+nothing while the flag is off (`gena.cpp` compiles to an empty translation unit). Re-enabling is
+one line in `platformio.ini` plus a soak, and the trigger is
+[#26](https://github.com/wjduenow/sonos-nest/issues/26) landing esp_hosted ≥ 2.12.12 on host and
+C6. Re-verify against §5's acceptance list, and watch `health.inbound` timeouts (must stay 0) and
+`health.lastReboot` for `netlink` — those are the two readings that would say the burst problem
+survived the upgrade.

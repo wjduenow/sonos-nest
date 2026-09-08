@@ -284,12 +284,17 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > 120 px clock is **a real font** (`lv_font_clock_120.c`), not a scaled label: scaling allocates a
   > ~240 KB ARGB draw layer per repaint from the 512 KB pool, and pool exhaustion here is a UI
   > freeze, not a dropped frame. That file's header has the regeneration command.
-  > ⚠️ **Now Playing is EVENT-DRIVEN here (`core/sonos/gena.*`, `-DGENA_EVENTS`, plans/09).** Sonos
-  > pushes state; the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP calls/sec
-  > → 0.09). Two things to know before touching it. The backstop is the **same poll, just slower** —
-  > it was briefly reduced to position-only and Now Playing went blank, because nothing else could
-  > repopulate the title. And **trust is revocable**: subscribed AND at least one event received,
-  > else it returns to 1 Hz by itself.
+  > ⚠️ **Now Playing eventing is BUILT BUT CURRENTLY OFF (`core/sonos/gena.*`, `-DGENA_EVENTS`,
+  > plans/09, issue #6).** The flag is commented out in `platformio.ini` as of `6ef9b70` (PR #27):
+  > inbound NOTIFY bursts are half the load profile that wedges the esp_hosted 2.12.11 SDIO link
+  > (#24), so the device is back on the 1 Hz poll until host **and** C6 run esp_hosted ≥ 2.12.12
+  > (#26). Without the flag `gena.cpp` is an empty translation unit. **Re-enabling it is one line
+  > plus a soak** — the code is merged and was proven on hardware. What it does when on: Sonos
+  > pushes state and the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP
+  > calls/sec → 0.09). Two things to know before touching it. The backstop is the **same poll, just
+  > slower** — it was briefly reduced to position-only and Now Playing went blank, because nothing
+  > else could repopulate the title. And **trust is revocable**: subscribed AND at least one event
+  > received, else it returns to 1 Hz by itself.
   > ⚠️ **Eventing gave several fields a SECOND writer, and that is where nearly every bug came
   > from — the new writer overwriting something better than it had.** Volume mid-turn, album art on
   > pause, track identity from container metadata, relative art URLs the poll had always fixed up.
