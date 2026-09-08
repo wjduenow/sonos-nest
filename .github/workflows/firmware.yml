@@ -149,24 +149,30 @@ jobs:
         with:
           # Second path is platformio.ini's build_cache_dir — compiled objects, keyed by compiler
           # invocation, so a stale entry can only miss and never poison a build.
-          # Third path: the generated sdkconfig for the P4 envs. It is gitignored on purpose (the
-          # config of record is platformio.ini), but pioarduino compares custom_sdkconfig against it
-          # and, finding no file on a fresh runner, ran "*** Reinstall Arduino framework ***" on
-          # EVERY jukebox build — a nested 93 s IDF build plus ~800 managed-component objects that
-          # the SCons cache does not cover (measured 2026-09-08). Cached alongside the package tree
-          # it was generated for, under the same platformio.ini-keyed entry, it is always consistent
-          # with it; a config change busts both together. Harmless for the S3 envs (no such file).
+          # Third and fourth paths: the generated sdkconfig files for the P4 envs. Gitignored on
+          # purpose (the config of record is platformio.ini), but pioarduino decides whether to run
+          # "*** Reinstall Arduino framework ***" by reading the FIRST LINE of the project's
+          # `sdkconfig.defaults` — a `# TASMOTA__<md5 of custom_sdkconfig+mcu+board>` marker — and
+          # comparing it with the marker inside the framework package (`matching_custom_sdkconfig()`
+          # in pioarduino's builder/frameworks/arduino.py). With no file on a fresh runner it
+          # reinstalled both framework packages (74 s of copying) and re-ran the IDF lib build (82 s)
+          # on EVERY jukebox job — measured 2026-09-08 at 155 s of a 217 s warm build. Caching only
+          # `sdkconfig.<env>` did NOT stop it: that is not the file it reads. Both files sit next to
+          # the package tree they were generated for, under the same key, so they stay consistent
+          # with it; a config change busts everything together. Harmless for the S3 envs (no files).
           path: |
             ${{ steps.pio.outputs.core_dir }}
             ~/.platformio-build-cache
+            sdkconfig.defaults
             sdkconfig.${{ matrix.env }}
-          # tools/git_version.py is in the key on purpose: actions/cache SAVES ONLY WHEN THE KEY IS
-          # NEW, so an entry full of objects keyed on the old -DFW_VERSION command lines would have
-          # been restored forever and the header-keyed ones never stored. Hashing the script busts it
-          # now and whenever the version mechanism changes again. Consequence to know: between key
-          # changes the entry is a snapshot from its first save — changed sources miss and recompile
-          # (they would anyway); libraries keep hitting until platformio.ini or this script moves.
-          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini', 'tools/git_version.py') }}
+          # tools/git_version.py and THIS FILE are in the key on purpose: actions/cache SAVES ONLY
+          # WHEN THE KEY IS NEW, so an entry full of objects keyed on the old -DFW_VERSION command
+          # lines would have been restored forever and the header-keyed ones never stored — and a
+          # change to WHAT is cached (a new path above) would likewise never be saved under an old
+          # key. Consequence to know: between key changes the entry is a snapshot from its first
+          # save — changed sources miss and recompile (they would anyway); libraries keep hitting
+          # until platformio.ini, the version script or this workflow moves.
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini', 'tools/git_version.py', '.github/workflows/firmware.yml') }}
           restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
       # PIN PlatformIO CORE. Core resolves `tool-scons` itself, so an unpinned `pip install
