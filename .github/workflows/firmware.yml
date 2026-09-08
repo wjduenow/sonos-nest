@@ -160,7 +160,13 @@ jobs:
             ${{ steps.pio.outputs.core_dir }}
             ~/.platformio-build-cache
             sdkconfig.${{ matrix.env }}
-          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          # tools/git_version.py is in the key on purpose: actions/cache SAVES ONLY WHEN THE KEY IS
+          # NEW, so an entry full of objects keyed on the old -DFW_VERSION command lines would have
+          # been restored forever and the header-keyed ones never stored. Hashing the script busts it
+          # now and whenever the version mechanism changes again. Consequence to know: between key
+          # changes the entry is a snapshot from its first save — changed sources miss and recompile
+          # (they would anyway); libraries keep hitting until platformio.ini or this script moves.
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini', 'tools/git_version.py') }}
           restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
       # PIN PlatformIO CORE. Core resolves `tool-scons` itself, so an unpinned `pip install
