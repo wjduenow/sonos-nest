@@ -253,8 +253,13 @@ bool albumArtFetch(const String &url) {
   // ~158 KB, chunked, at LAN speed — the largest inbound burst this device ever takes over the
   // SDIO link, and the link deaths (esp-hosted-mcu #184, inbound flow control) cluster at play
   // time. Correlate a `netlink` diary against the fetch just before it.
-  LOG.printf("[art] %u B in %lu ms via %s%s\n", (unsigned)got, (unsigned long)(millis() - t0),
-             src, n < 0 ? " (incomplete)" : "");
+  // The URL's `u=` tail rides along on a /getaa fetch: a 129 KB cover arrived through the proxy on
+  // the jukebox twice in ten minutes with NO track change and no Spotify id in its URL (so no CDN
+  // rewrite), and nothing in the log said what it was for. The tail names the item.
+  const int uAt = (src[0] == 'g') ? u.indexOf("u=") : -1;
+  LOG.printf("[art] %u B in %lu ms via %s%s%s%.90s\n", (unsigned)got, (unsigned long)(millis() - t0),
+             src, n < 0 ? " (incomplete)" : "", uAt >= 0 ? " " : "",
+             uAt >= 0 ? u.c_str() + uAt : "");
   s_lastBytes = got; s_lastMs = millis() - t0; s_lastSrc = src; s_lastAtMs = millis();
   // Refuse an oversize cover loudly — no art beats wrong art, and the message says what to raise.
   if (sink.full) {
