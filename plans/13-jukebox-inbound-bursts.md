@@ -253,4 +253,8 @@ Left for another day: the Radio-page artist radio that never plays (Search's doe
 **Consequence for this plan:** everything above on our side is mitigation of a driver bug that is
 already fixed upstream. The real fix is esp_hosted ≥ 2.12.12 on host AND slave, which for this
 build means waiting for (or building) a pioarduino/Arduino core that bundles it. Until then: GENA
-off, tiles off, detector at 7 s.
+off, tiles off, detector at 7 s. **Tracked as
+[issue #26](https://github.com/wjduenow/sonos-nest/issues/26)** (upgrade checklist inside), with a
+weekly cloud routine (Mondays 09:00 PT) that watches pioarduino releases newer than 55.03.311,
+reads the bundled esp_hosted version, and comments on #26 when there is news. The access point is
+a fairly new unit, so #184's AP explanation does not apply here.
