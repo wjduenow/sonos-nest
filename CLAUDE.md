@@ -159,10 +159,16 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > them) and fetches are paced 120 ms. **Read `lastReboot` before assuming a blank screen was a
   > crash.** That was not enough: two more netlink deaths followed. **Two rules now stand.** The art
   > fetcher checks `Content-Type` BEFORE reading a body — Spotify's user-uploaded covers negotiate
-  > **WebP** to a bare client and a 24 KB one was downloaded in full just to be refused — and it
-  > **never fetches while `smapi::busy()`**: a 15-29 KB browse plus tile TLS sessions plus the
-  > Sonos poll on the SDIO bridge at once is the death profile. Nothing is late; rows are not on
-  > screen until the browse lands. "Play all" on a playlist is PROVEN on hardware (the speaker
+  > **WebP** to a bare client and a 24 KB one was downloaded in full just to be refused — and
+  > **ONE INBOUND TRANSFER AT A TIME, `core/net/inbound_gate.h`** (issue #24): a 15-29 KB browse
+  > plus tile TLS sessions plus the Sonos poll on the SDIO bridge at once is the death profile, so
+  > SMAPI (browse/search/crawl), station tiles and Now Playing art all take one gate. It replaced
+  > `smapi::busy()`, which only let tiles wait for a browse. Nothing is late; rows are not on
+  > screen until the browse lands. `health.inbound` in `/api/config` counts waits and timeouts —
+  > timeouts must stay 0. The gate is NOT recursive: Now Playing resolves its Spotify CDN URL over
+  > SMAPI *before* taking it. Now Playing art itself is fetched from the CDN at 300 px (~18 KB)
+  > instead of the speaker's `/getaa` (158 KB) when a Spotify token is held — `via cdn` in the
+  > `[art]` log line. "Play all" on a playlist is PROVEN on hardware (the speaker
   > expands `x-rincon-cpcontainer:1006206c` into its queue), and so is **artist radio**
   > (`x-sonosapi-radio:spotify%3aartistRadio%3a…?sid=12&flags=8300&sn=…`, "ABBA Radio" from
   > Search, 2026-09-07). Every Spotify playback form the UI offers has now played.
@@ -758,9 +764,10 @@ Consequences worth knowing:
   an idle device polls Sonos fine, so a "does the network work?" control test that isn't playing
   anything proves nothing. Always test the *streaming* path.
 - **A corrupt incremental build looks like "every model silently scores 0.00"** — not a compile
-  error. This machine has a known hardware fault (BIOS update pending; random SIGKILL/ICE under
-  load). If detection dies after a change that couldn't affect it, **`pio run -t clean` before
-  debugging the code** — a clean rebuild of identical source restored it. Build with `-j 2`.
+  error. It happened once while the dev machine had a BIOS fault that crashed it under load (fixed
+  2026-09-08; full-parallel builds are fine again). The lesson outlives the fault: if detection dies
+  after a change that couldn't affect it, **`pio run -t clean` before debugging the code** — a clean
+  rebuild of identical source restored it.
 - **Wake-word testing: the mic needs LOUD, close speech (pcmRms >~10000) to fire.** At pcmRms ~4000
   *nothing* fires — with any kernel set. Several hours were lost concluding "esp-nn miscomputes"
   from tests that were really just too quiet. Always check `pcmRms` in the heartbeat before

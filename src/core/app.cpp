@@ -360,22 +360,39 @@ volatile uint32_t g_linkZones  = 0;
 // both inside 20 s, then the probe. Silent when no coordinator is known yet: there is nothing to
 // probe, and the slow path still covers boot.
 static uint32_t s_deadSinceMs = 0;   // first RSSI-0 sighting of the current episode (0 = none)
+// ⚠️ DETECTION MUST NOT DEPEND ON A SECOND netTask PASS. The first design paired two RSSI-0
+// sightings from consecutive passes, and a pass over a DEAD link is ~50 s: every stage blocks on
+// its own timeout, and on this board every WiFi.status()/RSSI() is an RPC to the C6 that times out
+// at 5 s when the link is gone. Measured 2026-09-07: `dead=110s` with a 20 s pairing window (the
+// second sighting was discarded as stale every pass), then `dead=57s gapmax=36s@gena` with the
+// window widened — one full pass, exactly as predicted. The user watches a frozen Now Playing for
+// all of it.
+//
+// So: on the FIRST 0 reading, probe the coordinator over TCP right away (2 s), and if that fails
+// confirm with one more RSSI read (another RPC, ~5 s when dead). A roam or a scan that still
+// connects never costs a reboot; a transient 0 with a working TCP path clears on the probe; and a
+// real death is caught in under 10 s no matter how long the surrounding stages block. Silent when
+// no coordinator is known yet — nothing to probe, and the slow path still covers boot.
 static bool deadLinkFast() {
-  static uint32_t s_firstMs = 0;
-  static int      s_seen = 0;
-  if (WiFi.status() != WL_CONNECTED || g_linkRssi != 0) { s_seen = 0; s_deadSinceMs = 0; return false; }
+  // The snapshot publishLinkStats() just took, not a fresh WiFi.status(): one read of link state per
+  // pass, so both fields describe the same instant and nothing here re-enters the radio stack.
+  if (g_linkStatus != WL_CONNECTED || g_linkRssi != 0) { s_deadSinceMs = 0; return false; }
   const uint32_t now = millis();
-  if (s_seen && now - s_firstMs > 20000) s_seen = 0;       // an old sighting is not this fault
-  if (s_seen == 0) { s_firstMs = now; s_seen = 1; if (!s_deadSinceMs) s_deadSinceMs = now; return false; }
-  if (now - s_firstMs < 3000) return false;                // let publishLinkStats() sample again
-  if (s_zoneIp.length() == 0) return false;
+  if (!s_deadSinceMs) s_deadSinceMs = now;
+  // Probe the COORDINATOR — the transport target, and what a dead link actually costs the user.
+  // s_coordIp falls back to s_zoneIp when the room is its own coordinator (selectZoneByIp), so this
+  // never probes nothing. Probing the selected speaker instead would reboot a healthy panel when
+  // that one speaker is off while its group coordinator keeps playing.
+  const String &target = s_coordIp.length() ? s_coordIp : s_zoneIp;
+  if (target.length() == 0) return false;
   WiFiClient probe;
   IPAddress ip;
-  if (!ip.fromString(s_zoneIp)) return false;
-  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_seen = 0; s_deadSinceMs = 0; return false; }   // alive after all
-  LOG.printf("[net] RSSI 0 while 'connected' for %lus and %s does not answer TCP — the radio link is dead\n",
-             (unsigned long)((now - s_firstMs) / 1000), s_zoneIp.c_str());
-  s_seen = 0;
+  if (!ip.fromString(target)) return false;
+  if (probe.connect(ip, 1400, 2000)) { probe.stop(); s_deadSinceMs = 0; return false; }   // alive after all
+  const int again = (int)WiFi.RSSI();
+  if (again != 0) { g_linkRssi = again; s_deadSinceMs = 0; return false; }                // it came back
+  LOG.printf("[net] RSSI 0 twice and coordinator %s does not answer TCP (%lus into the episode) — the radio link is dead\n",
+             target.c_str(), (unsigned long)((millis() - s_deadSinceMs) / 1000));
   return true;
 }
 
@@ -418,10 +435,18 @@ uint32_t appNetGapMaxMs(const char **stage) {
 // What netLinkRecover() records for the far side of the reboot. Written while the link is dead,
 // so nothing on the wire can carry it — the NVS note is the whole diary.
 static String linkDeadNote(const char *path) {
-  return String("netlink:") + path +
+  String n = String("netlink:") + path +
          " dead=" + String(s_deadSinceMs ? (millis() - s_deadSinceMs) / 1000 : 0) + "s" +
          " gapmax=" + String(s_netGapMaxMs / 1000) + "s@" + (const char *)s_netGapMaxStage +
          " now=" + (const char *)s_netStage;
+#ifndef HEADLESS
+  // Was a cover just fetched? Deaths cluster at play time (issue #24); this is how the correlation
+  // survives the reboot. `dead=` is when the RSSI first read 0, so "N s ago" is measured from the
+  // reboot and the fetch preceded the death by (N - dead) seconds.
+  const String art = albumArtLastNote();
+  if (art.length()) n += " art=" + art;
+#endif
+  return n;
 }
 
 const char *appNetStage() { return (const char *)s_netStage; }

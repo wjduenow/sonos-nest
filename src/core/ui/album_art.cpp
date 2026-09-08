@@ -7,10 +7,13 @@
 #ifdef ALBUM_ART_TLS
 #include <WiFiClientSecure.h>
 #include "core/amazon.h"          // artThumbUrl — ask the CDN to resize instead of pulling ~208 KB
+#include "core/spotify.h"         // trackArtUrl — a 300 px CDN cover instead of /getaa's 158 KB
+#include "core/smapi.h"           // cstr — never %s a String that came off the network
 #endif
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water (heap_watch.h)
 #include "core/net/http_body.h"   // the yielding body reader — writeToStream() rebooted the jukebox
+#include "core/net/inbound_gate.h"   // one inbound transfer at a time (issue #24)
 
 // Decoded art is capped to ART_MAX px on the long edge (power-of-2 downscale via TJpgDec).
 // Per-unit, because it is a function of panel size: 180 suits the nest's 480x480 and the
@@ -104,6 +107,16 @@ void albumArtDiag(AlbumArtDiag &out) {
   out.decodeFails = s_nDecodeFail; out.progressives = s_nProgressive;
 }
 
+// Last fetch, for the diary (albumArtLastNote). Scalars + a pointer to a string literal: written by
+// artTask, read by netTask on its way to a reboot, no lock needed.
+static volatile uint32_t    s_lastBytes = 0, s_lastMs = 0, s_lastAtMs = 0;
+static volatile const char *s_lastSrc   = "";
+String albumArtLastNote() {
+  if (!s_lastAtMs) return "";
+  return String((unsigned)s_lastBytes) + "B/" + String((unsigned)s_lastMs) + "ms " +
+         (const char *)s_lastSrc + " " + String((millis() - s_lastAtMs) / 1000) + "s ago";
+}
+
 // Second chance for anything TJpgDec would not take — in practice a progressive JPEG, which is
 // about half of what Amazon Prime Stations serve (issue #16). Decodes into the same back buffer
 // and reports the size it landed on, so the caller publishes it exactly as it does a TJpg decode.
@@ -115,6 +128,25 @@ static bool decodeFallback(size_t got) {
   return true;
 }
 
+#ifdef ALBUM_ART_TLS
+// True when the URL's host is media-amazon.com / ssl-images-amazon.com or a subdomain of either.
+// A plain substring test would also match "media-amazon.com.example.net"; the art URLs come from
+// the speaker and the CDN, but a host check costs nothing and says what it means.
+static bool hostIsAmazon(const String &url) {
+  const int a = url.indexOf("://");
+  if (a < 0) return false;
+  const int e = url.indexOf('/', a + 3);
+  String host = (e < 0) ? url.substring(a + 3) : url.substring(a + 3, e);
+  const int at = host.indexOf('@');    if (at >= 0)    host = host.substring(at + 1);   // userinfo
+  const int colon = host.indexOf(':'); if (colon >= 0) host = host.substring(0, colon); // port
+  host.toLowerCase();
+  static const char *kHosts[] = {"media-amazon.com", "ssl-images-amazon.com"};
+  for (const char *h : kHosts)
+    if (host == h || host.endsWith(String(".") + h)) return true;
+  return false;
+}
+#endif
+
 bool albumArtFetch(const String &url) {
   ++s_nFetch;
   if (!s_jpeg) { ++s_nFail; return false; }
@@ -124,8 +156,24 @@ bool albumArtFetch(const String &url) {
   // TLS, which only some units can afford (see ALBUM_ART_TLS below).
   String u = url;
   bool tls = false;
+  const char *src = "getaa";        // for the size log below: which path the bytes came down
 
 #ifdef ALBUM_ART_TLS
+  // A Spotify cover through the speaker's /getaa proxy is the 640 px original — 158 KB, chunked,
+  // at LAN speed — and getaa has no rendition knob (s=, &v=, &size= are byte-identical). That is
+  // the largest inbound burst the jukebox ever takes over its ESP-Hosted link, and its link
+  // deaths cluster at exactly this moment (issue #24, plans/13). So when this build can speak TLS
+  // and the device holds a Spotify token, ask SMAPI for the CDN URL and take the 300 px rendition
+  // (~18 KB) instead. Anything short of a usable https answer falls through to /getaa unchanged:
+  // no art is worse than a big fetch, and the diary will say which path each death followed.
+  if (u.indexOf("/getaa?") >= 0) {
+    const String id = spotify::trackIdFromSonosUri(u);
+    if (id.length()) {
+      const String cdn = spotify::trackArtUrl(id, ART_MAX);
+      if (cdn.startsWith("https://")) { u = cdn; src = "cdn"; }
+      else LOG.printf("[art] spotify %s: no CDN cover, using getaa\n", smapi::cstr(id));
+    }
+  }
   if (u.startsWith("https://")) {
     // Ask the CDN to resize rather than pulling the original. An Amazon cover is ~208 KB at full
     // size and ~24 KB at 320 px — 8x less to move across a link that stalls for seconds, and it
@@ -135,7 +183,11 @@ bool albumArtFetch(const String &url) {
     // The resized image comes back PROGRESSIVE (measured: baseline at <=200 px, SOF2 at >=224),
     // which is fine only because the libjpeg fallback exists now. Before that this would have
     // fetched perfectly and then failed to decode.
-    u = amazon::artThumbUrl(u, ART_MAX);
+    //
+    // Amazon HOSTS only — matched on the host, not by substring anywhere in the URL. i.scdn.co URLs
+    // have no extension so artThumbUrl() happened to leave them alone, but "happened to" is not a
+    // contract; the rewrite is Amazon's and is named as such.
+    if (hostIsAmazon(u)) u = amazon::artThumbUrl(u, ART_MAX);
     tls = true;
   }
 #endif
@@ -150,6 +202,17 @@ bool albumArtFetch(const String &url) {
     ++s_nFail;
     return false;
   }
+
+  // ONE INBOUND TRANSFER AT A TIME (inbound_gate.h) — taken here, AFTER the SMAPI resolve above,
+  // because the gate is not recursive and that resolve takes it itself. A cover is the single
+  // largest transfer this panel makes, so it must never land on top of a browse or a tile. 45 s,
+  // longer than the longest legitimate hold (a tile's 12 s GET + 12 s body deadline, ~26 s): the
+  // first cut waited 10 s and then proceeded UNGATED behind a slow tile — exactly the overlap the
+  // gate exists to prevent. A timed-out wait FAILS the fetch (the gate's rule for a caller that can
+  // retry — inbound_gate.h); artTask retries. Released explicitly after the body is read, so the
+  // decode does not keep the next reader waiting.
+  inbound::Guard gate("art", 45000);
+  if (!gate.held) { LOG.println("[art] inbound gate not free — retrying later"); ++s_nFail; return false; }
 
   // BOTH CLIENTS ARE DECLARED BEFORE THE HTTPClient, and that ordering is load-bearing: locals
   // destruct in reverse, and ~HTTPClient calls _client->stop(). Getting this backwards in
@@ -186,9 +249,24 @@ bool albumArtFetch(const String &url) {
   // failed the fetch. artFail ran 42-50% of artFetch on 2026-08-31. 4 s keeps a full second of
   // watchdog margin while tolerating the stalls this network actually produces.
   http.setTimeout(4000);
-  httpbody::prepare(http);          // keep Transfer-Encoding: the body reader needs it
+  // Keep Transfer-Encoding (the body reader needs it) and Content-Type: the decoders here are
+  // JPEG-only, and the tile fetcher learned the hard way that Spotify's user-uploaded covers
+  // negotiate WebP to a bare client — a whole body downloaded just to be refused. Refuse it at the
+  // header instead. collectHeaders() replaces the list, so ask through the reader.
+  static const char *kHdrs[] = {"Content-Type"};
+  httpbody::prepare(http, kHdrs, 1);
   int code = http.GET();
   if (code != 200) { LOG.printf("[art] HTTP %d\n", code); http.end(); ++s_nFail; return false; }
+  // An ABSENT Content-Type is refused too, not waved through: the speaker's /getaa always sends
+  // `image/jpeg` (checked 2026-09-08) and so do the CDNs, so a 200 with no type is not a cover — and
+  // reading it "to see" would be exactly the unvalidated inbound burst this check exists to avoid.
+  String ct = http.header("Content-Type");
+  ct.toLowerCase();               // the media-type token is case-insensitive ("Image/JPEG" is valid)
+  if (ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
+    LOG.printf("[art] %s: %.40s — not JPEG, not fetched\n", src,
+               ct.length() ? (ct.c_str() ? ct.c_str() : "?") : "(no Content-Type)");
+    http.end(); ++s_nFail; return false;
+  }
   // NOT http.writeToStream(): that de-chunks, but with a busy-wait per chunk header and delay(0)
   // between chunks, which starved IDLE0 across a dribbling /getaa response and rebooted the
   // jukebox (task watchdog, coredump 2026-09-07). httpbody::read de-chunks too, and sleeps.
@@ -198,12 +276,19 @@ bool albumArtFetch(const String &url) {
   const size_t got = sink.len;
   heapwatch::note("art.fetch");
   http.end();
+  gate.release();                   // bytes are in; the decode below is local work
   // Logged because the size IS the finding: a Spotify cover through the speaker's /getaa is
   // ~158 KB, chunked, at LAN speed — the largest inbound burst this device ever takes over the
   // SDIO link, and the link deaths (esp-hosted-mcu #184, inbound flow control) cluster at play
   // time. Correlate a `netlink` diary against the fetch just before it.
-  LOG.printf("[art] %u B in %lu ms%s\n", (unsigned)got, (unsigned long)(millis() - t0),
-             n < 0 ? " (incomplete)" : "");
+  // The URL's `u=` tail rides along on a /getaa fetch: a 129 KB cover arrived through the proxy on
+  // the jukebox twice in ten minutes with NO track change and no Spotify id in its URL (so no CDN
+  // rewrite), and nothing in the log said what it was for. The tail names the item.
+  const int uAt = (src[0] == 'g') ? u.indexOf("u=") : -1;
+  LOG.printf("[art] %u B in %lu ms via %s%s%s%.90s\n", (unsigned)got, (unsigned long)(millis() - t0),
+             src, n < 0 ? " (incomplete)" : "", uAt >= 0 ? " " : "",
+             uAt >= 0 ? u.c_str() + uAt : "");
+  s_lastBytes = got; s_lastMs = millis() - t0; s_lastSrc = src; s_lastAtMs = millis();
   // Refuse an oversize cover loudly — no art beats wrong art, and the message says what to raise.
   if (sink.full) {
     LOG.printf("[art] TRUNCATED: cover exceeds JPEG_MAX=%u. Raise JPEG_MAX.\n", (unsigned)JPEG_MAX);

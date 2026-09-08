@@ -294,7 +294,10 @@ bool genaVerb(const char *verb, const String &ip, const char *path, const String
               String *sidOut, uint32_t *timeoutOut) {
   WiFiClient c;
   c.setTimeout(kSockTimeoutMs / 1000);
-  if (!c.connect(ip.c_str(), 1400)) return false;
+  // Bounded connect. Over a DEAD link (the jukebox's ESP-Hosted fault) an unbounded connect sits
+  // in lwIP's SYN retries for ~20 s; this ran netTask's GENA stage to 24 s and was the single
+  // longest reason the dead-link detector took 110 s instead of 7 (app.cpp, deadLinkFast).
+  if (!c.connect(ip.c_str(), 1400, (int32_t)kSockTimeoutMs)) return false;
 
   String req = String(verb) + " " + path + " HTTP/1.1\r\nHOST: " + ip + ":1400\r\n" +
                extraHeaders + "Connection: close\r\n\r\n";

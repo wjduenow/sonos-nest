@@ -16,7 +16,8 @@
 #include "album_art.h"   // jpegLock/jpegUnlock — TJpgDec is a shared singleton
 #include "jpeg_decode.h" // progressive-JPEG fallback for tiles TJpgDec refuses
 #include "core/amazon.h"
-#include "core/smapi.h"      // smapi::busy — never fetch tiles under a browse
+#include "core/smapi.h"      // smapi::cstr — never %s a String that came off the network
+#include "core/net/inbound_gate.h"   // one inbound transfer at a time — tiles wait their turn
 #include "core/board.h"
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 #include "core/heap_watch.h"   // heapwatch::note — attribute the heap low-water
@@ -205,6 +206,14 @@ static size_t obtain(const Req &r) {
   }
   if (!r.url[0]) return 0;
 
+  // One inbound transfer at a time (inbound_gate.h). Tiles are background work with nothing
+  // waiting on them, so they wait as long as it takes — a minute is far past any holder's own
+  // timeout, and a give-up here would be a burst, which is the one thing a tile must never cause.
+  inbound::Guard gate("tile", 60000);
+  // Timed out: skip, never proceed ungated (inbound_gate.h — a caller that can retry must not).
+  // The row asks again on the next UI pass if it is still on screen; nothing is lost.
+  if (!gate.held) return 0;
+
   // HTTPS is mandatory — Amazon 403s plain HTTP on both image hosts. One client, reused across
   // requests, because a fresh TLS handshake per tile would dominate the cost of a browse.
   static WiFiClientSecure *cli = nullptr;
@@ -222,7 +231,8 @@ static size_t obtain(const Req &r) {
   httpbody::prepare(http, kHdrs, 1);   // collectHeaders() replaces the list, so ask through the reader
   const int code = http.GET();
   if (code != 200) { http.end(); return 0; }
-  const String ct = http.header("Content-Type");
+  String ct = http.header("Content-Type");
+  ct.toLowerCase();               // the media-type token is case-insensitive ("Image/JPEG" is valid)
   if (ct.length() && ct.indexOf("image/jpeg") < 0 && ct.indexOf("image/jpg") < 0) {
     LOG.printf("[artc  ] %s: %s — not JPEG, not fetched, not retrying\n", r.key, smapi::cstr(ct));
     http.end();
@@ -293,11 +303,9 @@ static void worker(void *) {
     // here does — it stops us provoking it.
     vTaskDelay(pdMS_TO_TICKS(120));
 
-    // NEVER under a browse. A Spotify listing is a 15-29 KB TLS transfer; starting tile fetches
-    // while it is still arriving puts two TLS sessions and the Sonos poll on the SDIO bridge at
-    // once, and that is the load profile that has killed the ESP-Hosted link three times in one
-    // evening. The tiles are not late — the rows are not on screen until the browse lands anyway.
-    while (smapi::busy()) vTaskDelay(pdMS_TO_TICKS(50));
+    // NEVER alongside anything else inbound — obtain() takes the inbound gate for the network
+    // part, so a tile waits for a browse, the crawl or the Now Playing cover, and they wait for it.
+    // The tiles are not late: the rows are not on screen until the browse lands anyway.
 
     const size_t n = obtain(r);
     if (!n) continue;
@@ -398,6 +406,13 @@ bool init(int tilePx, int slots) {
 uint32_t generation() { return s_gen; }
 
 const lv_image_dsc_t *get(const String &stationKey, const String &artUrl) {
+#ifdef EXPERIMENT_NO_TILES
+  // BISECTION BUILD (issue #24): no tile artwork at all, so no CDN TLS traffic from lists. If the
+  // ESP-Hosted link stops dying under the browse-then-play reproduction, tiles are the trigger and
+  // viewport-only fetching (plans/13 candidate 3) is the fix; if it still dies, they never were.
+  (void)stationKey; (void)artUrl;
+  return nullptr;
+#endif
   if (!s_slots || stationKey.isEmpty()) return nullptr;
   const lv_image_dsc_t *hit = nullptr;
   bool bad = false;

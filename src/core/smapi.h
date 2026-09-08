@@ -71,11 +71,9 @@ String loginCreds(const String &token, const String &key, const String &househol
 // built. Any %s of a String that came from the network goes through this.
 inline const char *cstr(const String &s) { return s.c_str() ? s.c_str() : "(null)"; }
 
-// True while ANY Client has a request in flight. The art fetcher waits on this so tile downloads
-// never run concurrently with a browse: two TLS sessions plus the Sonos poll over the jukebox's
-// SDIO bridge is the sustained-load profile that kills its ESP-Hosted link (plans/07), and three
-// link deaths in one evening each landed inside a Spotify browse-plus-artwork burst.
-bool busy();
+// There used to be a busy() here that let the tile fetcher wait for a browse. It covered one
+// direction of one pair; every Client::post() now takes core/net/inbound_gate.h instead, which
+// serialises browse, tiles, the crawl and Now Playing art through one slot in every direction.
 
 // --- one service endpoint ------------------------------------------------------------------------
 
