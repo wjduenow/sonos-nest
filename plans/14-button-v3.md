@@ -248,6 +248,22 @@ accelerometer jerk peaks.
 
 ---
 
+## 3b. ⚠️ Handling — one board already lost
+
+The LCD is bonded across the entire PCB face, so **soldering the harness cracked one panel**
+(2026-09-09: passed the bring-up in the morning, cracked by the afternoon). There is no
+unsupported FR4 on a 36 x 20 mm board with glass over all of it — bending it while soldering the
+castellated pads goes into the glass. Support it face-down, flat and soft; hold the wire, not the
+board.
+
+**A cracked panel is a whole-board replacement**, because the two are bonded.
+
+> ⚠️ **Firmware cannot detect this.** `displayInit()` only verifies its objects allocated —
+> Arduino_GFX 1.3.1's `begin()` returns void, so there is no return code to check and no register
+> read-back in that driver. A cracked panel reports a clean boot with no error and simply shows
+> nothing, which is indistinguishable from the app's normal 20 s screen-off behaviour. The
+> bring-up's PERSISTENT test pattern is the only reliable way to tell the two apart.
+
 ## 4. Open
 
 - ~~The harness: switch on GP2, ring on GP4~~ — **SOLDERED AND PROVEN 2026-09-09.** Pad 1 is live

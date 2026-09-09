@@ -163,6 +163,18 @@
 // No u.FL connector, no pigtail, no antenna pocket in the case — a real simplification over
 // hardware/button-v2/, whose lid is structural partly because of the u.FL routing.
 
+// ⚠️⚠️ THE GLASS IS BONDED ACROSS THE WHOLE BOARD, AND SOLDERING THE HEADER CRACKED ONE.
+// 2026-09-09: a board whose panel passed the bring-up in the morning came back cracked after the
+// four harness wires went on. On a 36 x 20 mm PCB with an LCD bonded over its entire face there is
+// no unsupported FR4 to flex — any bending while soldering the castellated pads goes straight into
+// the glass. And because the two are bonded, a cracked panel is a whole-board replacement, not a
+// panel swap.
+//
+// Solder it face-down on something soft and flat, hold the wire rather than the board, and do not
+// let it overhang a bench edge. The symptom is nasty precisely because it is invisible to
+// firmware: displayInit() only checks that its objects allocated, since Arduino_GFX 1.3.1's
+// begin() returns void — a cracked panel reports success and simply shows nothing.
+
 // --- Mechanical (for hardware/button-v3/) -------------------------------------------------
 // From Waveshare's dimension drawing, ESP32-S3-LCD-1.47B-details-size.jpg:
 //   PCB outline      36.37 x 20.32 mm

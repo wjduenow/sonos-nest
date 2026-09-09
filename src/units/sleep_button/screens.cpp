@@ -68,6 +68,11 @@ static uint8_t  s_lastVol   = 0;       // last volume we pushed to Sonos; seeded
 static uint32_t s_pulseEnd  = 0;       // ring-pulse deadline (0 = not pulsing)
 static bool     s_wasDown   = false;   // previous knobDown(), for the press-edge pulse
 static uint8_t  s_slot      = 1;       // press slot whose playlist is starting/playing
+// Cumulative press-edge count, for the heartbeat. Deliberately a COUNTER and not a log line: an
+// event only tells you anything if someone is watching at that instant, and coordinating "press
+// now" with a capture window over a chat round-trip does not work — two windows were spent proving
+// that. A running total can be read at any time and answers the question either way.
+static uint32_t s_edges     = 0;
 
 // All ring writes funnel through here so the pulse and the resting level can't fight over the
 // pin: while a pulse is active the tick restores the resting level when it expires.
@@ -314,14 +319,15 @@ void uiTick() {
       if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
       const uint32_t ip = g_linkIp;
       LOG.printf("[health ] up=%lus heap=%luKB min=%luKB wifi=%d rssi=%d ip=%u.%u.%u.%u "
-                 "zones=%u room=%s state=%d\n",
+                 "zones=%u room=%s state=%d btn=%d edges=%lu\n",
                  (unsigned long)(now / 1000),
                  (unsigned long)(ESP.getFreeHeap() / 1024),
                  (unsigned long)(ESP.getMinFreeHeap() / 1024),
                  g_linkStatus, g_linkRssi,
                  (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
                  (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
-                 (unsigned)g_linkZones, room.length() ? room.c_str() : "-", (int)s_st);
+                 (unsigned)g_linkZones, room.length() ? room.c_str() : "-", (int)s_st,
+                 knobDown() ? 1 : 0, (unsigned long)s_edges);
     }
   }
 
@@ -398,7 +404,7 @@ void uiTick() {
   // pulse was added to prevent. knobDown() is still edge-immediate, and pulsing per press also
   // makes a double or triple press countable in the dark.
   const bool down = knobDown();
-  if (down && !s_wasDown) { ringPulse(); screenWake(); }
+  if (down && !s_wasDown) { ++s_edges; ringPulse(); screenWake(); }
   s_wasDown = down;
 
   // Knock-to-wake. Polled every tick whether or not the screen is up, because the board samples
