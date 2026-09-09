@@ -54,7 +54,11 @@ class MEASURE(float):
 # link on the wiki is the 363 MB Arduino installer.
 PCB_W        = 36.37   # X — the long axis, horizontal in this build
 PCB_H        = 20.32   # Z — the short axis, vertical
-PCB_T        = MEASURE("PCB thickness (nominally 1.6, but caliper a bare edge)")
+# ⚠️ NOT MEASURABLE ON THIS BOARD, AND IT DOES NOT MATTER MUCH — read the next block first.
+# The LCD is seated directly on the PCB, so calipers cannot reach bare laminate. 1.6 is the
+# overwhelming standard and the design is made INSENSITIVE to it: see GLASS_AIR below, which is
+# sized to swallow +/-0.3 of error here without the glass ever touching the window rim.
+PCB_T        = 1.6     # ⚠️ ASSUMED, not measured
 PCB_CORNER   = 2.0     # ⚠️ eyeballed off the drawing. Cosmetic: only softens the board pocket.
 
 # Header geometry, for keep-outs around the soldered harness.
@@ -67,16 +71,29 @@ HDR_EDGE_OFF = (PCB_H - HDR_ROW_GAP) / 2.0                     # = 1.27, DERIVED
 HDR_LAST_TO_EDGE = 11.31   # drawing — last pad (TXD) centre to the right board edge
 
 # --- Component stack -------------------------------------------------------------------------
-# The display is on one face and everything else (ESP32-S3 module, USB-C, microSD socket) on the
-# other, so the two directions are measured separately from the PCB's own faces.
-DISP_PROUD   = MEASURE("display glass top surface above the PCB's display-side face")
-COMP_Z_MAX   = MEASURE("tallest part on the component side above that face (likely the USB-C shell)")
+# The display is on one face; everything else (ESP32-S3 module, USB-C, microSD socket) is on the
+# other. Both numbers below are measured from the GLASS TOP, because that is the only datum a
+# caliper can actually reach on an assembled board.
+#
+# The naming matters and cost one round trip. Asking for "display glass above the PCB's
+# display-side face" is unanswerable here — the LCD covers that face. What comes back is glass top
+# to PCB BACK face, i.e. the LCD module AND the PCB together. Two readings were taken (5.75, then
+# 5.5) and read as two different quantities in conflict; they were the same quantity twice.
+DISP_STACK   = 5.5     # MEASURED 2026-09-08 — glass top -> PCB BACK face (LCD module + PCB)
+STACK_TOTAL  = 8.5     # MEASURED 2026-09-08 — glass top -> tallest part on the component side
+
+# Falls straight out, and the fact that it lands on ~3.0 is the cross-check that the two
+# measurements above were read correctly: a standard top-mount USB-C shell stands 3.16 mm proud,
+# and it is the tallest thing on that face. Had DISP_STACK meant "LCD module alone", this would
+# have come out at 1.4 — impossible for that connector, which is what flagged the misreading.
+COMP_Z_MAX   = STACK_TOTAL - DISP_STACK                        # = 3.00
+LCD_MODULE_T = DISP_STACK - PCB_T                              # = 3.90, carries PCB_T's error
 
 # --- The display window ----------------------------------------------------------------------
 # The LIT area, not the glass. ~17.4 x 32.4 mm is what 172 x 320 px at this panel's pitch works
 # out to, but the offsets are what actually matter and cannot be derived at all.
-DISP_ACT_W   = MEASURE("lit area width  (long axis, expect ~32.4)")
-DISP_ACT_H   = MEASURE("lit area height (short axis, expect ~17.4)")
+DISP_ACT_W   = 32.4    # MEASURED 2026-09-08 — matches 172 x 320 px at this panel's pitch exactly,
+DISP_ACT_H   = 17.4    # which is a good sign the right thing was measured (the LIT area, not glass)
 DISP_OFF_X   = MEASURE("PCB left edge -> lit area left edge")
 DISP_OFF_Z   = MEASURE("PCB top edge  -> lit area top edge")
 WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on purpose: a window
@@ -85,7 +102,7 @@ WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on pur
 
 # --- USB-C ------------------------------------------------------------------------------------
 # On a SHORT edge (the 20.32 one), so it exits the LEFT or RIGHT wall of this landscape box.
-USB_PROTRUDE = MEASURE("how far the USB-C shell overhangs the board edge (0 if flush)")
+USB_PROTRUDE = 2.0     # MEASURED 2026-09-08 — shell overhang past the board edge
 USB_WIDTH    = MEASURE("USB-C shell width")
 USB_HEIGHT   = MEASURE("USB-C shell height")
 USB_OFF_Z    = MEASURE("PCB top edge -> USB-C shell centreline")
@@ -140,10 +157,22 @@ PCB_Z_GAP    = 0.4     # ...and in Z
 # comfortably more than the display + PCB + components stack needs. button-v2 has the identical
 # max() and for the identical reason.
 NUT_SOCKET_CLR = 0.5
-BOSS_STANDOFF  = MEASURE("front wall inner face -> PCB front face; = DISP_PROUD + display air gap")
-_STACK_Y       = MEASURE("BOSS_STANDOFF + PCB_T + COMP_Z_MAX + rear clearance")
-IN_Y   = MEASURE("max(BUTTON_NUT_AC + 2*NUT_SOCKET_CLR, _STACK_Y)")   # ~19.5 once measured
-OUT_Y  = MEASURE("IN_Y + FRONT_WALL + LID_T")                          # ~25.0
+# Front wall inner face -> display glass. 1.0, not the 0.3 that would merely clear it, because
+# this gap is ALSO the error budget for PCB_T being assumed rather than measured: the bosses set
+# the PCB's front face, so a PCB 0.3 thicker than assumed pushes the glass 0.3 closer to the wall.
+# At 1.0 that is still 0.7 of air. The window is chamfered so the recess reads as deliberate.
+GLASS_AIR      = 1.0
+STACK_REAR_CLR = 0.5     # tallest component -> the lid
+BOSS_STANDOFF  = GLASS_AIR + LCD_MODULE_T                      # = 4.90 — front wall inner face to
+                                                               # the PCB's display-side face
+_STACK_Y = GLASS_AIR + STACK_TOTAL + STACK_REAR_CLR            # = 9.30, the whole electronics stack
+
+# And this is the number that decides the box. 19.48 vs 9.30: the M12 nut needs MORE THAN TWICE
+# the depth the entire display-plus-PCB-plus-components stack does. Anyone looking at this box
+# will assume the screen made it deep; it did not, the button did. Do not "reclaim" this depth by
+# trimming clearances around the board — it is not the board's.
+IN_Y   = max(BUTTON_NUT_AC + 2 * NUT_SOCKET_CLR, _STACK_Y)     # = 19.48
+OUT_Y  = IN_Y + FRONT_WALL + LID_T                             # = 24.98
 
 # --- Width (X) --------------------------------------------------------------------------------
 IN_X   = PCB_W + 2 * PCB_X_GAP                                 # = 37.17
@@ -162,10 +191,14 @@ SEG = 96      # cylinder smoothness
 
 
 if __name__ == "__main__":
-    print(f"  PCB            {PCB_W} x {PCB_H} mm")
+    print(f"  PCB            {PCB_W} x {PCB_H} mm, {PCB_T} thick (assumed)")
+    print(f"  stack          LCD module {LCD_MODULE_T:.2f} + PCB {PCB_T} + components {COMP_Z_MAX:.2f}"
+          f"  = {STACK_TOTAL} measured")
+    print(f"  boss standoff  {BOSS_STANDOFF:.2f} from the front wall inner face")
     print(f"  header rows    {HDR_ROW_GAP} apart, {HDR_EDGE_OFF:.2f} from each long edge (derived)")
     print(f"  button keepout {BUTTON_KEEPOUT_Z:.2f} deep, {BUTTON_NUT_AC:.2f} across corners")
     print(f"  PCB top edge   z = {PCB_TOP_Z:.2f}")
-    print(f"  OVERALL        {OUT_X:.2f} (X) x ? (Y, needs measurements) x {HEIGHT:.2f} (Z)")
-    print()
-    print("  Y is unresolved until the stack is measured — see README.md §2.")
+    print(f"  electronics    {_STACK_Y:.2f} deep;  M12 nut {BUTTON_NUT_AC + 2 * NUT_SOCKET_CLR:.2f}"
+          f"  -> the NUT sets the depth, by {BUTTON_NUT_AC + 2 * NUT_SOCKET_CLR - _STACK_Y:.2f} mm")
+    print(f"  OVERALL        {OUT_X:.2f} x {OUT_Y:.2f} x {HEIGHT:.2f} mm"
+          f"   ({OUT_X * OUT_Y * HEIGHT / 1000.0:.1f} cm3 bounding)")
