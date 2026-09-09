@@ -338,15 +338,28 @@ HOLE_ZS = (PCB_TOP_Z + HOLE_Z1, PCB_TOP_Z + HOLE_Z2)           # = 19.50, 32.80
 MID_Y0       = BOARD_Y_REAR + STACK_REAR_CLR                   # = 9.30, the plane's front face
 MID_T        = 2.7
 MID_Y1       = MID_Y0 + MID_T                                  # = 12.00
-MID_Z0       = PCB_TOP_Z - 2.0                                 # spans the board's band, and stops
-MID_Z1       = PCB_BOT_Z + 2.0                                 # short of the corner bosses
-
 # ⚠️ 4.0, NOT 4.5 — set by the USB-C receptacle, not by the cavity wall. The lower-right eyelet is
 # 2.16 mm from the edge of the 9 mm connector, so a 4.5 post (radius 2.25) buries 0.09 mm of itself
 # in the connector body. Found by intersecting the body with a modelled receptacle; no dimensional
 # check was looking at that pair, because the post and the connector are on different parts.
 POST_OD      = 4.0
 POST_BORE    = 2.6     # M2 clearance, 0.3 of radial slop
+
+# ⚠️ THE PLANE'S TOP EDGE IS PINNED BY TWO THINGS AT ONCE, FROM OPPOSITE DIRECTIONS.
+#
+# It ran 2 mm above the board's top edge, to z = 14, and that was wrong twice over. The button's
+# solder tail reaches z = 15 on the centreline, so the plane was sitting INSIDE the button — found
+# by intersecting the body with a modelled button, not by any dimension. And the board's header
+# pads sit at z = 17.27, with only 0.5 mm between the board's back face and the plane: the harness
+# had nowhere to leave the pads.
+#
+# So it starts exactly where the upper posts need support and not a millimetre earlier. That clears
+# the button by 2.5 mm and leaves a 1.5 mm band behind the board's top edge for the four harness
+# wires to run along — which is the only route they have.
+MID_Z0       = PCB_TOP_Z + HOLE_Z1 - POST_OD / 2.0             # = 17.50, the upper posts' base
+MID_Z1       = PCB_BOT_Z + 2.0                                 # short of the lower corner bosses
+HARNESS_BAND = MID_Z0 - PCB_TOP_Z                              # = 1.50, behind the board's top edge
+
 POST_LEN     = MID_Y0 - BOARD_Y_PCB_BACK                       # = 3.80, over the components
 
 # ⚠️ SCREW LENGTH IS PINNED FROM BOTH ENDS — derived and asserted, never picked. Short of 1.0 mm

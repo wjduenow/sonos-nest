@@ -4,9 +4,9 @@ The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, wit
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
 > **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `body.stl`, `bezel.stl`, `back.stl` —
-> all watertight, 27 clearance rows passing, all three pairwise interference tests clean, and the
-> USB-C receptacle and plug envelopes both verified reachable.
-> **42.17 x 24.98 x 52.32 mm**, 12.82 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
+> all watertight, 31 clearance rows passing, all three pairwise interference tests clean, and six
+> access envelopes verified — USB receptacle and plug, button body+tail, nut sweep, nut column,
+> and the harness band. **42.17 x 24.98 x 52.32 mm**, 12.47 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
 > and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
@@ -133,8 +133,21 @@ shell/render_preview.py  render_preview.png
 > the socket is a question about the space *between* parts, and no dimension on the body describes
 > it. The first sandwich build passed every numeric row while the lower-right post was buried
 > 0.09 mm in the connector body and the notch was 2 mm too shallow for a plug's overmold.
-> `build_body.py` now intersects the body with modelled **receptacle** and **plug** envelopes and
-> asserts both are empty.
+> `build_body.py` now intersects the body with modelled **receptacle**, **plug**, **button
+> body+tail**, **nut sweep**, **nut column** and **harness band** envelopes, and asserts all six
+> are empty.
+>
+> Running that on the button immediately found a second one of the same shape: the middle plane
+> started 2 mm above the board's top edge, at z = 14, and the button's solder tail reaches z = 15 —
+> so the plane was sitting **inside the button**. Both the bore diameter and the nut's swept circle
+> were checked numerically and both passed, because a dimension on the bore says nothing about what
+> is 12 mm further down the same axis.
+>
+> ⚠️ **The envelope has to be the real part, not the part plus a safety margin.** Modelling the
+> button body as thread+clearance reported the bore's *intended* close fit (12.0 on an 11.71
+> thread) as a collision. Modelling the nut's insertion as a sliding box reported the box's square
+> corners against a round relief the hexagon never reaches. Both were false alarms from a padded
+> envelope, and a false alarm you then "fix" is worse than no check at all.
 >
 > Two things came out of that, and both are the kind of constraint that only shows up once:
 > `POST_OD` is 4.0 rather than 4.5 because the lower-right eyelet is 2.16 mm from the edge of a
@@ -188,6 +201,11 @@ a screw driven from either side would push past its own thread engagement.
    printing, or the carrier will sit on a capacitor instead of the board.
 2. ⚠️ **`PCB_T` is assumed 1.6.** Absorbed by `GLASS_AIR` if it is out by <=0.3; beyond that the
    glass moves toward the window rim.
+3a. ⚠️ **The harness has exactly one route, and it is 1.5 mm.** The four button wires leave the
+   header row at z = 17.27 and must run along the band between the board's top edge and the middle
+   plane. There is 0.4 mm beside the board and 0.5 mm behind it — nowhere else at all. The plane's
+   top edge is therefore pinned to the upper posts' base (z = 17.5) and cannot move up. Asserted,
+   but tight, and untested with real wire.
 3. ⚠️ **`HOLE_X1` comes off a drawing, not a caliper.** The 2.6 pillar bore gives 0.3 of radial
    slop. If the first print will not take all four screws, this is the number to re-measure.
 4. **Whether the ring's 5 V low-side drive works off this board's header** — unproven, and the

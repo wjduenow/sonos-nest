@@ -92,6 +92,17 @@ def check_clearances(verbose=True):
 
     # 1h. The middle plane must stop clear of the corner bosses, or it runs through both of them.
     rec("plane clear of the upper boss", P.MID_Z0 - (P.BOSS_ZS[0] + P.BOSS_OD / 2), 0.0)
+
+    # 1j. ...and clear of the BUTTON'S SOLDER TAIL, which reaches 15.0 on the centreline. The plane
+    #     used to start at 14.0 and sat inside it.
+    rec("plane clear of the button tail",
+        P.MID_Z0 - (P.BUTTON_INSIDE_T + P.BUTTON_TAIL_T), 1.0)
+
+    # 1k. The harness has exactly one route: the band between the board's top edge and the plane.
+    #     The header pads sit 1.27 in from that edge, and there is 0.4 mm beside the board and
+    #     0.5 mm behind it — nowhere else for four wires to go.
+    rec("harness band behind the board's top edge", P.HARNESS_BAND, 1.2)
+    rec("harness band clears the header row", P.MID_Z0 - (P.PCB_TOP_Z + P.HDR_EDGE_OFF), 0.2)
     rec("plane clear of the lower boss", (P.BOSS_ZS[1] - P.BOSS_OD / 2) - P.MID_Z1, 0.0)
 
 
@@ -286,6 +297,34 @@ if __name__ == "__main__":
         v = trimesh.boolean.intersection([m, env], engine=ENG).volume / 1000.0
         assert v < 1e-4, f"the body fouls the USB {name} by {v:.4f} cm3"
         print(f"  usb access    {name:11} clear ({v:.5f} cm3)")
+
+    # ⚠️ THE BUTTON, same treatment. The bore diameter and the nut's swept circle were both checked
+    # numerically and both passed while the button's TAIL was buried in the middle plane — a
+    # dimension on the bore says nothing about what is 12 mm further down the same axis.
+    #
+    # The body envelope is the REAL thread diameter, not body+clearance: the bore is deliberately a
+    # close fit (12.0 on an 11.71 thread), so padding it would report the intended fit as a fault.
+    nut_d = P.BUTTON_NUT_AC + 2 * P.NUT_SOCKET_CLR
+    button_env = {
+        "body+tail": cyl_z(P.BUTTON_BODY_D, -1.0, P.BUTTON_INSIDE_T + P.BUTTON_TAIL_T,
+                           x=P.BUTTON_CX, y=P.BUTTON_Y),
+        "nut sweep": cyl_z(nut_d, P.BUTTON_PANEL_T, P.BUTTON_PANEL_T + P.BUTTON_NUT_T,
+                           x=P.BUTTON_CX, y=P.BUTTON_Y),
+        # The COLUMN the nut travels up. It is brought in flat through the open front (bezel off),
+        # then lifted along the button's axis onto the thread — so what has to be clear is the
+        # cylinder from the thread down to the board, not a corridor in y. Modelling it as a
+        # sliding box reported a false failure: the box's square corners fall outside the round nut
+        # relief, which the hexagon never reaches.
+        "nut column": cyl_z(nut_d, P.BUTTON_PANEL_T, P.PCB_TOP_Z, x=P.BUTTON_CX, y=P.BUTTON_Y),
+        # And the four harness wires, leaving the header row and running along the board's top edge.
+        "harness band": blk(-P.IN_X / 2 + 0.5, P.IN_X / 2 - 0.5,
+                            P.BOARD_Y_REAR, P.MID_Y0,
+                            P.PCB_TOP_Z, P.MID_Z0),
+    }
+    for name, env in button_env.items():
+        v = trimesh.boolean.intersection([m, env], engine=ENG).volume / 1000.0
+        assert v < 1e-4, f"the body fouls the button {name} by {v:.4f} cm3"
+        print(f"  button access {name:13} clear ({v:.5f} cm3)")
 
     m.export("body.stl")
     print(f"  body.stl   watertight={m.is_watertight} winding={m.is_winding_consistent} "
