@@ -1,7 +1,11 @@
-"""button-v3 shell — front wall + window, four side walls, open at the rear.
+"""button-v3 body — four walls, a CLOSED rear, and the posts the board rests on.
+
+The rear is closed and the FRONT is open: the board loads from the front, past the removed bezel.
+That one reversal is what let the posts become body-integral and removed both the carrier plate
+and every screw into the board — see button_params.py section 5.
 
 Every dimension comes from button_params.py; nothing is typed twice. The clearances that matter
-are ASSERTED in check_clearances(), which build_shell() runs BEFORE exporting, so a violating STL
+are ASSERTED in check_clearances(), which build_body() runs BEFORE exporting, so a violating STL
 cannot be written.
 
 Datum (button_params.py has the full note):
@@ -57,13 +61,8 @@ def check_clearances(verbose=True):
     # 1. The carrier post that nearly did not fit. At x = -16.215 a 5.0 mm post would bury itself
     #    in the cavity wall; 4.5 clears by 0.12. Tightest thing in the assembly, and the reason
     #    CARRIER_POST_OD is not a round number.
-    rec("cavity wall clear of carrier post",
-        P.IN_X / 2 - (max(abs(P.HOLE_XS[0]), P.HOLE_XS[1]) + P.CARRIER_POST_OD / 2), 0.05)
-
-    # 1a. ...and the LEFT carrier post has to miss the locating rib, which the offset board made
-    #     necessary. This is now the tightest pair in the assembly.
-    rec("locating rib clear of carrier post",
-        (P.HOLE_XS[0] - P.CARRIER_POST_OD / 2) - P.BOARD_RIB_X, 0.05)
+    rec("cavity wall clear of board post",
+        P.IN_X / 2 - (max(abs(P.HOLE_XS[0]), P.HOLE_XS[1]) + P.POST_OD / 2), 0.05)
 
     # 1d. Growing the box to centre the screen must not leave the board short of floor.
     rec("height covers the board", P.HEIGHT - P.HEIGHT_MIN, 0.0)
@@ -73,19 +72,23 @@ def check_clearances(verbose=True):
     rec("lit area centred in Z", 0.05 - abs((P.PCB_TOP_Z + P.DISP_CZ) - P.HEIGHT / 2), 0.0)
 
     # 1f. Upper lid posts vs the M12 nut's swept circle.
-    rec("upper lid post clear of the nut",
-        (P.LID_POST_X - P.LID_POST_OD / 2) - P.BUTTON_NUT_AC / 2, 0.5)
+    rec("upper bezel boss clear of the nut",
+        (P.BOSS_X - P.BOSS_OD / 2) - P.BUTTON_NUT_AC / 2, 0.5)
 
     # 1b. The carrier itself must clear the M12 nut, which sweeps the full cavity depth at the top
     #     of the box — the reason the plate stops at the board's top edge instead of running to
     #     the cavity roof and giving the spigot a full-perimeter seat.
-    rec("carrier plate below the M12 nut",
+    rec("board top edge below the M12 nut",
         P.PCB_TOP_Z - (P.BUTTON_PANEL_T + P.BUTTON_NUT_T), 1.0)
 
-    # 1c. Screw engagement, from both ends. Short of 1.0 it does not hold; past PCB_T it comes out
-    #     the front of the board into the LCD.
-    rec("board screw engagement, minimum", P.BOARD_SCREW_ENGAGE, 1.0)
-    rec("board screw stops short of the LCD", P.PCB_T - P.BOARD_SCREW_ENGAGE, 0.0)
+    # 1c. The bezel's lip must press only on DEAD glass. If it ever reached the lit area it would
+    #     be clamping the picture, which is both ugly and the one failure a reprint cannot fix.
+    rec("bezel lip on dead glass, right", P.BOARD_X1 - P.WIN_X1, 0.8)
+    rec("bezel lip on dead glass, bottom", (P.PCB_TOP_Z + P.PCB_H) - P.WIN_Z1, 0.8)
+    rec("bezel lip clear of lit area, right",
+        P.WIN_X1 - (P.BOARD_X0 + P.DISP_OFF_X + P.DISP_ACT_W), 0.0)
+    rec("bezel lip clear of lit area, bottom",
+        P.WIN_Z1 - (P.PCB_TOP_Z + P.DISP_OFF_Z + P.DISP_ACT_H), 0.0)
 
     # 2. The window must not cover a single lit pixel. Checked on all four sides independently,
     #    because the clamp to the board outline makes two of them behave differently from the
@@ -111,20 +114,17 @@ def check_clearances(verbose=True):
         P.BUTTON_PCB_CLR)
 
     # 6. Electronics fit the cavity they are not setting.
-    rec("cavity depth for the board stack", (P.OUT_Y - P.LID_T) - P.BOARD_Y_REAR, P.STACK_REAR_CLR)
+    rec("cavity depth for the board stack", P.CAVITY_Y1 - P.BOARD_Y_REAR, P.STACK_REAR_CLR)
     rec("board bottom edge to cavity floor", (P.HEIGHT - P.WALL) - (P.PCB_TOP_Z + P.PCB_H), 0.0)
 
-    # 7. The board must be able to LOAD from the rear. The board stop is the one shell feature that
-    #    reaches into its footprint, so it has to stay above the window and out of the glass.
-    rec("board stop above the window", P.WIN_Z0 - (P.PCB_TOP_Z - P.BOARD_STOP_Z), 0.0)
 
     # 8. USB notch actually covers the connector, with cable slop.
     rec("usb notch over connector, Z", P.USB_SLOT_W - P.USB_WIDTH, 2.0)
     rec("usb notch over connector, Y", P.USB_SLOT_Y1 - P.USB_SLOT_Y0, P.USB_HEIGHT + 2.0)
 
-    # 9. Printability: the front wall left around the window on the two lipped sides.
-    rec("front-wall lip, right",  P.BOARD_X1 - P.WIN_X1, 0.8)
-    rec("front-wall lip, bottom", (P.PCB_TOP_Z + P.PCB_H) - P.WIN_Z1, 0.8)
+    # 9. The bezel bosses must sit clear of the board, in the bands above and below it.
+    rec("upper boss above the board", P.PCB_TOP_Z - (P.BOSS_ZS[0] + P.BOSS_OD / 2), 0.5)
+    rec("lower boss below the board", (P.BOSS_ZS[1] - P.BOSS_OD / 2) - (P.PCB_TOP_Z + P.PCB_H), 0.5)
 
     if verbose:
         print(f"  {'check':<38} {'got':>8} {'need':>8}")
@@ -147,61 +147,53 @@ def full_outer():
 
 def outer_body():
     return trimesh.boolean.intersection(
-        [full_outer(), blk(-P.OUT_X, P.OUT_X, -1.0, P.OUT_Y_SHELL, -1.0, P.HEIGHT + 1.0)],
+        [full_outer(), blk(-P.OUT_X, P.OUT_X, P.BODY_Y0, P.OUT_Y + 1.0, -1.0, P.HEIGHT + 1.0)],
         engine=ENG)
 
 
-def lid_screw_posts():
-    """Two columns the lid screws bite into.
+def board_posts():
+    """The four the board rests on — at the eyelets, which are the one place with guaranteed
+    component keepout on the back of the board.
 
-    Four of them, one near each corner. The lower pair only became possible once the box grew to
-    centre the screen: before that there was 0.4 mm below the board and nowhere to put them.
+    No bore: nothing screws into them. They exist to define a plane. A rigid board on four coplanar
+    posts stays flat under a clamping force anywhere inside their footprint, which is what lets the
+    bezel hold it with an L-shaped lip on only two edges.
+    """
+    return trimesh.boolean.union(
+        [cyl_y(P.POST_OD, P.POST_Y1, P.CAVITY_Y1, x=x, z=z)
+         for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
+
+
+def bezel_bosses():
+    """What the bezel's four screws bite into.
+
+    Tucked into the corners and overlapping each wall by BOSS_MERGE, so every boss is tied to two
+    walls rather than standing alone. That matters more than usual: these four screws are the only
+    thing holding the board down.
 
     ⚠️ The UPPER pair still has to dodge the M12 nut, whose swept circle is 19.48 across on the
     centreline — anything inside |x| = 9.74 up there lands in it.
     """
     return trimesh.boolean.union(
-        [cyl_y(P.LID_POST_OD, P.LID_POST_Y0, P.OUT_Y_SHELL, x=sx * P.LID_POST_X, z=z)
-         for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
+        [cyl_y(P.BOSS_OD, P.BODY_Y0, P.BODY_Y0 + P.BOSS_LEN, x=sx * P.BOSS_X, z=z)
+         for sx in (-1, 1) for z in P.BOSS_ZS], engine=ENG)
 
 
-def lid_pilots():
+def boss_pilots():
     return trimesh.boolean.union(
-        [cyl_y(P.LID_POST_PILOT, P.LID_POST_Y0 - 0.01, P.OUT_Y_SHELL + 1.0,
-               x=sx * P.LID_POST_X, z=z) for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
+        [cyl_y(P.BOSS_PILOT, P.BODY_Y0 - 0.01, P.BODY_Y0 + P.BOSS_LEN + 0.01,
+               x=sx * P.BOSS_X, z=z) for sx in (-1, 1) for z in P.BOSS_ZS], engine=ENG)
 
 
 def cavity():
-    # Open at the rear: extends past the shell's back face so the boolean leaves no skin.
-    return rrect_prism(P.IN_X / 2, (P.OUT_Y_SHELL - P.FRONT_WALL) / 2 + 1.0,
-                       max(P.OUT_R - P.WALL, 0.5), P.WALL, P.HEIGHT - P.WALL,
-                       cy=P.FRONT_WALL + (P.OUT_Y_SHELL - P.FRONT_WALL) / 2 + 1.0)
-
-
-def board_rib():
-    """Locates the board's LEFT edge.
-
-    The board is offset right so the lit area centres on the case, which leaves it hard against
-    the right cavity wall (0.4) and 3.97 clear of the left. The right wall still locates that
-    edge; this rib does the other one.
-    """
-    return blk(P.BOARD_RIB_X - P.BOARD_RIB_W, P.BOARD_RIB_X,
-               P.FRONT_WALL, P.BOARD_Y_PCB_BACK,
-               P.PCB_TOP_Z, P.PCB_BOT_Z)
-
-
-def board_stop():
-    """A rib across the top of the board pocket so the board cannot ride up into the button."""
-    return blk(-P.IN_X / 2, P.IN_X / 2,
-               P.FRONT_WALL, P.BOARD_Y_PCB_BACK,
-               P.PCB_TOP_Z - P.BOARD_STOP_Z, P.PCB_TOP_Z)
+    # Open at the FRONT (extends forward past the body so the boolean leaves no skin), closed at
+    # the rear by BACK_WALL.
+    y0, y1 = P.BODY_Y0 - 1.0, P.CAVITY_Y1
+    return rrect_prism(P.IN_X / 2, (y1 - y0) / 2, max(P.OUT_R - P.WALL, 0.5),
+                       P.WALL, P.HEIGHT - P.WALL, cy=(y0 + y1) / 2)
 
 
 # ---------------------------------------------------------------- cutters
-def window():
-    return blk(P.WIN_X0, P.WIN_X1, -1.0, P.FRONT_WALL + 0.01, P.WIN_Z0, P.WIN_Z1)
-
-
 def button_bore():
     return cyl_z(P.BUTTON_BORE_D, -1.0, P.WALL + 1.0, x=P.BUTTON_CX, y=P.BUTTON_Y)
 
@@ -217,13 +209,13 @@ def usb_notch():
                P.USB_SLOT_ZC - P.USB_SLOT_W / 2, P.USB_SLOT_ZC + P.USB_SLOT_W / 2)
 
 
-def build_shell():
+def build_body():
     check_clearances(verbose=False)
 
     m = outer_body()
     m = trimesh.boolean.difference([m, cavity()], engine=ENG)
-    m = trimesh.boolean.union([m, board_stop(), board_rib(), lid_screw_posts()], engine=ENG)
-    for cutter in (window(), nut_relief(), button_bore(), usb_notch(), lid_pilots()):
+    m = trimesh.boolean.union([m, board_posts(), bezel_bosses()], engine=ENG)
+    for cutter in (nut_relief(), button_bore(), usb_notch(), boss_pilots()):
         m = trimesh.boolean.difference([m, cutter], engine=ENG)
     return m
 
@@ -238,8 +230,8 @@ if __name__ == "__main__":
     print(f"  window                  {P.WIN_X1 - P.WIN_X0:.2f} x {P.WIN_Z1 - P.WIN_Z0:.2f}")
     print(f"  OVERALL                 {P.OUT_X:.2f} x {P.OUT_Y:.2f} x {P.HEIGHT:.2f} mm")
     print()
-    m = build_shell()
-    m.export("shell.stl")
-    print(f"  shell.stl  watertight={m.is_watertight} winding={m.is_winding_consistent} "
+    m = build_body()
+    m.export("body.stl")
+    print(f"  body.stl   watertight={m.is_watertight} winding={m.is_winding_consistent} "
           f"volume={m.volume/1000:.2f}cm3 tris={len(m.faces)}")
     print(f"             bbox={np.round(m.bounds, 2).tolist()}")

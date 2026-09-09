@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np, trimesh
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import button_params as P
-from build_shell import build_shell
-from build_lid import build_lid
-from build_carrier import build_carrier
+from build_body import build_body
+from build_bezel import build_bezel
 
 
 def draw(ax, meshes_colors, elev, azim, title):
@@ -21,15 +20,15 @@ def draw(ax, meshes_colors, elev, azim, title):
     ax.set_box_aspect((1, 1, 1)); ax.set_axis_off(); ax.set_title(title, fontsize=9)
 
 
-shell, carrier, lid = build_shell(), build_carrier(), build_lid()
-S, C, L = ("#4a6fa5", 1.0), ("#4f9d69", 1.0), ("#c0703a", 1.0)
+body, bezel = build_body(), build_bezel()
+B, Z = ("#4a6fa5", 1.0), ("#c0703a", 1.0)
 
 fig = plt.figure(figsize=(11, 9))
 views = [
-    ([(shell, *S)], -20, -35, "shell — three-quarter (window + button bore)"),
-    ([(carrier, *C)], -35, 60, "carrier — 4 posts to the PCB eyelets"),
-    ([(lid, *L)], -35, 60, "lid — spigot bears on the carrier"),
-    ([(shell, S[0], 0.35), (carrier, C[0], 0.9), (lid, L[0], 0.9)], -25, -140, "assembled"),
+    ([(bezel, *Z)], -75, -90, "bezel — front (window + 4 countersinks)"),
+    ([(bezel, *Z)], -35, 60, "bezel — inside (3-sided locating rim)"),
+    ([(body, *B)], -35, 60, "body — 4 board posts + corner bosses"),
+    ([(body, B[0], 0.4), (bezel, Z[0], 0.95)], -25, -140, "assembled"),
 ]
 for i, (mc, elev, azim, title) in enumerate(views, 1):
     draw(fig.add_subplot(2, 2, i, projection="3d"), mc, elev, azim, title)

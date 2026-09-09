@@ -3,10 +3,11 @@
 The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, with a FILN
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
-> **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `shell.stl`, `carrier.stl`,
-> `lid.stl` — all watertight, 25 clearance rows passing, and all three pairwise interference tests
-> clean. **45.74 x 24.98 x 49.80 mm**, 14.44 + 3.30 + 8.52 cm3. Nothing has been printed or
-> test-fitted, and `PCB_T` is still an assumption rather than a measurement (§2).
+> **Status: BUILT, NOT PRINTED — 2026-09-09.** **Two** parts — `body.stl` + `bezel.stl` — both
+> watertight, 24 clearance rows passing, interference clean. **45.74 x 24.98 x 49.80 mm**,
+> 15.60 + 4.97 cm3 — less material than the three-part version it replaced, and no screws enter
+> the board at all. Nothing has been printed or test-fitted, and `PCB_T` is still an assumption
+> rather than a measurement (§2).
 
 ## 1. The idea
 
@@ -44,15 +45,21 @@ Threaded eyelets solved both at once: the front wall now holds nothing, so the w
 every pixel. The cost is that **nothing shell-integral may sit behind the board** — it loads from
 the rear, so anything already there would block it.
 
-That first put the four pillars on the lid, which implied **M2 x 18**: the board's back face is
-15.98 mm in from the outside of the box, and any screw driven from the rear face has to span it,
-thin and aimed blind at a brass thread you cannot see. Neither a thicker lid nor shorter pillars
-help — the distance is set by the window at one end and the box depth at the other.
+**...until the FRONT became removable, which dissolved the whole problem.** Every awkward thing
+above traces back to one constraint: the board loaded from the rear, so nothing shell-integral
+could sit behind it, so the posts had to belong to another part, so the screws had to span
+15.98 mm from the rear face — M2 x 18, or a carrier plate to move the joint somewhere reachable.
 
-Hence the third part. **The board screws to a CARRIER PLATE in the open**, with everything
-visible, using M2 x 8; the pair then drops into the shell as one piece and the lid's spigot bears
-on the carrier's back face to hold the stack forward. One more part and one more tolerance joint,
-in exchange for an assembly that can actually be done.
+Making the bezel a separate part lets the board load from the **front**. The body can then simply
+have posts. And once the board rests on four coplanar posts, a rigid board stays flat under a
+clamping force applied anywhere inside their footprint — so the bezel holds it with an L-shaped lip
+along the chin (3.17 mm) and bottom (2.12 mm) edges, both dead glass, and **no screw ever enters
+the board**. The carrier, the rear lid and four M2 screws all went away at once, and the case got
+lighter doing it.
+
+The window and the locating rim are on the SAME part, which is the other prize: there is no
+tolerance stack between where the board sits and where the hole is. The three-part design had them
+on different parts with two joints in between.
 
 ## 2. Where every number came from
 
@@ -125,10 +132,9 @@ that supported two different readings, and `hardware/cam-button` still carries t
 
 ```
 shell/button_params.py   single source of truth
-shell/build_shell.py     shell.stl + check_clearances()  (23 rows)
-shell/build_carrier.py   carrier.stl + the screw-engagement assertion
-shell/build_lid.py       lid.stl + all three pairwise interference assertions
-shell/build_all.py       runs all three, in order
+shell/build_body.py      body.stl + check_clearances()  (24 rows)
+shell/build_bezel.py     bezel.stl + the body-vs-bezel interference assertion
+shell/build_all.py       runs both, in order
 shell/render_preview.py  render_preview.png
 ```
 
@@ -150,8 +156,10 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
 
 | qty | screw | into |
 |---|---|---|
-| 4 | **M2 x 8** | the board's threaded brass eyelets, through the carrier and its posts |
-| 4 | **M3 x 8** | the shell's lid posts (self-tapping into a 2.5 pilot), one near each corner |
+| 4 | **M3 x 8 countersunk** | the body's corner bosses (self-tapping into a 2.5 pilot) |
+
+That is the whole fastener list. **Nothing screws into the board** — the brass eyelets go unused,
+which also means the assumption about eyelet thread depth no longer matters.
 
 > ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
 > engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
@@ -172,6 +180,9 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
    slop. If the first print will not take all four screws, this is the number to re-measure.
 4. **Whether the ring's 5 V low-side drive works off this board's header** — unproven, and the
    last thing that could still change the BOM (`plans/14` §Open).
+4b. **The bezel presses directly on glass.** Only ever on dead bezel area, never on a pixel, and
+   asserted — but if a printed lip proves too aggressive, a 0.5 mm foam strip along the chin and
+   bottom is the fix. Untested.
 5. ~~Only two lid screws, both at the top~~ — **four now**, one near each corner, once the box
    grew to centre the screen. The upper pair still has to dodge the M12 nut's 19.48 swept circle.
 6. **No USB-C strain relief.** `button-v2` needs pinch ribs because the XIAO has no mounting
