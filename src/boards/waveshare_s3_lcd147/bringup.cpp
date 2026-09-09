@@ -29,6 +29,17 @@
 
 static const uint32_t DEBOUNCE_MS = 30;
 
+// Ring PWM, same channel and rate the app uses (board.cpp). INVERTED: the pin sinks the cathode,
+// so duty 0 is fully lit and 255 is off. Every write goes through ringSet() so the inversion lives
+// in exactly one place here, as it does in the board HAL.
+static const int      RING_CH   = 0;
+static const uint32_t RING_FREQ = 5000;
+static const uint8_t  RING_RES  = 8;
+static inline void ringSet(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  ledcWrite(RING_CH, 255 - ((uint32_t)pct * 255 / 100));
+}
+
 static Arduino_DataBus *bus = nullptr;
 static Arduino_GFX     *gfx = nullptr;
 
@@ -156,19 +167,24 @@ void waveshareBringupRun() {
   for (auto &c : rgb) { neopixelWrite(PIN_RGB_LED, c[0], c[1], c[2]); delay(400); }
 
   // --- 5. Ring ---------------------------------------------------------------------------
-  Serial.println("\n[5] ring on GP4 (low-side off the 5V header pad) — fading up, then off");
+  // Set up only; the real test is in the loop below, where it responds to the button. A one-shot
+  // fade at boot is no good for wiring work — you miss it, and re-running it means a power cycle
+  // with a soldering iron in your hand.
+  Serial.println("\n[5] ring on GP4, low-side off the 5V header pad");
+  Serial.println("    Wiring:  white -> 5V(pad 1)   black -> GP4(pad 7)");
+  Serial.println("             brown -> GP2(pad 5)  brown -> GND(pad 2)");
   Serial.println("    IF IT NEVER LIGHTS: check the 5V pad first, then the solder joints.");
-  ledcSetup(0, 5000, 8);
-  ledcAttachPin(PIN_RING_GATE, 0);
-  for (int d = 255; d >= 0; d -= 5) { ledcWrite(0, d); delay(12); }   // inverted: 0 duty = full on
-  delay(600);
-  ledcDetachPin(PIN_RING_GATE);
-  pinMode(PIN_RING_GATE, OUTPUT);
-  digitalWrite(PIN_RING_GATE, HIGH);                                  // off, and never floating
+  Serial.println("    Remember the logic is INVERTED — the pin SINKS the cathode, so LOW = lit.");
+  ledcSetup(RING_CH, RING_FREQ, RING_RES);
+  ledcAttachPin(PIN_RING_GATE, RING_CH);
+  ringSet(0);                                     // start dark
 
   // --- 6. Button + live tap numbers ------------------------------------------------------
   pinMode(PIN_BUTTON, INPUT_PULLUP);
-  Serial.println("\n[6] button on GP2 + live accelerometer jerk");
+  Serial.println("\n[6] button on GP2, ring on GP4, live accelerometer jerk");
+  Serial.println("    The ring BREATHES while idle and goes FULL BRIGHT while the button is held.");
+  Serial.println("    That tests both halves of the harness at once: if it breathes but does not");
+  Serial.println("    respond, the switch is wrong; if it responds but never breathes, the PWM is.");
   Serial.printf("    idle level: %s (expect HIGH)\n", digitalRead(PIN_BUTTON) ? "HIGH" : "LOW");
   Serial.println("    Press the button. Knock the board. Both are reported below.");
   Serial.println("    Use the jerk peaks to set TAP_JERK_LSB in imu.cpp — note the IDLE floor");
@@ -196,6 +212,18 @@ void waveshareBringupRun() {
       if (stable) { pressedAt = now; }
       else        { Serial.printf("    press #%lu — held %lu ms\n",
                                   (unsigned long)++presses, (unsigned long)(now - pressedAt)); }
+    }
+
+    // Ring: full bright while held, otherwise a slow breathe. Driven off the DEBOUNCED level, not
+    // the raw pin, so a bouncing contact cannot make it flicker and send you hunting a PWM fault.
+    if (stable) {
+      ringSet(100);
+    } else {
+      // ~3 s period triangle. Deliberately never fully off at the bottom — "dark" and "not wired"
+      // look identical, and you want to be able to tell them apart at a glance.
+      const uint32_t phase = now % 3000;
+      const uint32_t tri   = phase < 1500 ? phase : (3000 - phase);
+      ringSet(10 + (uint8_t)(tri * 90 / 1500));
     }
 
     if (imu) {

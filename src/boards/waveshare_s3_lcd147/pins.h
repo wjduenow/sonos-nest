@@ -122,15 +122,18 @@
 //
 // GP2 and GP4 are both RTC- and ADC-capable, so deep-sleep wake stays available if anyone ever
 // runs one off the VBAT pad.
-// ✅ GP2 VERIFIED ON HARDWARE 2026-09-08: idle reads HIGH with the internal pull-up and nothing
-// wired, so it is a sound button pin. GP4/the ring is still unproven — nothing is soldered yet.
+// ✅ BOTH VERIFIED ON HARDWARE 2026-09-09, harness soldered and working. GP2 idles HIGH and every
+// press produced exactly one debounced event (four consecutive holds of 190/210/220/190 ms — no
+// chatter, so 30 ms of debounce is ample on this switch). GP4 drives the ring correctly.
 #define PIN_BUTTON            2
 #define PIN_RING_GATE         4
 
 // The ring is white (Vf ~3.1 V) and specced 5-24 V, so a 3.3 V pin cannot SOURCE it — both other
-// buttons wire it low-side off a 5 V rail and let the pin SINK the cathode. **This board brings
-// VBUS out on header pad 1** (verified from the drawing above), so that arrangement carries over
-// from button-v2 unchanged. It was the one open question that could have forced a BOM change.
+// buttons wire it low-side off a 5 V rail and let the pin SINK the cathode.
+//
+// ✅ VERIFIED ON HARDWARE 2026-09-09: pad 1 IS live VBUS and the ring lights and dims under PWM
+// off GP4. This was the last open question that could have forced a BOM change, and the answer is
+// that the arrangement carries over from button-v2 completely unchanged.
 //
 //   LOW  -> ring sees the full 5 V -> ON   (pin sinks ~10-20 mA; the S3 is good for ~28 mA)
 //   HIGH -> ring sees 5 - 3.3 = 1.7 V, well under Vf -> OFF, and no current flows into the pin

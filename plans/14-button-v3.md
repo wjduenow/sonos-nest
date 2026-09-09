@@ -44,6 +44,10 @@ It exists because a headless button cannot answer two questions:
 >   it** — the measured 1200 threshold is right on a bare board. **The QR scans** and opens
 >   `http://<ip>:8080`. 29x29 modules at 4 px/module is comfortably readable by a phone.
 > - ⬜ Ring + switch still unwired; WS2812 bead still unobserved.
+> - ✅ **HARNESS SOLDERED AND PROVEN 2026-09-09.** Header pad 1 is live VBUS, the ring lights and
+>   dims under PWM off GP4, and GP2 classified four consecutive presses (190/210/220/190 ms) with
+>   no chatter. **The last item that could have forced a BOM change is closed** — the low-side ring
+>   drive carries over from button-v2 completely unchanged.
 > - ⬜ The **provisioning QR path is untested** — see Open.
 
 ---
@@ -246,8 +250,11 @@ accelerometer jerk peaks.
 
 ## 4. Open
 
-- **The harness: switch on GP2, ring on GP4.** The ring is the last thing that could still force a
-  BOM change — the 5 V low-side drive is proven on two other boards but not on this one's header.
+- ~~The harness: switch on GP2, ring on GP4~~ — **SOLDERED AND PROVEN 2026-09-09.** Pad 1 is live
+  VBUS; the ring dims under PWM; four presses classified cleanly with no chatter. Worth noting for
+  the tap threshold: pressing the button produces accelerometer jerk up to **6597**, about 5.5x
+  `TAP_JERK_LSB`, so a press always registers as a tap too. Harmless — both wake the screen — but
+  it means the two inputs can never be told apart by the IMU.
 - **The provisioning QR (`uiProvisioning`) has never run.** It cannot: `include/secrets.h` bakes in
   `WIFI_SSID`, so `wifiHaveCreds()` is always true and the portal is only reachable by holding the
   button through power-on — which needs the switch wired. Test it as soon as it is. Until then the
