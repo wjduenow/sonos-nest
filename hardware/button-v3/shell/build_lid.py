@@ -6,6 +6,10 @@ have to belong to this part.
 
 Geometry helpers and the outer profile come from build_shell, so the two parts cannot drift apart
 on the seam that runs all the way round the box.
+
+The lid no longer carries the board — that moved to build_carrier.py once the M2 x 18 screws it
+implied proved unreasonable. What it does now is press the carrier forward: the spigot reaches all
+the way to the carrier's back face, so the lid holds the whole stack against the front wall.
 """
 import numpy as np
 import trimesh
@@ -47,17 +51,17 @@ def post_reliefs():
                x=sx * P.LID_POST_X, z=P.LID_POST_Z) for sx in (-1, 1)], engine=ENG)
 
 
-def pillars():
-    """Four posts reaching from the lid to the PCB's back face at the threaded eyelets."""
-    return trimesh.boolean.union(
-        [cyl_y(P.PILLAR_OD, P.BOARD_Y_PCB_BACK, P.OUT_Y_SHELL, x=x, z=z)
-         for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
+def screw_head_reliefs():
+    """Pockets where the carrier's four M2 heads sit under the spigot ring.
 
-
-def pillar_bores():
+    The heads land at |x| = 15.8-16.2, and the ring runs 16.335 to 18.335 — they overlap. Relieving
+    the ring is the right fix rather than counterboring the carrier: a counterbore would shorten
+    the screw's clearance run and push engagement past PCB_T, i.e. through the board into the LCD.
+    """
     return trimesh.boolean.union(
-        [cyl_y(P.PILLAR_BORE, P.BOARD_Y_PCB_BACK - 1.0, P.OUT_Y + 1.0, x=x, z=z)
-         for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
+        [cyl_y(P.SCREW_HEAD_D + 2 * P.SPIGOT_CLR,
+               P.OUT_Y_SHELL - P.SPIGOT_T - 0.01, P.OUT_Y_SHELL - P.SPIGOT_T + P.SCREW_HEAD_T,
+               x=x, z=z) for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
 
 
 def lid_screw_holes():
@@ -67,8 +71,8 @@ def lid_screw_holes():
 
 
 def build_lid():
-    m = trimesh.boolean.union([lid_body(), spigot(), pillars()], engine=ENG)
-    m = trimesh.boolean.difference([m, pillar_bores(), lid_screw_holes(), post_reliefs()],
+    m = trimesh.boolean.union([lid_body(), spigot()], engine=ENG)
+    m = trimesh.boolean.difference([m, lid_screw_holes(), post_reliefs(), screw_head_reliefs()],
                                    engine=ENG)
     return m
 
@@ -83,21 +87,31 @@ if __name__ == "__main__":
     # screw holes = six holes through the plane at y = OUT_Y.
     sec = m.section(plane_origin=(0, P.OUT_Y - 0.5, 0), plane_normal=(0, 1, 0))
     loops = len(sec.discrete) if sec is not None else 0
-    want = 1 + 4 + 2          # outline + 4 pillar bores + 2 lid screws
-    assert loops == want, f"the lid face must show {want} loops (outline + 6 holes); it has {loops}"
+    want = 1 + 2              # outline + the two lid screws
+    assert loops == want, f"the lid face must show {want} loops (outline + 2 holes); it has {loops}"
 
     # ⚠️ THE CHECK THAT EARNED ITS PLACE. Each part can be watertight, pass every one of its own
     # clearance rows, and still be un-assemblable, because nothing in a per-part check looks at
     # the OTHER part. The first build was exactly that: shell and lid both perfect, 0.064 cm3 of
     # solid in the same place — the shell's lid posts standing inside the lid's spigot.
     from build_shell import build_shell
-    overlap = trimesh.boolean.intersection([build_shell(), m], engine=ENG).volume / 1000.0
-    assert overlap < 1e-3, f"shell and lid occupy the same space: {overlap:.4f} cm3"
-    print(f"  interference  shell n lid = {overlap:.5f} cm3  ok")
+    from build_carrier import build_carrier
+    sh, ca = build_shell(), build_carrier()
+    for a, b, na, nb in ((sh, ca, "shell", "carrier"), (sh, m, "shell", "lid"),
+                         (ca, m, "carrier", "lid")):
+        v = trimesh.boolean.intersection([a, b], engine=ENG).volume / 1000.0
+        assert v < 1e-3, f"{na} and {nb} occupy the same space: {v:.4f} cm3"
+        print(f"  interference  {na:7} n {nb:7} = {v:.5f} cm3  ok")
+
+    # The spigot has to actually REACH the carrier, or nothing holds the stack forward and the
+    # board floats on 6.48 mm of nothing. SPIGOT_T is derived to make this exact; assert it stays
+    # exact, because a gap here is invisible in every other check.
+    gap = (P.OUT_Y_SHELL - P.SPIGOT_T) - P.CARRIER_Y1
+    assert abs(gap) < 1e-6, f"spigot does not meet the carrier: {gap:+.3f} mm"
 
     m.export("lid.stl")
-    print(f"  pillars    {P.PILLAR_OD} OD x {P.PILLAR_LEN:.2f} long, bore {P.PILLAR_BORE}")
-    print(f"  screws     4x M2 x {P.SCREW_LEN:.0f} (board)   2x M3 x 8 (lid)")
+    print(f"  spigot     {P.SPIGOT_T:.2f} deep — bears on the carrier's back face")
+    print(f"  screws     2x M3 x 8 (lid into the shell posts)")
     print(f"  lid.stl    watertight={m.is_watertight} winding={m.is_winding_consistent} "
           f"volume={m.volume/1000:.2f}cm3 tris={len(m.faces)}")
     print(f"             bbox={np.round(m.bounds, 2).tolist()}")

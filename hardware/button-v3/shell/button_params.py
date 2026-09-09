@@ -256,6 +256,11 @@ _STACK_Y = GLASS_AIR + STACK_TOTAL + STACK_REAR_CLR            # = 9.30, the who
 IN_Y   = max(BUTTON_NUT_AC + 2 * NUT_SOCKET_CLR, _STACK_Y)     # = 19.48
 OUT_Y  = IN_Y + FRONT_WALL + LID_T                             # = 24.98
 
+# The shell body stops short of the rear; the lid makes up OUT_Y.
+OUT_Y_SHELL  = OUT_Y - LID_T                                   # = 21.98
+BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centred in the cavity
+NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
+
 # --- Width (X) --------------------------------------------------------------------------------
 IN_X   = PCB_W + 2 * PCB_X_GAP                                 # = 37.17
 OUT_X  = IN_X + 2 * WALL                                       # = 42.17
@@ -295,17 +300,30 @@ HOLE_ZS = (PCB_TOP_Z + HOLE_Z1, PCB_TOP_Z + HOLE_Z2)           # = 19.50, 32.80
 # ============================================================================================
 # 5. RETENTION — four pillars on the LID, screws from outside it into the eyelets
 # ============================================================================================
-PILLAR_OD    = 4.5     # ⚠️ NOT arbitrary: at x = +/-16.2 a 5.0 pillar would foul the cavity wall
-                       # (IN_X/2 = 18.585). check_clearances() asserts it.
-PILLAR_BORE  = 2.6     # M2 clearance. 0.3 radial slop, which is the tolerance budget for print
-                       # shrink and for HOLE_X1 coming off a drawing rather than a caliper.
-PILLAR_LEN   = (OUT_Y - LID_T) - BOARD_Y_PCB_BACK              # = 12.98
-SCREW_ENGAGE = 2.5     # thread engagement into the brass eyelet
-SCREW_LEN    = LID_T + PILLAR_LEN + SCREW_ENGAGE               # = 18.48 -> M2 x 18
-# ⚠️ M2 x 18 is a long screw for a box this size, and that is the price of the board loading from
-# the rear: nothing shell-integral may stand behind it, so the pillars have to reach all the way
-# from the lid. A stepped lid tray would shorten them to ~M2 x 8 at the cost of a 12 mm skirt and
-# a stepped floor to clear the M12 nut. Not worth it for four screws that carry no load.
+# The board screws to a CARRIER PLATE, and the carrier drops into the shell behind it.
+#
+# ⚠️ WHY A THIRD PART. The board's back face is 15.98 mm in from the outside of the box, so ANY
+# screw driven from the rear face has to span that — M2 x 18, thin, and aimed blind at a brass
+# thread you cannot see. Neither a thicker lid nor shorter pillars help: the distance is fixed by
+# the window at one end and the box depth at the other. A carrier moves the joint to where there
+# is access — the board screws to it in the open, with everything visible — and the assembly then
+# drops in as one piece. The cost is one more part and one more tolerance joint between the board
+# and the window.
+CARRIER_POST_LEN = (BOARD_Y_REAR + STACK_REAR_CLR) - BOARD_Y_PCB_BACK   # = 3.80, over the parts
+CARRIER_Y0   = BOARD_Y_PCB_BACK + CARRIER_POST_LEN             # = 12.80  carrier front face
+CARRIER_T    = 2.7
+CARRIER_Y1   = CARRIER_Y0 + CARRIER_T                          # = 15.50  carrier back face
+CARRIER_CLR  = 0.25    # per side, inside the cavity
+CARRIER_POST_OD = 4.5  # same tight fit as before — see the cavity-wall row in check_clearances
+CARRIER_BORE = 2.6     # M2 clearance; 0.3 radial slop covers HOLE_X1 coming off a drawing
+
+# ⚠️ SCREW LENGTH IS PINNED FROM BOTH ENDS, so it is derived and asserted, never picked.
+# Too short and it does not reach the thread; too long and it drives straight through the PCB into
+# the back of the LCD, which is unrecoverable. A brass eyelet in a 1.6 mm board gives at most
+# PCB_T of thread, so the window is narrow: CARRIER_T is tuned so a COMMON M2 x 8 lands inside it.
+BOARD_SCREW_PASS   = CARRIER_T + CARRIER_POST_LEN              # = 6.50 of clearance to cross
+BOARD_SCREW_LEN    = 8.0                                       # M2 x 8, a stock length
+BOARD_SCREW_ENGAGE = BOARD_SCREW_LEN - BOARD_SCREW_PASS        # = 1.50, and must be <= PCB_T
 
 BOARD_STOP_Z = 1.2     # rib across the top of the board pocket, so the board cannot ride up into
                        # the button during assembly. Sits above WIN_Z0, so it never sees the window.
@@ -314,9 +332,14 @@ BOARD_STOP_Z = 1.2     # rib across the top of the board pocket, so the board ca
 LID_POST_OD    = 6.0
 LID_POST_PILOT = 2.5   # M3 self-tap into the post
 LID_SCREW_D    = 3.0
-SPIGOT_T       = 1.5   # tongue depth into the cavity mouth
+# The spigot is no longer just a locator: it reaches all the way forward to bear on the carrier's
+# back face, so the lid is what holds the whole stack against the front wall. Sized by subtraction
+# rather than typed, or it silently stops touching the moment anything upstream moves.
+SPIGOT_T       = OUT_Y_SHELL - CARRIER_Y1                      # = 6.48
 SPIGOT_CLR     = 0.25  # per side
 SPIGOT_W       = 2.0   # ring width — a solid plate fouls the lid-screw posts
+SCREW_HEAD_D   = 3.8   # M2 pan head
+SCREW_HEAD_T   = 1.4
 # ⚠️ Position is FORCED, not chosen. The board fills the cavity across almost its full width
 # (36.37 in a 37.17 opening) so nothing fits beside it; there is 0.4 mm below it; above it is the
 # button. The M12 nut's swept circle is 19.48 across on x = 0, leaving exactly two slivers at
@@ -335,11 +358,6 @@ USB_SLOT_ZC = PCB_TOP_Z + USB_OFF_Z                            # = 26.16, the re
 
 OUT_R = 3.0            # outer vertical corner radius
 
-
-# The shell body stops short of the rear; the lid makes up OUT_Y.
-OUT_Y_SHELL  = OUT_Y - LID_T                                   # = 21.98
-BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centred in the cavity
-NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
 
 SEG = 96      # cylinder smoothness
 

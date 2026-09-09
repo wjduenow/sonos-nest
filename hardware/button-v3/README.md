@@ -3,9 +3,9 @@
 The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, with a FILN
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
-> **Status: BUILT, NOT PRINTED — 2026-09-09.** `shell.stl` + `lid.stl` generate watertight, all
-> 20 clearance rows pass, and the shell-vs-lid interference test is clean.
-> **42.17 x 24.98 x 39.22 mm**, 10.49 + 5.60 cm3 of material. Nothing has been printed or
+> **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `shell.stl`, `carrier.stl`,
+> `lid.stl` — all watertight, 23 clearance rows passing, and all three pairwise interference tests
+> clean. **42.17 x 24.98 x 39.22 mm**, 10.49 + 2.13 + 6.42 cm3. Nothing has been printed or
 > test-fitted, and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
@@ -31,8 +31,17 @@ and a printable one (>=0.8 mm) would have covered ~8 px of live display.
 
 Threaded eyelets solved both at once: the front wall now holds nothing, so the window can clear
 every pixel. The cost is that **nothing shell-integral may sit behind the board** — it loads from
-the rear, so anything already there would block it. The four pillars therefore belong to the
-**lid**, which is why a lid carries the board in this design and why the screws are M2 x 18.
+the rear, so anything already there would block it.
+
+That first put the four pillars on the lid, which implied **M2 x 18**: the board's back face is
+15.98 mm in from the outside of the box, and any screw driven from the rear face has to span it,
+thin and aimed blind at a brass thread you cannot see. Neither a thicker lid nor shorter pillars
+help — the distance is set by the window at one end and the box depth at the other.
+
+Hence the third part. **The board screws to a CARRIER PLATE in the open**, with everything
+visible, using M2 x 8; the pair then drops into the shell as one piece and the lid's spigot bears
+on the carrier's back face to hold the stack forward. One more part and one more tolerance joint,
+in exchange for an assembly that can actually be done.
 
 ## 2. Where every number came from
 
@@ -105,16 +114,19 @@ that supported two different readings, and `hardware/cam-button` still carries t
 
 ```
 shell/button_params.py   single source of truth
-shell/build_shell.py     shell.stl + check_clearances()  (20 rows)
-shell/build_lid.py       lid.stl + the shell-vs-lid interference assertion
-shell/build_all.py       runs both, in order
+shell/build_shell.py     shell.stl + check_clearances()  (23 rows)
+shell/build_carrier.py   carrier.stl + the screw-engagement assertion
+shell/build_lid.py       lid.stl + all three pairwise interference assertions
+shell/build_all.py       runs all three, in order
 shell/render_preview.py  render_preview.png
 ```
 
 > ⚠️ **A per-part check cannot catch an assembly fault.** The first build had both parts
 > watertight, both passing every clearance row, and **0.064 cm3 of solid in the same place** — the
-> shell's lid-screw posts standing inside the lid's spigot. `build_lid.py` now asserts
-> `shell n lid == 0` on every build. Keep it.
+> shell's lid-screw posts standing inside the lid's spigot. `build_lid.py` now asserts all three
+> pairwise intersections are empty on every build, plus that the spigot actually REACHES the
+> carrier — a gap there would leave the board floating on 6.48 mm of nothing and is invisible to
+> every other check. Keep them.
 
 Built with Python CSG (trimesh + manifold3d), never OpenSCAD — see `hardware/README.md`:
 
@@ -127,17 +139,22 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
 
 | qty | screw | into |
 |---|---|---|
-| 4 | **M2 x 18** | the board's threaded brass eyelets, through the lid and its pillars |
+| 4 | **M2 x 8** | the board's threaded brass eyelets, through the carrier and its posts |
 | 2 | **M3 x 8** | the shell's lid posts (self-tapping into a 2.5 pilot) |
 
-M2 x 18 is long for a box this size and is a direct consequence of rear loading — see §1. A
-stepped lid tray would shorten them to ~M2 x 8 at the cost of a 12 mm skirt and a stepped floor to
-clear the M12 nut; not worth it for four screws that carry no load.
+> ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
+> engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
+> which nothing recovers. A brass eyelet in a 1.6 mm board offers at most 1.6 mm of thread, so the
+> window is narrow — `CARRIER_T` is tuned to 2.7 precisely so a **stock M2 x 8** lands inside it
+> (crosses 6.50, engages 1.50). Change `CARRIER_T` and the screw length changes with it.
 
 ## 5. Still open
 
 1. **NOTHING HAS BEEN PRINTED.** No test fit, no tolerance check on the button bore, no
    confirmation that the window frames the display squarely.
+1b. ⚠️ **The carrier posts assume the PCB is clear of components around each eyelet.** They are
+   4.5 mm across and land on the board's back face at the corners. Not verified — check before
+   printing, or the carrier will sit on a capacitor instead of the board.
 2. ⚠️ **`PCB_T` is assumed 1.6.** Absorbed by `GLASS_AIR` if it is out by <=0.3; beyond that the
    glass moves toward the window rim.
 3. ⚠️ **`HOLE_X1` comes off a drawing, not a caliper.** The 2.6 pillar bore gives 0.3 of radial

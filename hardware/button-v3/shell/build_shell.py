@@ -54,10 +54,22 @@ def check_clearances(verbose=True):
         ok &= good
         rows.append((name, got, need, unit, good))
 
-    # 1. The pillar that nearly did not fit. At x = +/-16.215 a 5.0 mm pillar would bury itself in
-    #    the cavity wall; 4.5 clears by 0.12. This is the tightest thing in the whole part and the
-    #    reason PILLAR_OD is not a round number.
-    rec("cavity wall clear of pillar", P.IN_X / 2 - (abs(P.HOLE_XS[0]) + P.PILLAR_OD / 2), 0.05)
+    # 1. The carrier post that nearly did not fit. At x = -16.215 a 5.0 mm post would bury itself
+    #    in the cavity wall; 4.5 clears by 0.12. Tightest thing in the assembly, and the reason
+    #    CARRIER_POST_OD is not a round number.
+    rec("cavity wall clear of carrier post",
+        P.IN_X / 2 - (abs(P.HOLE_XS[0]) + P.CARRIER_POST_OD / 2), 0.05)
+
+    # 1b. The carrier itself must clear the M12 nut, which sweeps the full cavity depth at the top
+    #     of the box — the reason the plate stops at the board's top edge instead of running to
+    #     the cavity roof and giving the spigot a full-perimeter seat.
+    rec("carrier plate below the M12 nut",
+        P.PCB_TOP_Z - (P.BUTTON_PANEL_T + P.BUTTON_NUT_T), 1.0)
+
+    # 1c. Screw engagement, from both ends. Short of 1.0 it does not hold; past PCB_T it comes out
+    #     the front of the board into the LCD.
+    rec("board screw engagement, minimum", P.BOARD_SCREW_ENGAGE, 1.0)
+    rec("board screw stops short of the LCD", P.PCB_T - P.BOARD_SCREW_ENGAGE, 0.0)
 
     # 2. The window must not cover a single lit pixel. Checked on all four sides independently,
     #    because the clamp to the board outline makes two of them behave differently from the
