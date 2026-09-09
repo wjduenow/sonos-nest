@@ -104,8 +104,28 @@ DISP_ACT_H   = 17.4    # which is a good sign the right thing was measured (the 
 # It matters more than it sounds. Centre the window on the PCB and it crops ~1.75 mm of PIXELS on
 # one side while showing ~1.75 mm of dead chin on the other — and cropped pixels are a reprint.
 DISP_CHIN    = 3.5     # dead glass between the lit area and the display edge, USB-C side
-DISP_OFF_X   = MEASURE("PCB left edge (USB-C on the RIGHT) -> lit area left edge")
-DISP_OFF_Z   = MEASURE("PCB top edge -> lit area top edge")
+# MEASURED 2026-09-09, and PCB-relative because the LCD module and the PCB share the SAME
+# footprint (36.37 x 20.32) — the board is entirely behind the glass with no overhang either way,
+# so "from the glass edge" and "from the PCB edge" are the same measurement here.
+DISP_OFF_X   = 0.2     # PCB left edge (USB-C on the RIGHT) -> lit area left edge
+DISP_OFF_Z   = 0.2     # PCB top edge -> lit area top edge
+# Cross-check that these are read right: the derived right margin lands on the independently
+# measured chin. 36.37 - 0.2 - 32.4 = 3.77 vs 3.5 measured — 0.27 apart, which is measurement
+# noise. Two numbers taken different ways agreeing is what makes this trustworthy.
+DISP_MARGIN_R = PCB_W - DISP_OFF_X - DISP_ACT_W                # = 3.77  (the chin)
+DISP_MARGIN_B = PCB_H - DISP_OFF_Z - DISP_ACT_H                # = 2.72
+
+# ⚠️⚠️ THE LIT AREA IS 0.2 mm FROM THE TOP AND LEFT BOARD EDGES, AND THAT BREAKS TWO ASSUMPTIONS.
+#
+# 1. NO FRONT-WALL BOSSES. The LCD covers the whole PCB face, so nothing can touch the board's
+#    front surface at the corners. The M2-bosses-off-the-front-wall scheme is dead.
+# 2. NO RETAINING LIP on those two edges either — 0.2 mm of front wall is below a 0.4 mm nozzle.
+#    A lip wide enough to print (>=0.8) would cover ~8 px of live display.
+#
+# Both are solvable but the answer depends on whether the brass eyelets are THREADED M2 (rear
+# screws bite directly, board held rigidly, no lip needed) or plain plated holes (the board has to
+# be clamped, which needs a lip, which costs pixels unless the UI keeps a safe-area inset).
+# Left unresolved on purpose rather than guessed — see README.md §4.
 WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on purpose: a window
                        # that crops the display is unfixable without a reprint, whereas a slightly
                        # loose one only shows a sliver of black bezel.
@@ -116,8 +136,13 @@ WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on pur
 # cable exits the right-hand wall and the chin above is on that same side.
 USB_ON_RIGHT = True
 USB_PROTRUDE = 2.0     # MEASURED 2026-09-08 — shell overhang past the board edge
-USB_WIDTH    = MEASURE("USB-C shell width")
-USB_HEIGHT   = MEASURE("USB-C shell height")
+USB_WIDTH    = 9.0     # MEASURED 2026-09-09 — along the board's short axis
+USB_HEIGHT   = 3.3     # MEASURED 2026-09-09 — standing proud of the component-side face.
+# Third cross-check on the stack, and it closes: COMP_Z_MAX came out at 3.00 by subtraction
+# (STACK_TOTAL - DISP_STACK) without anyone knowing what the tallest part was. Measuring the
+# USB-C shell independently gives 3.3. So the connector IS the tallest thing on that face, as
+# assumed, and the two routes agree to 0.3 mm. Irrelevant to the box in any case — the M12 nut
+# leaves 9.48 mm of slack in this axis.
 USB_OFF_Z    = MEASURE("PCB top edge -> USB-C shell centreline")
 
 # --- Mounting holes ---------------------------------------------------------------------------
