@@ -139,7 +139,20 @@ HOLE_D       = 2.0     # M2 nominal
 HOLE_CLR_D   = 2.6     # clearance hole in the PCB pocket / boss pilot spacing. 0.3 mm of radial
                        # slop per hole, deliberately, so a +/-0.3 error in any measured centre
                        # still assembles rather than binding across four bosses.
-HOLES = MEASURE("the four (x, z) hole centres, measured from the PCB's top-left corner")
+# MEASURED 2026-09-09: z = 3.5 and 16.8 from the top edge. 3.5 + 16.8 = 20.3 against a 20.32
+# board, so the holes ARE symmetric about the long centreline — 3.5 in from each long edge. That
+# also settles the drawing: its top-left 3.52 was right and its top-right "2.00" was a misread
+# leader, so the asymmetry flagged earlier is not real. Vertical pitch 13.3.
+HOLE_Z1      = 3.5
+HOLE_Z2      = 16.8
+HOLE_Z_PITCH = HOLE_Z2 - HOLE_Z1                               # = 13.30, DERIVED
+
+# ⚠️ X IS STILL OPEN. The drawing gives insets of 1.97 (left) and 2.40 (right) -> x = 1.97 and
+# 33.97; the first caliper pass reported "1 and 33". Both give a 32.00 pitch, so the SPACING is
+# solid — it is the absolute position that differs by ~1 mm, which the 2.6 clearance hole (0.3 of
+# slop) does NOT absorb.
+HOLE_X_PITCH = 32.0    # agreed by both sources
+HOLE_X1      = MEASURE("PCB left edge -> LEFT hole centre; drawing says 1.97, calipers said 1")
 
 # ============================================================================================
 # 2. THE BUTTON — FILN FLM12-FJ-6, identical to button-v2 and cam-button
