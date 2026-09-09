@@ -3,63 +3,52 @@
 The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, with a FILN
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
-> **Status: BUILT, NOT PRINTED — 2026-09-09.** **Two** parts — `body.stl` + `bezel.stl` — both
-> watertight, 24 clearance rows passing, interference clean. **45.74 x 24.98 x 49.80 mm**,
-> 15.60 + 4.97 cm3 — less material than the three-part version it replaced, and no screws enter
-> the board at all. Nothing has been printed or test-fitted, and `PCB_T` is still an assumption
-> rather than a measurement (§2).
+> **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `body.stl`, `bezel.stl`, `back.stl` —
+> all watertight, 26 clearance rows passing, all three pairwise interference tests clean.
+> **42.17 x 24.98 x 52.32 mm**, 12.91 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
+> and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
 
-Same product as `hardware/button-v2`, plus a screen. Landscape: the board's long axis is
-horizontal so the display reads landscape, matching `DISPLAY_ROTATION 1` as shipped.
+Same product as `hardware/button-v2`, plus a screen. Landscape: the board's long axis is horizontal
+so the display reads landscape, matching `DISPLAY_ROTATION 1` as shipped.
 
-Three things set the shape, and none of them is the PCB:
+**A three-layer sandwich.** Front to back: `bezel` | board | **integral middle plane** | `back`.
+
+```
+  y=0        3.0                9.3   12.0            22.48   24.98
+  |  bezel   |  board (glass flush at y=0)  |  cavity  | back  |
+             |                    | MIDDLE PLANE |             |
+                                  ^ board screws in from HERE, back cover off
+```
+
+- **The middle plane is part of the body**, not a separate carrier. It sits 0.5 mm behind the
+  tallest component, so the board screws are short (**M2 x 8**), and there is **10.5 mm** of open
+  cavity behind it for a screwdriver. Every earlier arrangement failed one of those two — either
+  M2 x 18 spanning the whole box, or a joint nothing could reach.
+- **The board loads from the FRONT**, through the bezel opening, and lands on four posts standing
+  off the plane.
+- **The bezel exposes the WHOLE glass** — dead border and driver chin included — with the glass
+  surface flush with the frame. Nothing overlaps the display, so nothing can crop a pixel or press
+  on one.
+
+Three things set the outside, and none of them is the PCB:
 
 - **Depth is set by the M12 NUT, not the electronics.** The button tightens from inside, so the
-  cavity has to swallow 18.48 mm across corners — more than the display + PCB + component stack
-  needs. `hardware/button-v2` has the identical `max()` for the identical reason.
-- **Height is set by the button sitting ABOVE the board.** Its body plus solder tail is 15.00 mm,
-  and the board spans the full width so it cannot tuck under. `PCB_TOP_Z = 16.00` falls straight
-  out of that.
+  cavity has to swallow 18.48 mm across corners — more than the whole board stack needs.
+  `hardware/button-v2` has the identical `max()` for the identical reason.
+- **Height is set by the button sitting ABOVE the board.** Its body plus solder tail is 15.00 mm
+  and the board spans the full width, so it cannot tuck under. The board's top edge is pinned at
+  z = 16, and centring the board then fixes the height at 52.32.
 - **Width is the only dimension the PCB wins**, at 36.37 + gaps + walls = 42.17.
 
-**The LIT AREA is centred in the case, not the board.** They are not the same point: the lit
-rectangle sits 0.2 mm from the board's top-left corner with a 3.5 mm chin on the USB-C side, so its
-centre is 1.79 mm right of the board's and 1.26 mm above it. Centring the board would leave the
-visible screen visibly off-centre in the finished box, which is the only thing anyone looks at. So
-the board is offset and the case grown to swallow it.
-
-**Height falls out of that.** The board's top edge is pinned at z = 16 by the button's nut and
-tail, so centring the screen vertically can only grow the box DOWNWARD — and that new space below
-the board is exactly where the second pair of lid posts goes. One change, two problems: the box
-went 39.22 -> 49.80 tall and gained the 3rd and 4th lid screws it had nowhere to put.
-
-**Retention is four M2 screws from the REAR**, threading directly into the board's brass eyelets.
-That is not what was originally chosen — bosses off the front wall were — and the hardware
-overruled it: the LCD covers the whole PCB face, so nothing can touch the board's front surface at
-the corners. With only 0.2 mm of bezel on two edges there was no room for a retaining lip either,
-and a printable one (>=0.8 mm) would have covered ~8 px of live display.
-
-Threaded eyelets solved both at once: the front wall now holds nothing, so the window can clear
-every pixel. The cost is that **nothing shell-integral may sit behind the board** — it loads from
-the rear, so anything already there would block it.
-
-**...until the FRONT became removable, which dissolved the whole problem.** Every awkward thing
-above traces back to one constraint: the board loaded from the rear, so nothing shell-integral
-could sit behind it, so the posts had to belong to another part, so the screws had to span
-15.98 mm from the rear face — M2 x 18, or a carrier plate to move the joint somewhere reachable.
-
-Making the bezel a separate part lets the board load from the **front**. The body can then simply
-have posts. And once the board rests on four coplanar posts, a rigid board stays flat under a
-clamping force applied anywhere inside their footprint — so the bezel holds it with an L-shaped lip
-along the chin (3.17 mm) and bottom (2.12 mm) edges, both dead glass, and **no screw ever enters
-the board**. The carrier, the rear lid and four M2 screws all went away at once, and the case got
-lighter doing it.
-
-The window and the locating rim are on the SAME part, which is the other prize: there is no
-tolerance stack between where the board sits and where the hole is. The three-part design had them
-on different parts with two joints in between.
+> ⚠️ **The BOARD is centred, not the lit area — and that is a reversal.** It was the other way
+> round while the bezel covered the glass down to the lit rectangle: what you saw was the picture,
+> so the picture got centred. Now the whole glass shows, so the glass is the visible rectangle, and
+> centring the lit area instead would leave the opening 1.79 mm off centre with left and right
+> frame margins differing by 3.57 mm. The lit area now sits its natural 1.79 mm right of centre
+> inside the glass, exactly where this panel's driver chin puts it. It also bought back 3.57 mm of
+> width.
 
 ## 2. Where every number came from
 
@@ -132,9 +121,10 @@ that supported two different readings, and `hardware/cam-button` still carries t
 
 ```
 shell/button_params.py   single source of truth
-shell/build_body.py      body.stl + check_clearances()  (24 rows)
-shell/build_bezel.py     bezel.stl + the body-vs-bezel interference assertion
-shell/build_all.py       runs both, in order
+shell/build_body.py      body.stl + check_clearances()  (26 rows)
+shell/build_bezel.py     bezel.stl + a countersink-actually-cut assertion
+shell/build_back.py      back.stl + all three pairwise interference assertions
+shell/build_all.py       runs all three, in order
 shell/render_preview.py  render_preview.png
 ```
 
@@ -156,10 +146,18 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
 
 | qty | screw | into |
 |---|---|---|
-| 4 | **M3 x 8 countersunk** | the body's corner bosses (self-tapping into a 2.5 pilot) |
+| 4 | **M2 x 8** | the board's threaded eyelets, from BEHIND, through the middle plane and its posts |
+| 4 | **M3 x 8 countersunk** | the corner bosses, from the FRONT (bezel) |
+| 4 | **M3 x 8 countersunk** | the SAME corner bosses, from the REAR (back cover) |
 
-That is the whole fastener list. **Nothing screws into the board** — the brass eyelets go unused,
-which also means the assumption about eyelet thread depth no longer matters.
+One boss serves both covers, with a pilot drilled in from each end — deliberately not through, or
+a screw driven from either side would push past its own thread engagement.
+
+> ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
+> engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
+> which nothing recovers. A brass eyelet in a 1.6 mm board offers at most 1.6 mm of thread, so the
+> window is narrow — `MID_T` is tuned to 2.7 precisely so a **stock M2 x 8** lands inside it
+> (crosses 6.50, engages 1.50).
 
 > ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
 > engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
@@ -180,9 +178,9 @@ which also means the assumption about eyelet thread depth no longer matters.
    slop. If the first print will not take all four screws, this is the number to re-measure.
 4. **Whether the ring's 5 V low-side drive works off this board's header** — unproven, and the
    last thing that could still change the BOM (`plans/14` §Open).
-4b. **The bezel presses directly on glass.** Only ever on dead bezel area, never on a pixel, and
-   asserted — but if a printed lip proves too aggressive, a 0.5 mm foam strip along the chin and
-   bottom is the fix. Untested.
+4b. **The glass sits flush in the bezel opening with 0.15 mm all round.** Nothing presses on it,
+   but that also means nothing hides a misalignment — if the board sits proud or shy of flush, it
+   will show. First print will tell.
 5. ~~Only two lid screws, both at the top~~ — **four now**, one near each corner, once the box
    grew to centre the screen. The upper pair still has to dodge the M12 nut's 19.48 swept circle.
 6. **No USB-C strain relief.** `button-v2` needs pinch ribs because the XIAO has no mounting

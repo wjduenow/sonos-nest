@@ -7,6 +7,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import button_params as P
 from build_body import build_body
 from build_bezel import build_bezel
+from build_back import build_back
 
 
 def draw(ax, meshes_colors, elev, azim, title):
@@ -20,15 +21,15 @@ def draw(ax, meshes_colors, elev, azim, title):
     ax.set_box_aspect((1, 1, 1)); ax.set_axis_off(); ax.set_title(title, fontsize=9)
 
 
-body, bezel = build_body(), build_bezel()
-B, Z = ("#4a6fa5", 1.0), ("#c0703a", 1.0)
+body, bezel, back = build_body(), build_bezel(), build_back()
+B, Z, K = ("#4a6fa5", 1.0), ("#c0703a", 1.0), ("#4f9d69", 1.0)
 
 fig = plt.figure(figsize=(11, 9))
 views = [
-    ([(bezel, *Z)], -75, -90, "bezel — front (window + 4 countersinks)"),
-    ([(bezel, *Z)], -35, 60, "bezel — inside (3-sided locating rim)"),
-    ([(body, *B)], -35, 60, "body — 4 board posts + corner bosses"),
-    ([(body, B[0], 0.4), (bezel, Z[0], 0.95)], -25, -140, "assembled"),
+    ([(bezel, *Z)], -35, -120, "bezel — full-glass opening, flush"),
+    ([(body, *B)], -35, 60, "body — integral middle plane + 4 posts"),
+    ([(back, *K)], -35, 60, "back cover — off to reach the M2 screws"),
+    ([(body, B[0], 0.35), (bezel, Z[0], 0.95), (back, K[0], 0.95)], -25, -140, "assembled"),
 ]
 for i, (mc, elev, azim, title) in enumerate(views, 1):
     draw(fig.add_subplot(2, 2, i, projection="3d"), mc, elev, azim, title)

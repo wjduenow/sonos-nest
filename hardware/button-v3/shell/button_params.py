@@ -224,26 +224,36 @@ BUTTON_PANEL_T   = BUTTON_THREAD_L - BUTTON_NUT_T              # = 2.00, DERIVED
 BUTTON_TAIL_T    = 2.5     # the connector/solder tail behind the body
 BUTTON_CX        = 0.0     # centred on width. The top face has room for nothing else anyway.
 
-# ⚠️ THE BOARD IS NOT CENTRED IN THE CASE — THE LIT AREA IS, AND THEY ARE NOT THE SAME POINT.
-# The lit rectangle sits 0.2 from the board's top-left corner with a 3.5 chin on the USB-C side, so
-# its centre is 1.785 right of the board's centre and 1.26 above it. Centring the BOARD would put
-# the visible screen visibly off-centre in the finished box, which is the thing anyone actually
-# looks at. So the board is offset and the case is grown to swallow it.
-DISP_CX = DISP_OFF_X + DISP_ACT_W / 2.0        # = 16.40, lit centre in board coords
+# ⚠️ THE BOARD IS CENTRED, NOT THE LIT AREA — AND THAT IS A REVERSAL, ON PURPOSE.
+#
+# It was the other way round while the bezel covered the glass down to the lit rectangle: what you
+# saw was the picture, so the picture got centred. Now the bezel exposes the WHOLE glass, so the
+# visible rectangle is the glass — and centring the lit area instead would leave that opening
+# 1.79 mm off centre, with left and right frame margins differing by 3.57 mm. Obvious. The lit area
+# now sits its natural 1.79 mm right of centre inside the glass, which is simply where this panel's
+# driver chin puts it, exactly as it does on any phone.
+#
+# It also buys back the width the offset had cost: 42.17 instead of 45.74.
+DISP_CX = DISP_OFF_X + DISP_ACT_W / 2.0        # = 16.40, lit centre in board coords (for checks)
 DISP_CZ = DISP_OFF_Z + DISP_ACT_H / 2.0        # = 8.90
 
-BOARD_X0 = -DISP_CX                             # = -16.40  puts the lit centre on x = 0
-BOARD_X1 = BOARD_X0 + PCB_W                     # = 19.97   the USB-C edge
+BOARD_X0 = -PCB_W / 2.0                         # = -18.185
+BOARD_X1 = +PCB_W / 2.0                         # = +18.185, the USB-C edge
 
 # ============================================================================================
 # 3. THE SHELL
 # ============================================================================================
 WALL         = 2.5     # side, top and bottom walls of the body
-BEZEL_T      = 3.0     # the FRONT part — carries the window AND clamps the board. 3.0 not 2.5:
-                       # it spans 33 mm of window and has to stay flat while pressing the board
-                       # onto its posts, and a bowed bezel is a screen that sits crooked.
-BACK_WALL    = 2.5     # the body's closed rear
+BEZEL_T      = 3.0     # the FRONT frame. The glass sits flush in its opening, so this thickness is
+                       # also how far the frame wraps around the LCD's edge.
+BACK_T       = 2.5     # the rear cover
 FRONT_WALL   = BEZEL_T # alias — several derivations below read this name
+
+# ⚠️ THE GLASS IS FLUSH WITH THE OUTSIDE OF THE BEZEL — y = 0 IS THE GLASS, not a wall.
+# The bezel opening is the FULL board outline, dead border and chin included, so nothing overlaps
+# the display at all and the front reads as one continuous surface. Nothing holds the board
+# forward either: the four M2 screws into the middle plane do all of it.
+BEZEL_GAP    = 0.15    # around the board in the bezel's opening
 PCB_X_GAP    = 0.4     # cavity is PCB + this per side in X
 PCB_Z_GAP    = 0.4     # ...and in Z
 
@@ -253,18 +263,7 @@ PCB_Z_GAP    = 0.4     # ...and in Z
 # comfortably more than the display + PCB + components stack needs. button-v2 has the identical
 # max() and for the identical reason.
 NUT_SOCKET_CLR = 0.5
-# ZERO, deliberately — the bezel BEARS on the glass, and that contact is what holds the board on
-# its posts. There are no screws into the board at all.
-#
-# ⚠️ It only ever touches DEAD glass. The lip is 3.17 wide over the chin and 2.12 over the bottom
-# bezel, both of which are inactive area; the top and left edges have no lip at all, so nothing
-# ever presses on a pixel. check_clearances() asserts that.
-#
-# A rigid board on four coplanar posts stays flat under a clamping force applied anywhere inside
-# their footprint, so an L along two adjacent edges is sufficient — it does not need to press all
-# the way round, which is just as well, because the top and left edges have 0.2 mm of bezel and a
-# lip there would cover live pixels.
-GLASS_AIR      = 0.0
+GLASS_AIR      = 0.0   # the glass IS the front surface — see BEZEL_GAP above
 STACK_REAR_CLR = 0.5     # tallest component -> the lid
 BOSS_STANDOFF  = GLASS_AIR + LCD_MODULE_T                      # = 4.90 — front wall inner face to
                                                                # the PCB's display-side face
@@ -275,25 +274,21 @@ _STACK_Y = GLASS_AIR + STACK_TOTAL + STACK_REAR_CLR            # = 9.30, the who
 # will assume the screen made it deep; it did not, the button did. Do not "reclaim" this depth by
 # trimming clearances around the board — it is not the board's.
 IN_Y   = max(BUTTON_NUT_AC + 2 * NUT_SOCKET_CLR, _STACK_Y)     # = 19.48
-OUT_Y  = IN_Y + BEZEL_T + BACK_WALL                            # = 24.98
+OUT_Y  = IN_Y + BEZEL_T + BACK_T                               # = 24.98
 
 # The BODY spans everything behind the bezel, and its rear is closed — there is no rear lid.
 BODY_Y0      = BEZEL_T                                         # = 3.00, where the body starts
-CAVITY_Y1    = OUT_Y - BACK_WALL                               # = 22.48, the rear wall's inner face
+BODY_Y1      = OUT_Y - BACK_T                                  # = 22.48, where the back cover starts
+CAVITY_Y1    = BODY_Y1
 BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centred in the cavity
 NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
 
 # --- Width (X) --------------------------------------------------------------------------------
 # The cavity is symmetric about x = 0 but the board inside it is not, so its half-width is set by
 # whichever board edge ended up further out — the USB-C side, after the offset above.
-IN_X_HALF = max(abs(BOARD_X0), BOARD_X1) + PCB_X_GAP           # = 20.37
-IN_X   = 2 * IN_X_HALF                                         # = 40.74
-OUT_X  = IN_X + 2 * WALL                                       # = 45.74
-
-# The board no longer fills the cavity: it is hard against the right wall (0.4) and 3.97 clear of
-# the left, so a rib takes over locating that edge.
-BOARD_RIB_X = BOARD_X0 - PCB_X_GAP                             # = -16.80, the rib's inner face
-BOARD_RIB_W = 1.2
+IN_X_HALF = PCB_W / 2.0 + PCB_X_GAP                            # = 18.585
+IN_X   = 2 * IN_X_HALF                                         # = 37.17
+OUT_X  = IN_X + 2 * WALL                                       # = 42.17
 
 # --- Height (Z) — set by the BUTTON sitting above the board ------------------------------------
 # The button's body plus its solder tail must clear the board's top edge entirely; the board
@@ -306,23 +301,24 @@ PCB_BOT_Z    = PCB_TOP_Z + PCB_H                               # = 36.32
 # Height is set by centring the lit area, not by the board. The board's top edge cannot move — the
 # button owns everything above z = 16 — so the box grows DOWNWARD, and that new space below the
 # board is exactly where the second pair of lid posts goes. One change, two problems.
-HEIGHT       = 2.0 * (PCB_TOP_Z + DISP_CZ)                     # = 49.80  OVERALL
+HEIGHT       = 2.0 * (PCB_TOP_Z + PCB_H / 2.0)                 # = 52.32  OVERALL
 HEIGHT_MIN   = PCB_BOT_Z + PCB_Z_GAP + WALL                    # = 39.22, what the board alone needs
 
 # ============================================================================================
 # 4. WHERE THE BOARD ACTUALLY SITS  (world coordinates — see the datum at the top)
 # ============================================================================================
 # Board Y: one chain, front to back, every link measured.
-BOARD_Y_GLASS     = FRONT_WALL + GLASS_AIR                     # = 3.50  display glass
+BOARD_Y_GLASS     = 0.0                                        # flush with the outside
 BOARD_Y_PCB_FRONT = BOARD_Y_GLASS + LCD_MODULE_T               # = 7.40
 BOARD_Y_PCB_BACK  = BOARD_Y_PCB_FRONT + PCB_T                  # = 9.00  the pillars land here
 BOARD_Y_REAR      = BOARD_Y_PCB_BACK + COMP_Z_MAX              # = 12.30 tallest component
 
-# Window, in world coords.
-WIN_X0 = BOARD_X0 + WINDOW_X0
-WIN_X1 = BOARD_X0 + WINDOW_X1
-WIN_Z0 = PCB_TOP_Z + WINDOW_Z0
-WIN_Z1 = PCB_TOP_Z + WINDOW_Z1
+# The bezel opening, in world coords: the FULL board outline plus a hairline. No lip, no overlap —
+# the whole glass shows and sits flush in it.
+WIN_X0 = BOARD_X0 - BEZEL_GAP
+WIN_X1 = BOARD_X1 + BEZEL_GAP
+WIN_Z0 = PCB_TOP_Z - BEZEL_GAP
+WIN_Z1 = PCB_BOT_Z + BEZEL_GAP
 
 # The four threaded eyelets, in world coords.
 HOLE_XS = (BOARD_X0 + HOLE_X1, BOARD_X0 + HOLE_X2)             # = -16.215, +15.815
@@ -331,16 +327,31 @@ HOLE_ZS = (PCB_TOP_Z + HOLE_Z1, PCB_TOP_Z + HOLE_Z2)           # = 19.50, 32.80
 # ============================================================================================
 # 5. RETENTION — four pillars on the LID, screws from outside it into the eyelets
 # ============================================================================================
-# ⚠️ NO SCREWS INTO THE BOARD, AND NO CARRIER. Both went away when the bezel became a separate
-# part, because that is what let the board load from the FRONT. Every awkward thing about the
-# previous design traced back to rear loading: nothing shell-integral could sit behind the board,
-# so the posts had to belong to another part, so the screws had to span 15.98 mm from the rear
-# face — M2 x 18, or a carrier plate to move the joint somewhere reachable.
+# THE MIDDLE PLANE — the carrier plate, printed as part of the body.
 #
-# Loading from the front dissolves all of it. The body simply has posts.
-POST_OD      = 4.5     # ⚠️ not round: the right-hand eyelet is 0.55 from the cavity wall
-POST_Y1      = BOARD_Y_PCB_BACK                                # the posts' front face
-POST_LEN     = CAVITY_Y1 - POST_Y1                             # = 13.98, back wall to board
+# It is what the board screws to, from BEHIND, with the back cover off. That is the whole trick:
+# the plane sits 0.5 mm behind the tallest component, so the screws are short (M2 x 8), and there
+# is ~10.5 mm of open cavity behind it for a driver. The earlier designs each failed one of those
+# two — long screws, or a joint you could not reach.
+#
+# The board still loads from the FRONT, through the bezel opening, and lands on the posts.
+MID_Y0       = BOARD_Y_REAR + STACK_REAR_CLR                   # = 9.30, the plane's front face
+MID_T        = 2.7
+MID_Y1       = MID_Y0 + MID_T                                  # = 12.00
+MID_Z0       = PCB_TOP_Z - 2.0                                 # spans the board's band, and stops
+MID_Z1       = PCB_BOT_Z + 2.0                                 # short of the corner bosses
+
+POST_OD      = 4.5     # ⚠️ not round: the outer eyelet is 0.12 from the cavity wall
+POST_BORE    = 2.6     # M2 clearance, 0.3 of radial slop
+POST_LEN     = MID_Y0 - BOARD_Y_PCB_BACK                       # = 3.80, over the components
+
+# ⚠️ SCREW LENGTH IS PINNED FROM BOTH ENDS — derived and asserted, never picked. Short of 1.0 mm
+# of engagement it does not hold; past PCB_T it drives through the board into the back of the LCD.
+# A brass eyelet in a 1.6 mm board offers at most PCB_T of thread, so MID_T is tuned to put a stock
+# M2 x 8 inside that window.
+BOARD_SCREW_PASS   = MID_T + POST_LEN                          # = 6.50 to cross
+BOARD_SCREW_LEN    = 8.0                                       # M2 x 8
+BOARD_SCREW_ENGAGE = BOARD_SCREW_LEN - BOARD_SCREW_PASS        # = 1.50, must be <= PCB_T
 
 BOARD_STOP_Z = 1.2     # rib across the top of the board pocket, so the board cannot ride up into
                        # the button during assembly. Sits above WIN_Z0, so it never sees the window.
@@ -357,10 +368,12 @@ BOSS_MERGE   = 1.0     # how far the boss buries itself in each wall
 BEZEL_SCREW_D = 3.0
 BEZEL_SCREW_HEAD_D = 6.0   # countersunk M3
 BEZEL_SCREW_LEN = 8.0      # M3 x 8: through BEZEL_T and ~5 into the boss
+BACK_SCREW_LEN  = 8.0      # M3 x 8 the other way, into the same boss from the rear
+BOSS_PILOT_D    = 6.0      # how deep each pilot goes in from its own end
 BOSS_LEN     = 9.0     # boss depth, comfortably past the screw's ~5 of engagement
 RIM_W        = 1.2     # bezel locating-rim wall
 
-BOSS_X       = IN_X_HALF - BOSS_OD / 2.0 + BOSS_MERGE          # = 17.87
+BOSS_X       = IN_X_HALF - BOSS_OD / 2.0 + BOSS_MERGE          # = 16.09
 BOSS_ZS      = (WALL + BOSS_OD / 2.0 - BOSS_MERGE,              # = 5.00  above the board
                 HEIGHT - WALL - BOSS_OD / 2.0 + BOSS_MERGE)     # = 44.80 below it
 
