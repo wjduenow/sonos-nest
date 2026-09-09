@@ -3,10 +3,10 @@
 The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, with a FILN
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
-> **Status: SCAFFOLD.** `shell/button_params.py` carries every number that could be derived or
-> read off a vendor drawing. The geometry is not written yet, because seven dimensions have to
-> come off a caliper first — §2. Two of the three outside dimensions are already fixed:
-> **X = 42.17, Z = 39.22 mm.**
+> **Status: BUILT, NOT PRINTED — 2026-09-09.** `shell.stl` + `lid.stl` generate watertight, all
+> 20 clearance rows pass, and the shell-vs-lid interference test is clean.
+> **42.17 x 24.98 x 39.22 mm**, 10.49 + 5.60 cm3 of material. Nothing has been printed or
+> test-fitted, and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
 
@@ -23,8 +23,16 @@ Three things set the shape, and none of them is the PCB:
   out of that.
 - **Width is the only dimension the PCB wins**, at 36.37 + gaps + walls = 42.17.
 
-**Retention is four M2 bosses off the front wall**, not `button-v2`'s ledges-and-lid-rib. A screen
-has to stay square in its window and ledges do not control rotation. The rear is the lid.
+**Retention is four M2 screws from the REAR**, threading directly into the board's brass eyelets.
+That is not what was originally chosen — bosses off the front wall were — and the hardware
+overruled it: the LCD covers the whole PCB face, so nothing can touch the board's front surface at
+the corners. With only 0.2 mm of bezel on two edges there was no room for a retaining lip either,
+and a printable one (>=0.8 mm) would have covered ~8 px of live display.
+
+Threaded eyelets solved both at once: the front wall now holds nothing, so the window can clear
+every pixel. The cost is that **nothing shell-integral may sit behind the board** — it loads from
+the rear, so anything already there would block it. The four pillars therefore belong to the
+**lid**, which is why a lid carries the board in this design and why the screws are M2 x 18.
 
 ## 2. Where every number came from
 
@@ -40,7 +48,34 @@ the 363 MB Arduino installer.
 > settles it: 17.78 + 2 x 1.27 = 20.32 exactly, i.e. two pad rows inset 1.27 mm from each long
 > edge. Taken as a hole pitch it would have put the bottom holes 0.98 mm off the end of the board.
 
-### ⚠️ NOT VERIFIED — measure these seven before anything is built
+### Measured on the board, 2026-09-08/09
+
+| what | value | note |
+|---|---|---|
+| glass top -> PCB back face | **5.50** | the LCD is seated on the PCB, so this is the only reachable datum |
+| glass top -> tallest component | **8.50** | closes exactly: 5.50 + 3.00 |
+| lit area | **32.4 x 17.4** | |
+| lit area offset from PCB top-left | **0.2, 0.2** | PCB-relative: LCD and PCB share one footprint |
+| dead chin, USB-C side | **3.5** | cross-checks the derived 3.77 right margin |
+| M2 hole centres | **x 1.97 / 33.97, z 3.5 / 16.8** | eyelets are THREADED |
+| USB-C shell | **9.0 x 3.3**, centred | cross-checks the derived 3.00 tallest component |
+
+Three independent cross-checks closed, which is what makes these trustworthy: the chin against the
+derived right margin, the USB-C height against the derived tallest component, and 3.5 + 16.8 =
+20.3 against the 20.32 board.
+
+> ⚠️ **`PCB_T` is ASSUMED at 1.6, not measured** — the LCD is bonded to the board, so calipers
+> cannot reach bare laminate. The design is made insensitive to it: `GLASS_AIR` is 1.0 so the
+> pillars can be 0.3 out without the glass reaching the window rim.
+
+### The measurement that cost a round trip
+
+Asking for "display glass above the PCB's display-side face" was an unanswerable question on this
+board, and it produced two readings (5.75, then 5.5) that looked like two quantities in conflict.
+They were one quantity twice. **Ask for a dimension between two surfaces a caliper can actually
+touch**, not between one surface and a plane buried inside an assembly.
+
+### ⚠️ Superseded — what the drawing got wrong
 
 Tolerance is friendlier than it looks: the M2s get **Ø2.6 clearance holes**, so ±0.3 mm per hole
 still assembles. Nothing here needs to be surgical.
@@ -69,11 +104,17 @@ that supported two different readings, and `hardware/cam-button` still carries t
 ## 3. Files
 
 ```
-shell/button_params.py   single source of truth   <- only this exists so far
-shell/build_shell.py     not written yet
-shell/build_lid.py       not written yet
-shell/build_all.py       not written yet
+shell/button_params.py   single source of truth
+shell/build_shell.py     shell.stl + check_clearances()  (20 rows)
+shell/build_lid.py       lid.stl + the shell-vs-lid interference assertion
+shell/build_all.py       runs both, in order
+shell/render_preview.py  render_preview.png
 ```
+
+> ⚠️ **A per-part check cannot catch an assembly fault.** The first build had both parts
+> watertight, both passing every clearance row, and **0.064 cm3 of solid in the same place** — the
+> shell's lid-screw posts standing inside the lid's spigot. `build_lid.py` now asserts
+> `shell n lid == 0` on every build. Keep it.
 
 Built with Python CSG (trimesh + manifold3d), never OpenSCAD — see `hardware/README.md`:
 
@@ -82,11 +123,30 @@ conda run -n img23d python hardware/button-v3/shell/button_params.py   # print t
 conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it exists
 ```
 
-## 4. Still open
+## 4. Screws (BOM)
 
-1. The seven measurements in §2.
-2. Which side wall the USB-C exits, which decides whether the cable leaves left or right.
-3. Whether the ring's 5 V low-side drive works off this board's header — unproven, and the last
-   thing that could still change the BOM (`plans/14` §Open).
-4. Strain relief for the USB-C cable. `button-v2` takes that load on pinch ribs because the XIAO
-   has no mounting holes; with four M2 bosses here it may not be needed at all.
+| qty | screw | into |
+|---|---|---|
+| 4 | **M2 x 18** | the board's threaded brass eyelets, through the lid and its pillars |
+| 2 | **M3 x 8** | the shell's lid posts (self-tapping into a 2.5 pilot) |
+
+M2 x 18 is long for a box this size and is a direct consequence of rear loading — see §1. A
+stepped lid tray would shorten them to ~M2 x 8 at the cost of a 12 mm skirt and a stepped floor to
+clear the M12 nut; not worth it for four screws that carry no load.
+
+## 5. Still open
+
+1. **NOTHING HAS BEEN PRINTED.** No test fit, no tolerance check on the button bore, no
+   confirmation that the window frames the display squarely.
+2. ⚠️ **`PCB_T` is assumed 1.6.** Absorbed by `GLASS_AIR` if it is out by <=0.3; beyond that the
+   glass moves toward the window rim.
+3. ⚠️ **`HOLE_X1` comes off a drawing, not a caliper.** The 2.6 pillar bore gives 0.3 of radial
+   slop. If the first print will not take all four screws, this is the number to re-measure.
+4. **Whether the ring's 5 V low-side drive works off this board's header** — unproven, and the
+   last thing that could still change the BOM (`plans/14` §Open).
+5. **Only two lid screws**, both at the top, because the board fills the cavity and there is
+   nowhere else (see `LID_POST_X`). The spigot ring carries the racking load instead. If the lid
+   flexes on a print, that is where to look.
+6. **No USB-C strain relief.** `button-v2` needs pinch ribs because the XIAO has no mounting
+   holes; here the board is screwed down at four corners, so the load path is probably fine — but
+   it is untested.

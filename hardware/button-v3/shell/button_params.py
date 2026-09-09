@@ -219,6 +219,8 @@ BUTTON_HEAD_T    = 1.5
 BUTTON_INSIDE_T  = BUTTON_OVERALL_T - BUTTON_HEAD_T            # = 12.50, DERIVED — never type it
 BUTTON_THREAD_L  = 4.0
 BUTTON_NUT_T     = 2.0     # ⚠️ ESTIMATED — an M12x0.75 thin nut. Caliper it with the button.
+BUTTON_PANEL_T   = BUTTON_THREAD_L - BUTTON_NUT_T              # = 2.00, DERIVED — the wall
+                                                               # thickness the button can clamp
 BUTTON_TAIL_T    = 2.5     # the connector/solder tail behind the body
 BUTTON_CX        = 0.0     # centred on width. The top face has room for nothing else anyway.
 
@@ -266,6 +268,78 @@ BUTTON_PCB_CLR   = 1.0     # air between the button's tail and the board's top e
 PCB_TOP_Z    = BUTTON_KEEPOUT_Z + BUTTON_PCB_CLR               # = 16.00
 PCB_BOT_Z    = PCB_TOP_Z + PCB_H                               # = 36.32
 HEIGHT       = PCB_BOT_Z + PCB_Z_GAP + WALL                    # = 39.22  OVERALL
+
+# ============================================================================================
+# 4. WHERE THE BOARD ACTUALLY SITS  (world coordinates — see the datum at the top)
+# ============================================================================================
+# Board X: the cavity walls locate it. IN_X is PCB_W + 0.4 per side, so nothing else has to.
+BOARD_X0 = -PCB_W / 2.0
+BOARD_X1 = +PCB_W / 2.0                 # the USB-C edge — "right" as you face the screen
+
+# Board Y: one chain, front to back, every link measured.
+BOARD_Y_GLASS     = FRONT_WALL + GLASS_AIR                     # = 3.50  display glass
+BOARD_Y_PCB_FRONT = BOARD_Y_GLASS + LCD_MODULE_T               # = 7.40
+BOARD_Y_PCB_BACK  = BOARD_Y_PCB_FRONT + PCB_T                  # = 9.00  the pillars land here
+BOARD_Y_REAR      = BOARD_Y_PCB_BACK + COMP_Z_MAX              # = 12.30 tallest component
+
+# Window, in world coords.
+WIN_X0 = BOARD_X0 + WINDOW_X0
+WIN_X1 = BOARD_X0 + WINDOW_X1
+WIN_Z0 = PCB_TOP_Z + WINDOW_Z0
+WIN_Z1 = PCB_TOP_Z + WINDOW_Z1
+
+# The four threaded eyelets, in world coords.
+HOLE_XS = (BOARD_X0 + HOLE_X1, BOARD_X0 + HOLE_X2)             # = -16.215, +15.815
+HOLE_ZS = (PCB_TOP_Z + HOLE_Z1, PCB_TOP_Z + HOLE_Z2)           # = 19.50, 32.80
+
+# ============================================================================================
+# 5. RETENTION — four pillars on the LID, screws from outside it into the eyelets
+# ============================================================================================
+PILLAR_OD    = 4.5     # ⚠️ NOT arbitrary: at x = +/-16.2 a 5.0 pillar would foul the cavity wall
+                       # (IN_X/2 = 18.585). check_clearances() asserts it.
+PILLAR_BORE  = 2.6     # M2 clearance. 0.3 radial slop, which is the tolerance budget for print
+                       # shrink and for HOLE_X1 coming off a drawing rather than a caliper.
+PILLAR_LEN   = (OUT_Y - LID_T) - BOARD_Y_PCB_BACK              # = 12.98
+SCREW_ENGAGE = 2.5     # thread engagement into the brass eyelet
+SCREW_LEN    = LID_T + PILLAR_LEN + SCREW_ENGAGE               # = 18.48 -> M2 x 18
+# ⚠️ M2 x 18 is a long screw for a box this size, and that is the price of the board loading from
+# the rear: nothing shell-integral may stand behind it, so the pillars have to reach all the way
+# from the lid. A stepped lid tray would shorten them to ~M2 x 8 at the cost of a 12 mm skirt and
+# a stepped floor to clear the M12 nut. Not worth it for four screws that carry no load.
+
+BOARD_STOP_Z = 1.2     # rib across the top of the board pocket, so the board cannot ride up into
+                       # the button during assembly. Sits above WIN_Z0, so it never sees the window.
+
+# --- Lid retention (the lid holds the board, so something must hold the lid) ---
+LID_POST_OD    = 6.0
+LID_POST_PILOT = 2.5   # M3 self-tap into the post
+LID_SCREW_D    = 3.0
+SPIGOT_T       = 1.5   # tongue depth into the cavity mouth
+SPIGOT_CLR     = 0.25  # per side
+SPIGOT_W       = 2.0   # ring width — a solid plate fouls the lid-screw posts
+# ⚠️ Position is FORCED, not chosen. The board fills the cavity across almost its full width
+# (36.37 in a 37.17 opening) so nothing fits beside it; there is 0.4 mm below it; above it is the
+# button. The M12 nut's swept circle is 19.48 across on x = 0, leaving exactly two slivers at
+# |x| > 9.74 up in the button region. The posts go there, and there is nowhere else.
+LID_POST_X   = 14.0
+LID_POST_Z   = 8.0
+LID_POST_Y0  = FRONT_WALL + 1.0    # they start just behind the front wall and run to the lid
+
+# --- USB-C notch, right-hand wall -------------------------------------------------------------
+# Generous on purpose. Unlike the screen window, nothing here needs precision: it clears a cable
+# overmold, which is bigger and less well specified than the receptacle.
+USB_SLOT_W  = USB_WIDTH + 3.0                                  # = 12.00, in Z
+USB_SLOT_Y0 = BOARD_Y_PCB_BACK - 1.0                           # = 8.00
+USB_SLOT_Y1 = BOARD_Y_REAR + 2.5                               # = 14.80
+USB_SLOT_ZC = PCB_TOP_Z + USB_OFF_Z                            # = 26.16, the receptacle centreline
+
+OUT_R = 3.0            # outer vertical corner radius
+
+
+# The shell body stops short of the rear; the lid makes up OUT_Y.
+OUT_Y_SHELL  = OUT_Y - LID_T                                   # = 21.98
+BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centred in the cavity
+NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
 
 SEG = 96      # cylinder smoothness
 
