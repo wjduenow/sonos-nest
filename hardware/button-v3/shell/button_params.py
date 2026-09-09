@@ -70,6 +70,21 @@ HDR_ROW_GAP  = 17.78   # drawing — row centreline to row centreline.
 HDR_EDGE_OFF = (PCB_H - HDR_ROW_GAP) / 2.0                     # = 1.27, DERIVED — never type it
 HDR_LAST_TO_EDGE = 11.31   # drawing — last pad (TXD) centre to the right board edge
 
+# --- USB-C ------------------------------------------------------------------------------------
+# On a SHORT edge (the 20.32 one), so it exits the LEFT or RIGHT wall of this landscape box.
+# CONFIRMED 2026-09-09: the USB-C is on the RIGHT short edge with the screen upright, so the
+# cable exits the right-hand wall and the chin above is on that same side.
+USB_ON_RIGHT = True
+USB_PROTRUDE = 2.0     # MEASURED 2026-09-08 — shell overhang past the board edge
+USB_WIDTH    = 9.0     # MEASURED 2026-09-09 — along the board's short axis
+USB_HEIGHT   = 3.3     # MEASURED 2026-09-09 — standing proud of the component-side face.
+# Third cross-check on the stack, and it closes: COMP_Z_MAX came out at 3.00 by subtraction
+# (STACK_TOTAL - DISP_STACK) without anyone knowing what the tallest part was. Measuring the
+# USB-C shell independently gives 3.3. So the connector IS the tallest thing on that face, as
+# assumed, and the two routes agree to 0.3 mm. Irrelevant to the box in any case — the M12 nut
+# leaves 9.48 mm of slack in this axis.
+USB_OFF_Z    = PCB_H / 2.0   # CONFIRMED 2026-09-09 centred on that edge = 10.16, DERIVED
+
 # --- Component stack -------------------------------------------------------------------------
 # The display is on one face; everything else (ESP32-S3 module, USB-C, microSD socket) is on the
 # other. Both numbers below are measured from the GLASS TOP, because that is the only datum a
@@ -86,7 +101,9 @@ STACK_TOTAL  = 8.5     # MEASURED 2026-09-08 — glass top -> tallest part on th
 # measurements above were read correctly: a standard top-mount USB-C shell stands 3.16 mm proud,
 # and it is the tallest thing on that face. Had DISP_STACK meant "LCD module alone", this would
 # have come out at 1.4 — impossible for that connector, which is what flagged the misreading.
-COMP_Z_MAX   = STACK_TOTAL - DISP_STACK                        # = 3.00
+# Take the WORSE of the two routes. Subtraction says 3.00; the connector itself measures 3.3, and
+# a cavity sized off the smaller number would foul it by 0.3.
+COMP_Z_MAX   = max(STACK_TOTAL - DISP_STACK, USB_HEIGHT)       # = 3.30
 LCD_MODULE_T = DISP_STACK - PCB_T                              # = 3.90, carries PCB_T's error
 
 # --- The display window ----------------------------------------------------------------------
@@ -115,35 +132,32 @@ DISP_OFF_Z   = 0.2     # PCB top edge -> lit area top edge
 DISP_MARGIN_R = PCB_W - DISP_OFF_X - DISP_ACT_W                # = 3.77  (the chin)
 DISP_MARGIN_B = PCB_H - DISP_OFF_Z - DISP_ACT_H                # = 2.72
 
-# ⚠️⚠️ THE LIT AREA IS 0.2 mm FROM THE TOP AND LEFT BOARD EDGES, AND THAT BREAKS TWO ASSUMPTIONS.
+# ⚠️ THE LIT AREA IS 0.2 mm FROM THE TOP AND LEFT BOARD EDGES, WHICH INVERTS THE MOUNTING.
 #
-# 1. NO FRONT-WALL BOSSES. The LCD covers the whole PCB face, so nothing can touch the board's
-#    front surface at the corners. The M2-bosses-off-the-front-wall scheme is dead.
-# 2. NO RETAINING LIP on those two edges either — 0.2 mm of front wall is below a 0.4 mm nozzle.
-#    A lip wide enough to print (>=0.8) would cover ~8 px of live display.
+# The LCD covers the whole PCB face, so nothing can touch the board's front surface at the
+# corners: bosses rising off the front wall — the scheme originally chosen — cannot exist. And
+# with only 0.2 mm of bezel on two edges there is no room for a retaining lip either; a printable
+# one (>=0.8, one nozzle) would cover ~8 px of live display.
 #
-# Both are solvable but the answer depends on whether the brass eyelets are THREADED M2 (rear
-# screws bite directly, board held rigidly, no lip needed) or plain plated holes (the board has to
-# be clamped, which needs a lip, which costs pixels unless the UI keeps a safe-area inset).
-# Left unresolved on purpose rather than guessed — see README.md §4.
+# Threaded eyelets resolve both at once. Screws come from the REAR and thread directly into the
+# board, so the front wall never has to hold anything and the window can clear every pixel.
+#
+# It does mean nothing shell-integral may sit behind the board — the board is inserted from the
+# rear, so anything already there would block it. The pillars therefore belong to the LID, and the
+# lid is a deep tray whose floor sits behind the components carrying four short pillars. That also
+# keeps the screws short: a pillar hung off a flat lid would need M2x18.
+#
 WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on purpose: a window
                        # that crops the display is unfixable without a reprint, whereas a slightly
                        # loose one only shows a sliver of black bezel.
-
-# --- USB-C ------------------------------------------------------------------------------------
-# On a SHORT edge (the 20.32 one), so it exits the LEFT or RIGHT wall of this landscape box.
-# CONFIRMED 2026-09-09: the USB-C is on the RIGHT short edge with the screen upright, so the
-# cable exits the right-hand wall and the chin above is on that same side.
-USB_ON_RIGHT = True
-USB_PROTRUDE = 2.0     # MEASURED 2026-09-08 — shell overhang past the board edge
-USB_WIDTH    = 9.0     # MEASURED 2026-09-09 — along the board's short axis
-USB_HEIGHT   = 3.3     # MEASURED 2026-09-09 — standing proud of the component-side face.
-# Third cross-check on the stack, and it closes: COMP_Z_MAX came out at 3.00 by subtraction
-# (STACK_TOTAL - DISP_STACK) without anyone knowing what the tallest part was. Measuring the
-# USB-C shell independently gives 3.3. So the connector IS the tallest thing on that face, as
-# assumed, and the two routes agree to 0.3 mm. Irrelevant to the box in any case — the M12 nut
-# leaves 9.48 mm of slack in this axis.
-USB_OFF_Z    = MEASURE("PCB top edge -> USB-C shell centreline")
+# ...but CLAMPED to the board outline, because on the top and left there is only 0.2 mm of bezel to
+# spend and the clearance would otherwise run the opening PAST the board edge, leaving a hairline
+# gap into the case. Flush with the board edge on those two sides is the right answer: no overhang
+# means no chance of the wall creeping over live pixels, and the board's own edge closes the seam.
+WINDOW_X0    = max(DISP_OFF_X - WINDOW_CLR, 0.0)               # = 0.00  (flush)
+WINDOW_Z0    = max(DISP_OFF_Z - WINDOW_CLR, 0.0)               # = 0.00  (flush)
+WINDOW_X1    = min(DISP_OFF_X + DISP_ACT_W + WINDOW_CLR, PCB_W)   # = 33.20
+WINDOW_Z1    = min(DISP_OFF_Z + DISP_ACT_H + WINDOW_CLR, PCB_H)   # = 18.20
 
 # --- Mounting holes ---------------------------------------------------------------------------
 # M2, four, brass eyelets, one per corner — the "M2" callout on the drawing is explicit.
@@ -177,7 +191,16 @@ HOLE_Z_PITCH = HOLE_Z2 - HOLE_Z1                               # = 13.30, DERIVE
 # solid — it is the absolute position that differs by ~1 mm, which the 2.6 clearance hole (0.3 of
 # slop) does NOT absorb.
 HOLE_X_PITCH = 32.0    # agreed by both sources
-HOLE_X1      = MEASURE("PCB left edge -> LEFT hole centre; drawing says 1.97, calipers said 1")
+# RESOLVED 2026-09-09 in favour of the drawing. The eyelets are THREADED M2 inserts, whose brass
+# body measures ~4 mm across on the vendor drawing — so a centre 1.0 mm from the board edge would
+# put a millimetre of that body off the PCB. Impossible. At 1.97 it lands tangent to the edge,
+# which is exactly how it looks in Waveshare's photo. The caliper pass read "1 and 33", each
+# exactly one hole-radius short of 1.97 and 33.97: the signature of measuring to the NEAR EDGE of
+# the hole rather than its centre, easy to do on an eyelet where the centre is not a visible
+# feature. (The z pass did not have the problem — 3.5 + 16.8 = 20.3 proves those are centres.)
+HOLE_X1      = 1.97
+HOLE_X2      = HOLE_X1 + HOLE_X_PITCH                          # = 33.97, DERIVED
+EYELET_THREADED = True   # CONFIRMED 2026-09-09 — an M2 screw bites
 
 # ============================================================================================
 # 2. THE BUTTON — FILN FLM12-FJ-6, identical to button-v2 and cam-button
