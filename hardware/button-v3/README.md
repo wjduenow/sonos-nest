@@ -4,8 +4,9 @@ The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, wit
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
 > **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `body.stl`, `bezel.stl`, `back.stl` —
-> all watertight, 26 clearance rows passing, all three pairwise interference tests clean.
-> **42.17 x 24.98 x 52.32 mm**, 12.91 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
+> all watertight, 27 clearance rows passing, all three pairwise interference tests clean, and the
+> USB-C receptacle and plug envelopes both verified reachable.
+> **42.17 x 24.98 x 52.32 mm**, 12.82 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
 > and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
@@ -127,6 +128,19 @@ shell/build_back.py      back.stl + all three pairwise interference assertions
 shell/build_all.py       runs all three, in order
 shell/render_preview.py  render_preview.png
 ```
+
+> ⚠️ **Nor can a dimensional check catch an ACCESS fault.** Whether a cable can physically reach
+> the socket is a question about the space *between* parts, and no dimension on the body describes
+> it. The first sandwich build passed every numeric row while the lower-right post was buried
+> 0.09 mm in the connector body and the notch was 2 mm too shallow for a plug's overmold.
+> `build_body.py` now intersects the body with modelled **receptacle** and **plug** envelopes and
+> asserts both are empty.
+>
+> Two things came out of that, and both are the kind of constraint that only shows up once:
+> `POST_OD` is 4.0 rather than 4.5 because the lower-right eyelet is 2.16 mm from the edge of a
+> 9 mm connector — set by the connector, not by the cavity wall it looks like it should be. And the
+> USB notch grows **forward** toward the bezel rather than backward, because backward is blocked by
+> the middle plane sitting 0.5 mm behind the shell, which left only 4.8 mm of usable opening.
 
 > ⚠️ **A per-part check cannot catch an assembly fault.** The first build had both parts
 > watertight, both passing every clearance row, and **0.064 cm3 of solid in the same place** — the

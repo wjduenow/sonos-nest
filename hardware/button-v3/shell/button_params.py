@@ -341,7 +341,11 @@ MID_Y1       = MID_Y0 + MID_T                                  # = 12.00
 MID_Z0       = PCB_TOP_Z - 2.0                                 # spans the board's band, and stops
 MID_Z1       = PCB_BOT_Z + 2.0                                 # short of the corner bosses
 
-POST_OD      = 4.5     # ⚠️ not round: the outer eyelet is 0.12 from the cavity wall
+# ⚠️ 4.0, NOT 4.5 — set by the USB-C receptacle, not by the cavity wall. The lower-right eyelet is
+# 2.16 mm from the edge of the 9 mm connector, so a 4.5 post (radius 2.25) buries 0.09 mm of itself
+# in the connector body. Found by intersecting the body with a modelled receptacle; no dimensional
+# check was looking at that pair, because the post and the connector are on different parts.
+POST_OD      = 4.0
 POST_BORE    = 2.6     # M2 clearance, 0.3 of radial slop
 POST_LEN     = MID_Y0 - BOARD_Y_PCB_BACK                       # = 3.80, over the components
 
@@ -387,7 +391,10 @@ POCKET_D     = 2.0     # how deep the board's front edge sits into the bezel
 # Generous on purpose. Unlike the screen window, nothing here needs precision: it clears a cable
 # overmold, which is bigger and less well specified than the receptacle.
 USB_SLOT_W  = USB_WIDTH + 3.0                                  # = 12.00, in Z
-USB_SLOT_Y0 = BOARD_Y_PCB_BACK - 1.0                           # = 8.00
+# ⚠️ The notch grows FORWARD, not backward. Backward is blocked by the middle plane, which sits
+# 0.5 mm behind the connector and left only 4.8 mm of usable opening — under a plug's ~7 mm
+# overmold. Forward is free all the way to the bezel's back face, so that is where the room is.
+USB_SLOT_Y0 = BODY_Y0                                          # = 3.00
 USB_SLOT_Y1 = BOARD_Y_REAR + 2.5                               # = 14.80
 USB_SLOT_ZC = PCB_TOP_Z + USB_OFF_Z                            # = 26.16, the receptacle centreline
 

@@ -128,7 +128,13 @@ def check_clearances(verbose=True):
 
     # 8. USB notch actually covers the connector, with cable slop.
     rec("usb notch over connector, Z", P.USB_SLOT_W - P.USB_WIDTH, 2.0)
-    rec("usb notch over connector, Y", P.USB_SLOT_Y1 - P.USB_SLOT_Y0, P.USB_HEIGHT + 2.0)
+    # A plug's overmold is far bigger than the shell it covers — size the notch for the cable, not
+    # the connector.
+    rec("usb notch depth for a plug", P.USB_SLOT_Y1 - P.USB_SLOT_Y0, 7.5)
+    # ...and the post nearest the connector has to miss it. These live on different parts, which is
+    # exactly why nothing was checking the pair until it was found by intersection.
+    rec("post clear of the USB receptacle",
+        ((P.PCB_TOP_Z + P.USB_OFF_Z - P.USB_WIDTH / 2) - P.HOLE_ZS[0]) - P.POST_OD / 2, 0.1)
 
     # 9. The bezel bosses must sit clear of the board, in the bands above and below it.
     rec("upper boss above the board", P.PCB_TOP_Z - (P.BOSS_ZS[0] + P.BOSS_OD / 2), 0.5)
@@ -261,6 +267,26 @@ if __name__ == "__main__":
     print(f"  OVERALL                 {P.OUT_X:.2f} x {P.OUT_Y:.2f} x {P.HEIGHT:.2f} mm")
     print()
     m = build_body()
+
+    # ⚠️ ACCESS CHECK, not a clearance check. Whether a cable can physically reach the socket is a
+    # question about the space BETWEEN parts, and no dimension on the body describes it — the first
+    # version passed every numeric row while the connector was fouled and the notch was 2 mm too
+    # shallow for a plug.
+    yc = P.BOARD_Y_PCB_BACK + P.USB_HEIGHT / 2
+    zc = P.PCB_TOP_Z + P.USB_OFF_Z
+    envelopes = {
+        "receptacle": blk(P.BOARD_X1 - 7.0, P.BOARD_X1 + P.USB_PROTRUDE,
+                          P.BOARD_Y_PCB_BACK, P.BOARD_Y_PCB_BACK + P.USB_HEIGHT,
+                          zc - P.USB_WIDTH / 2, zc + P.USB_WIDTH / 2),
+        # The overmold starts at the receptacle's MOUTH, not the board edge — a plug does not
+        # insert past the socket it plugs into.
+        "plug": blk(P.BOARD_X1 + P.USB_PROTRUDE, P.OUT_X, yc - 3.5, yc + 3.5, zc - 6.0, zc + 6.0),
+    }
+    for name, env in envelopes.items():
+        v = trimesh.boolean.intersection([m, env], engine=ENG).volume / 1000.0
+        assert v < 1e-4, f"the body fouls the USB {name} by {v:.4f} cm3"
+        print(f"  usb access    {name:11} clear ({v:.5f} cm3)")
+
     m.export("body.stl")
     print(f"  body.stl   watertight={m.is_watertight} winding={m.is_winding_consistent} "
           f"volume={m.volume/1000:.2f}cm3 tris={len(m.faces)}")
