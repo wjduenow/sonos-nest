@@ -94,14 +94,27 @@ LCD_MODULE_T = DISP_STACK - PCB_T                              # = 3.90, carries
 # out to, but the offsets are what actually matter and cannot be derived at all.
 DISP_ACT_W   = 32.4    # MEASURED 2026-09-08 — matches 172 x 320 px at this panel's pitch exactly,
 DISP_ACT_H   = 17.4    # which is a good sign the right thing was measured (the LIT area, not glass)
-DISP_OFF_X   = MEASURE("PCB left edge -> lit area left edge")
-DISP_OFF_Z   = MEASURE("PCB top edge  -> lit area top edge")
+# ⚠️ THE LIT AREA IS NOT CENTRED ON THE PANEL — there is a ~3.5 mm DEAD CHIN on the USB-C side.
+# Observed on hardware 2026-09-09 against the bring-up's 1-px border: three sides sit hard against
+# the display edge, the USB-C side has 3.5 mm of dead glass. That is the driver IC bonded to one
+# short edge of the native 172x320 panel, which rotation 1 puts on the right — ordinary panel
+# construction, NOT a wrong column offset (that was checked: Arduino_TFT::setRotation maps
+# ROW_OFFSET1 -> x and COL_OFFSET2 -> y at rotation 1, both correct here).
+#
+# It matters more than it sounds. Centre the window on the PCB and it crops ~1.75 mm of PIXELS on
+# one side while showing ~1.75 mm of dead chin on the other — and cropped pixels are a reprint.
+DISP_CHIN    = 3.5     # dead glass between the lit area and the display edge, USB-C side
+DISP_OFF_X   = MEASURE("PCB left edge (USB-C on the RIGHT) -> lit area left edge")
+DISP_OFF_Z   = MEASURE("PCB top edge -> lit area top edge")
 WINDOW_CLR   = 0.6     # window is the lit area + this per side. Generous on purpose: a window
                        # that crops the display is unfixable without a reprint, whereas a slightly
                        # loose one only shows a sliver of black bezel.
 
 # --- USB-C ------------------------------------------------------------------------------------
 # On a SHORT edge (the 20.32 one), so it exits the LEFT or RIGHT wall of this landscape box.
+# CONFIRMED 2026-09-09: the USB-C is on the RIGHT short edge with the screen upright, so the
+# cable exits the right-hand wall and the chin above is on that same side.
+USB_ON_RIGHT = True
 USB_PROTRUDE = 2.0     # MEASURED 2026-09-08 — shell overhang past the board edge
 USB_WIDTH    = MEASURE("USB-C shell width")
 USB_HEIGHT   = MEASURE("USB-C shell height")
@@ -116,6 +129,12 @@ USB_OFF_Z    = MEASURE("PCB top edge -> USB-C shell centreline")
 # Y inset between two corners of the same board is unusual enough that it is either real — in
 # which case guessing symmetry puts two bosses 1.5 mm out — or an artefact of reading leaders off
 # a JPEG. Either way it is not something to bet a print on. Caliper all four.
+# CONFIRMED 2026-09-09: all four eyelets stay CLEAR of the LCD module on the display face, so
+# bosses rising off the front wall can reach the PCB's front face at each corner. That is what
+# makes the front-wall boss scheme viable at all — had the module overlapped them, the board would
+# have had to be carried from the rear and the screen's depth in the window would have been set by
+# a tolerance stack instead of by one surface.
+HOLES_CLEAR_OF_LCD = True
 HOLE_D       = 2.0     # M2 nominal
 HOLE_CLR_D   = 2.6     # clearance hole in the PCB pocket / boss pilot spacing. 0.3 mm of radial
                        # slop per hole, deliberately, so a +/-0.3 error in any measured centre

@@ -41,6 +41,13 @@
 // Arduino_GFX 1.3.1 takes it as a constructor argument (col_offset1), so there is nothing to patch.
 #define LCD_COL_OFFSET       34
 #define LCD_ROW_OFFSET        0
+// ⚠️ PASS THIS TO **BOTH** col_offset ARGUMENTS AND 0 TO BOTH row_offsets — do not "tidy" the
+// duplicate away. Arduino_TFT::setRotation() picks a DIFFERENT pair per rotation:
+//     rot 0: xStart=COL1 yStart=ROW1     rot 1: xStart=ROW1 yStart=COL2
+//     rot 2: xStart=COL2 yStart=ROW2     rot 3: xStart=ROW2 yStart=COL1
+// so (34, 0, 34, 0) is correct at EVERY rotation, while the tempting (34, 0, 0, 0) is correct
+// only at 0 and 1 and silently loses the offset at 2 and 3. DISPLAY_ROTATION is a case decision
+// (below) and may yet change, so this has to hold for all four.
 
 // Rotation 1 = landscape, 320 x 172 logical.
 //

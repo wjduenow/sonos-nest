@@ -61,7 +61,8 @@ bool displayInit() {
   if (!s_bus) return false;
 
   // The two offsets are the whole reason this panel needs a thought: 172 columns of glass inside
-  // 240 columns of controller RAM. See pins.h.
+  // 240 columns of controller RAM. Both col_offset arguments get the same value and both
+  // row_offsets get 0 — that is deliberate and rotation-proof; see the note in pins.h.
   s_gfx = new Arduino_ST7789(s_bus, PIN_LCD_RST, DISPLAY_ROTATION, LCD_INVERT_COLORS /* ips */,
                              LCD_WIDTH, LCD_HEIGHT,
                              LCD_COL_OFFSET, LCD_ROW_OFFSET, LCD_COL_OFFSET, LCD_ROW_OFFSET);
