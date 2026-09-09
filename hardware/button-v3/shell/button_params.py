@@ -224,6 +224,17 @@ BUTTON_PANEL_T   = BUTTON_THREAD_L - BUTTON_NUT_T              # = 2.00, DERIVED
 BUTTON_TAIL_T    = 2.5     # the connector/solder tail behind the body
 BUTTON_CX        = 0.0     # centred on width. The top face has room for nothing else anyway.
 
+# ⚠️ THE BOARD IS NOT CENTRED IN THE CASE — THE LIT AREA IS, AND THEY ARE NOT THE SAME POINT.
+# The lit rectangle sits 0.2 from the board's top-left corner with a 3.5 chin on the USB-C side, so
+# its centre is 1.785 right of the board's centre and 1.26 above it. Centring the BOARD would put
+# the visible screen visibly off-centre in the finished box, which is the thing anyone actually
+# looks at. So the board is offset and the case is grown to swallow it.
+DISP_CX = DISP_OFF_X + DISP_ACT_W / 2.0        # = 16.40, lit centre in board coords
+DISP_CZ = DISP_OFF_Z + DISP_ACT_H / 2.0        # = 8.90
+
+BOARD_X0 = -DISP_CX                             # = -16.40  puts the lit centre on x = 0
+BOARD_X1 = BOARD_X0 + PCB_W                     # = 19.97   the USB-C edge
+
 # ============================================================================================
 # 3. THE SHELL
 # ============================================================================================
@@ -262,25 +273,34 @@ BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centre
 NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
 
 # --- Width (X) --------------------------------------------------------------------------------
-IN_X   = PCB_W + 2 * PCB_X_GAP                                 # = 37.17
-OUT_X  = IN_X + 2 * WALL                                       # = 42.17
+# The cavity is symmetric about x = 0 but the board inside it is not, so its half-width is set by
+# whichever board edge ended up further out — the USB-C side, after the offset above.
+IN_X_HALF = max(abs(BOARD_X0), BOARD_X1) + PCB_X_GAP           # = 20.37
+IN_X   = 2 * IN_X_HALF                                         # = 40.74
+OUT_X  = IN_X + 2 * WALL                                       # = 45.74
+
+# The board no longer fills the cavity: it is hard against the right wall (0.4) and 3.97 clear of
+# the left, so a rib takes over locating that edge.
+BOARD_RIB_X = BOARD_X0 - PCB_X_GAP                             # = -16.80, the rib's inner face
+BOARD_RIB_W = 1.2
 
 # --- Height (Z) — set by the BUTTON sitting above the board ------------------------------------
 # The button's body plus its solder tail must clear the board's top edge entirely; the board
 # cannot tuck under it because it spans the full width. That stack IS the height budget.
 BUTTON_KEEPOUT_Z = BUTTON_INSIDE_T + BUTTON_TAIL_T             # = 15.00
 BUTTON_PCB_CLR   = 1.0     # air between the button's tail and the board's top edge
-PCB_TOP_Z    = BUTTON_KEEPOUT_Z + BUTTON_PCB_CLR               # = 16.00
+PCB_TOP_Z    = BUTTON_KEEPOUT_Z + BUTTON_PCB_CLR               # = 16.00  — PINNED by the button
 PCB_BOT_Z    = PCB_TOP_Z + PCB_H                               # = 36.32
-HEIGHT       = PCB_BOT_Z + PCB_Z_GAP + WALL                    # = 39.22  OVERALL
+
+# Height is set by centring the lit area, not by the board. The board's top edge cannot move — the
+# button owns everything above z = 16 — so the box grows DOWNWARD, and that new space below the
+# board is exactly where the second pair of lid posts goes. One change, two problems.
+HEIGHT       = 2.0 * (PCB_TOP_Z + DISP_CZ)                     # = 49.80  OVERALL
+HEIGHT_MIN   = PCB_BOT_Z + PCB_Z_GAP + WALL                    # = 39.22, what the board alone needs
 
 # ============================================================================================
 # 4. WHERE THE BOARD ACTUALLY SITS  (world coordinates — see the datum at the top)
 # ============================================================================================
-# Board X: the cavity walls locate it. IN_X is PCB_W + 0.4 per side, so nothing else has to.
-BOARD_X0 = -PCB_W / 2.0
-BOARD_X1 = +PCB_W / 2.0                 # the USB-C edge — "right" as you face the screen
-
 # Board Y: one chain, front to back, every link measured.
 BOARD_Y_GLASS     = FRONT_WALL + GLASS_AIR                     # = 3.50  display glass
 BOARD_Y_PCB_FRONT = BOARD_Y_GLASS + LCD_MODULE_T               # = 7.40
@@ -340,12 +360,14 @@ SPIGOT_CLR     = 0.25  # per side
 SPIGOT_W       = 2.0   # ring width — a solid plate fouls the lid-screw posts
 SCREW_HEAD_D   = 3.8   # M2 pan head
 SCREW_HEAD_T   = 1.4
-# ⚠️ Position is FORCED, not chosen. The board fills the cavity across almost its full width
-# (36.37 in a 37.17 opening) so nothing fits beside it; there is 0.4 mm below it; above it is the
-# button. The M12 nut's swept circle is 19.48 across on x = 0, leaving exactly two slivers at
-# |x| > 9.74 up in the button region. The posts go there, and there is nowhere else.
-LID_POST_X   = 14.0
-LID_POST_Z   = 8.0
+# FOUR posts now, one near each corner — two above the board and two below it. The pair below only
+# became possible when the box grew to centre the screen; before that there was 0.4 mm under the
+# board and nowhere to put them.
+#
+# ⚠️ The TOP pair still has to dodge the M12 nut, whose swept circle is 19.48 across on the
+# centreline. Anything inside |x| = 9.74 up there lands in it.
+LID_POST_X   = 16.0
+LID_POST_ZS  = (8.0, 42.0)         # above the button's nut band; below the board
 LID_POST_Y0  = FRONT_WALL + 1.0    # they start just behind the front wall and run to the lid
 
 # --- USB-C notch, right-hand wall -------------------------------------------------------------

@@ -4,8 +4,8 @@ The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, wit
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
 > **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `shell.stl`, `carrier.stl`,
-> `lid.stl` — all watertight, 23 clearance rows passing, and all three pairwise interference tests
-> clean. **42.17 x 24.98 x 39.22 mm**, 10.49 + 2.13 + 6.42 cm3. Nothing has been printed or
+> `lid.stl` — all watertight, 25 clearance rows passing, and all three pairwise interference tests
+> clean. **45.74 x 24.98 x 49.80 mm**, 14.44 + 3.30 + 8.52 cm3. Nothing has been printed or
 > test-fitted, and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
@@ -22,6 +22,17 @@ Three things set the shape, and none of them is the PCB:
   and the board spans the full width so it cannot tuck under. `PCB_TOP_Z = 16.00` falls straight
   out of that.
 - **Width is the only dimension the PCB wins**, at 36.37 + gaps + walls = 42.17.
+
+**The LIT AREA is centred in the case, not the board.** They are not the same point: the lit
+rectangle sits 0.2 mm from the board's top-left corner with a 3.5 mm chin on the USB-C side, so its
+centre is 1.79 mm right of the board's and 1.26 mm above it. Centring the board would leave the
+visible screen visibly off-centre in the finished box, which is the only thing anyone looks at. So
+the board is offset and the case grown to swallow it.
+
+**Height falls out of that.** The board's top edge is pinned at z = 16 by the button's nut and
+tail, so centring the screen vertically can only grow the box DOWNWARD — and that new space below
+the board is exactly where the second pair of lid posts goes. One change, two problems: the box
+went 39.22 -> 49.80 tall and gained the 3rd and 4th lid screws it had nowhere to put.
 
 **Retention is four M2 screws from the REAR**, threading directly into the board's brass eyelets.
 That is not what was originally chosen — bosses off the front wall were — and the hardware
@@ -140,7 +151,7 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
 | qty | screw | into |
 |---|---|---|
 | 4 | **M2 x 8** | the board's threaded brass eyelets, through the carrier and its posts |
-| 2 | **M3 x 8** | the shell's lid posts (self-tapping into a 2.5 pilot) |
+| 4 | **M3 x 8** | the shell's lid posts (self-tapping into a 2.5 pilot), one near each corner |
 
 > ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
 > engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
@@ -161,9 +172,8 @@ conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it
    slop. If the first print will not take all four screws, this is the number to re-measure.
 4. **Whether the ring's 5 V low-side drive works off this board's header** — unproven, and the
    last thing that could still change the BOM (`plans/14` §Open).
-5. **Only two lid screws**, both at the top, because the board fills the cavity and there is
-   nowhere else (see `LID_POST_X`). The spigot ring carries the racking load instead. If the lid
-   flexes on a print, that is where to look.
+5. ~~Only two lid screws, both at the top~~ — **four now**, one near each corner, once the box
+   grew to centre the screen. The upper pair still has to dodge the M12 nut's 19.48 swept circle.
 6. **No USB-C strain relief.** `button-v2` needs pinch ribs because the XIAO has no mounting
    holes; here the board is screwed down at four corners, so the load path is probably fine — but
    it is untested.

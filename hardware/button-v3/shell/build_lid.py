@@ -48,7 +48,7 @@ def post_reliefs():
     return trimesh.boolean.union(
         [cyl_y(P.LID_POST_OD + 2 * P.SPIGOT_CLR,
                P.OUT_Y_SHELL - P.SPIGOT_T - 1.0, P.OUT_Y_SHELL + 0.01,
-               x=sx * P.LID_POST_X, z=P.LID_POST_Z) for sx in (-1, 1)], engine=ENG)
+               x=sx * P.LID_POST_X, z=z) for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
 
 
 def screw_head_reliefs():
@@ -67,7 +67,7 @@ def screw_head_reliefs():
 def lid_screw_holes():
     return trimesh.boolean.union(
         [cyl_y(P.LID_SCREW_D, P.OUT_Y_SHELL - P.SPIGOT_T - 1.0, P.OUT_Y + 1.0,
-               x=sx * P.LID_POST_X, z=P.LID_POST_Z) for sx in (-1, 1)], engine=ENG)
+               x=sx * P.LID_POST_X, z=z) for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
 
 
 def build_lid():
@@ -87,8 +87,8 @@ if __name__ == "__main__":
     # screw holes = six holes through the plane at y = OUT_Y.
     sec = m.section(plane_origin=(0, P.OUT_Y - 0.5, 0), plane_normal=(0, 1, 0))
     loops = len(sec.discrete) if sec is not None else 0
-    want = 1 + 2              # outline + the two lid screws
-    assert loops == want, f"the lid face must show {want} loops (outline + 2 holes); it has {loops}"
+    want = 1 + 4              # outline + the four lid screws
+    assert loops == want, f"the lid face must show {want} loops (outline + 4 holes); it has {loops}"
 
     # ⚠️ THE CHECK THAT EARNED ITS PLACE. Each part can be watertight, pass every one of its own
     # clearance rows, and still be un-assemblable, because nothing in a per-part check looks at
@@ -111,7 +111,7 @@ if __name__ == "__main__":
 
     m.export("lid.stl")
     print(f"  spigot     {P.SPIGOT_T:.2f} deep — bears on the carrier's back face")
-    print(f"  screws     2x M3 x 8 (lid into the shell posts)")
+    print(f"  screws     4x M3 x 8 (lid into the shell posts)")
     print(f"  lid.stl    watertight={m.is_watertight} winding={m.is_winding_consistent} "
           f"volume={m.volume/1000:.2f}cm3 tris={len(m.faces)}")
     print(f"             bbox={np.round(m.bounds, 2).tolist()}")

@@ -58,7 +58,23 @@ def check_clearances(verbose=True):
     #    in the cavity wall; 4.5 clears by 0.12. Tightest thing in the assembly, and the reason
     #    CARRIER_POST_OD is not a round number.
     rec("cavity wall clear of carrier post",
-        P.IN_X / 2 - (abs(P.HOLE_XS[0]) + P.CARRIER_POST_OD / 2), 0.05)
+        P.IN_X / 2 - (max(abs(P.HOLE_XS[0]), P.HOLE_XS[1]) + P.CARRIER_POST_OD / 2), 0.05)
+
+    # 1a. ...and the LEFT carrier post has to miss the locating rib, which the offset board made
+    #     necessary. This is now the tightest pair in the assembly.
+    rec("locating rib clear of carrier post",
+        (P.HOLE_XS[0] - P.CARRIER_POST_OD / 2) - P.BOARD_RIB_X, 0.05)
+
+    # 1d. Growing the box to centre the screen must not leave the board short of floor.
+    rec("height covers the board", P.HEIGHT - P.HEIGHT_MIN, 0.0)
+
+    # 1e. The lit area is what gets centred, not the board. Prove it landed.
+    rec("lit area centred in X", 0.05 - abs(P.BOARD_X0 + P.DISP_CX), 0.0)
+    rec("lit area centred in Z", 0.05 - abs((P.PCB_TOP_Z + P.DISP_CZ) - P.HEIGHT / 2), 0.0)
+
+    # 1f. Upper lid posts vs the M12 nut's swept circle.
+    rec("upper lid post clear of the nut",
+        (P.LID_POST_X - P.LID_POST_OD / 2) - P.BUTTON_NUT_AC / 2, 0.5)
 
     # 1b. The carrier itself must clear the M12 nut, which sweeps the full cavity depth at the top
     #     of the box — the reason the plate stops at the board's top edge instead of running to
@@ -138,20 +154,21 @@ def outer_body():
 def lid_screw_posts():
     """Two columns the lid screws bite into.
 
-    ⚠️ Their position is forced, and is the only place they could go. The board fills the cavity
-    across almost its whole width (36.37 in a 37.17 opening), so nothing fits beside it; below it
-    there is 0.4 mm; above it is the button. The M12 nut's swept circle is 19.48 across centred on
-    x = 0, which leaves exactly two slivers at |x| > 9.74 in the button region — these sit there.
+    Four of them, one near each corner. The lower pair only became possible once the box grew to
+    centre the screen: before that there was 0.4 mm below the board and nowhere to put them.
+
+    ⚠️ The UPPER pair still has to dodge the M12 nut, whose swept circle is 19.48 across on the
+    centreline — anything inside |x| = 9.74 up there lands in it.
     """
     return trimesh.boolean.union(
-        [cyl_y(P.LID_POST_OD, P.LID_POST_Y0, P.OUT_Y_SHELL, x=sx * P.LID_POST_X, z=P.LID_POST_Z)
-         for sx in (-1, 1)], engine=ENG)
+        [cyl_y(P.LID_POST_OD, P.LID_POST_Y0, P.OUT_Y_SHELL, x=sx * P.LID_POST_X, z=z)
+         for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
 
 
 def lid_pilots():
     return trimesh.boolean.union(
         [cyl_y(P.LID_POST_PILOT, P.LID_POST_Y0 - 0.01, P.OUT_Y_SHELL + 1.0,
-               x=sx * P.LID_POST_X, z=P.LID_POST_Z) for sx in (-1, 1)], engine=ENG)
+               x=sx * P.LID_POST_X, z=z) for sx in (-1, 1) for z in P.LID_POST_ZS], engine=ENG)
 
 
 def cavity():
@@ -159,6 +176,18 @@ def cavity():
     return rrect_prism(P.IN_X / 2, (P.OUT_Y_SHELL - P.FRONT_WALL) / 2 + 1.0,
                        max(P.OUT_R - P.WALL, 0.5), P.WALL, P.HEIGHT - P.WALL,
                        cy=P.FRONT_WALL + (P.OUT_Y_SHELL - P.FRONT_WALL) / 2 + 1.0)
+
+
+def board_rib():
+    """Locates the board's LEFT edge.
+
+    The board is offset right so the lit area centres on the case, which leaves it hard against
+    the right cavity wall (0.4) and 3.97 clear of the left. The right wall still locates that
+    edge; this rib does the other one.
+    """
+    return blk(P.BOARD_RIB_X - P.BOARD_RIB_W, P.BOARD_RIB_X,
+               P.FRONT_WALL, P.BOARD_Y_PCB_BACK,
+               P.PCB_TOP_Z, P.PCB_BOT_Z)
 
 
 def board_stop():
@@ -193,7 +222,7 @@ def build_shell():
 
     m = outer_body()
     m = trimesh.boolean.difference([m, cavity()], engine=ENG)
-    m = trimesh.boolean.union([m, board_stop(), lid_screw_posts()], engine=ENG)
+    m = trimesh.boolean.union([m, board_stop(), board_rib(), lid_screw_posts()], engine=ENG)
     for cutter in (window(), nut_relief(), button_bore(), usb_notch(), lid_pilots()):
         m = trimesh.boolean.difference([m, cutter], engine=ENG)
     return m

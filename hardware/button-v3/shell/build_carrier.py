@@ -35,6 +35,20 @@ def posts():
          for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
 
 
+def lid_post_reliefs():
+    """Clearance where the shell's LOWER lid posts pass through the plate.
+
+    A consequence of centring the screen: growing the box downward is what made room for the lower
+    posts, and the same growth let this plate reach down over them. The upper pair is clear because
+    the plate starts at the board's top edge.
+    """
+    return trimesh.boolean.union(
+        [cyl_y(P.LID_POST_OD + 2 * P.CARRIER_CLR,
+               P.CARRIER_Y0 - 1.0, P.CARRIER_Y1 + 1.0, x=sx * P.LID_POST_X, z=z)
+         for sx in (-1, 1) for z in P.LID_POST_ZS
+         if P.PCB_TOP_Z <= z <= P.HEIGHT], engine=ENG)
+
+
 def bores():
     return trimesh.boolean.union(
         [cyl_y(P.CARRIER_BORE, P.BOARD_Y_PCB_BACK - 1.0, P.CARRIER_Y1 + 1.0, x=x, z=z)
@@ -43,7 +57,7 @@ def bores():
 
 def build_carrier():
     m = trimesh.boolean.union([plate(), posts()], engine=ENG)
-    return trimesh.boolean.difference([m, bores()], engine=ENG)
+    return trimesh.boolean.difference([m, bores(), lid_post_reliefs()], engine=ENG)
 
 
 if __name__ == "__main__":
