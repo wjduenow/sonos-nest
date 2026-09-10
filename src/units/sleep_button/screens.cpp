@@ -44,11 +44,12 @@
 
 // Enqueue + play round-trip over SOAP.
 //
-// ⚠️ 45 s, not the 20 s the sleep-machine uses. Measured on hardware: a saved queue ("Sleep") sat
-// in PAUSED_PLAYBACK well past 20 s before reaching Playing — Sonos accepts the enqueue and the
-// play, then takes its time expanding the queue and buffering. The old 20 s declared failure on a
-// start that was simply still in progress, and the next press then stopped what it had just
-// started. Sizing this off a big playlist rather than a small one is the whole point.
+// 45 s, against the sleep-machine's 20 s — but purely as margin, NOT because 20 s was ever seen to
+// be short. Measured on hardware once the deadline actually worked: Paused at 0 ms,
+// Transitioning at 1696 ms, Playing at 4809 ms. Every historic "timeout" was the unsigned
+// underflow below, not a slow speaker, and an earlier version of this comment claimed a
+// measurement that had never been taken. The extra margin is for a playlist far larger than
+// "Sleep"; it is not load-bearing.
 static const uint32_t START_TIMEOUT_MS = 45000;
 // ⚠️ COMPARE THE DEADLINE SIGNED — `now - s_startMs > START_TIMEOUT_MS` is a trap here.
 // `now` is sampled once at the top of uiTick, but startPlaylist() calls millis() again a few ms
@@ -226,10 +227,11 @@ static void screenTick(uint32_t now) {
   // and a repaint starts with fillScreen(BLACK), so a value that moves on its own makes the screen
   // flash. Rounding to 5 dB was the obvious fix and did NOT work: measured drift of -51/-54/-50/
   // -49/-52 rounds to -50/-50/-50/-45/-50, so a 1 dB wobble across a boundary still flips it.
-  // Only update what is DISPLAYED once it has moved 5 dB from the displayed value.
+  // Only update what is DISPLAYED once it has moved 10 dB from the displayed value — 5 was still
+  // too tight against a real observed swing of -55 to -67 with the box sitting still.
   {
     const int rssi = (int)g_linkRssi;
-    if (abs(rssi - s_shownRssi) >= 5) s_shownRssi = rssi;
+    if (abs(rssi - s_shownRssi) >= 10) s_shownRssi = rssi;
   }
   snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones", s_shownRssi, (unsigned)g_linkZones);
   snprintf(l3, sizeof(l3), "fw    %s", FW_VERSION);

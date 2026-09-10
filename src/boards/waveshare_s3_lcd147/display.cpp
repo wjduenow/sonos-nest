@@ -29,6 +29,10 @@ static const uint8_t  kBlBits = 8;
 static Arduino_DataBus *s_bus = nullptr;
 static Arduino_GFX     *s_gfx = nullptr;
 
+// The QR currently ON the glass. A page whose QR text is unchanged repaints only its text column,
+// which is what keeps a drifting RSSI from flashing the whole screen — see displayQrPage().
+static String s_lastQr;
+
 // Logical size after rotation. At rotation 1/3 the panel is landscape, so 320x172.
 #if (DISPLAY_ROTATION & 1)
   static const int16_t DISP_W = LCD_HEIGHT, DISP_H = LCD_WIDTH;
@@ -81,6 +85,9 @@ void displayBacklight(uint8_t pct) {
 void displayBlank() {
   if (s_gfx) s_gfx->fillScreen(BLACK);
   blWrite(0);
+  // Invalidate the cache: the glass has just been cleared, so the next page MUST redraw its QR
+  // even if the text is identical. Forgetting this leaves a page with no QR on it at all.
+  s_lastQr = "";
 }
 
 // Draw the QR into a square of side `box` whose top-left is (x0, y0). Returns false if the text
@@ -118,30 +125,42 @@ void displayQrPage(const char *qrText, const char *caption,
                    const char *const *lines, uint8_t nLines) {
   if (!s_gfx) return;
 
-  s_gfx->fillScreen(BLACK);
+  // ⚠️ REPAINT ONLY WHAT CHANGED. A full-page repaint starts with fillScreen(BLACK), which on a
+  // panel this size is a visible flash — and the status text carries RSSI, which drifts on its own
+  // (a real swing of -55 to -67 with the box sitting still). The QR is by far the most expensive
+  // and most conspicuous thing here and almost never changes, so it is redrawn only when its
+  // CONTENT does. A text-only update clears just the right-hand column.
+  const bool qrChanged = (s_lastQr != (qrText ? qrText : ""));
+
+  const int16_t MARGIN = 6;
+  const int16_t box    = DISP_H - 2 * MARGIN;
+  const int16_t tx     = MARGIN + box + MARGIN;
+
+  if (qrChanged) {
+    s_gfx->fillScreen(BLACK);
+    s_lastQr = qrText ? qrText : "";
+  } else {
+    s_gfx->fillRect(tx, 0, DISP_W - tx, DISP_H, BLACK);   // just the text column
+  }
   // NOTE: the built-in GFX font is ASCII-only, and setUTF8Print() needs U8G2_FONT_SUPPORT, which
   // this build does not enable. Callers pass text that has already been folded to ASCII — see
   // asciiFold() in units/sleep_button/screens.cpp, which matters because room names come off the
   // network and "Küche" is a perfectly ordinary one.
 
   // Left: the QR gets a full-height square. Right: caption over status lines.
-  const int16_t MARGIN = 6;
-  const int16_t box    = DISP_H - 2 * MARGIN;
-
   // An EMPTY qrText is a legitimate state, not a failure: before Wi-Fi is up there is no config
   // URL to encode, and the page still has useful things to say on the right. Leave the left half
   // black in that case. Only a genuine encode failure earns the red text — a silently blank half
   // would otherwise read as a dead panel on the one screen whose job is to be readable when
   // something has gone wrong.
-  if (qrText && *qrText && !drawQr(qrText, MARGIN, MARGIN, box)) {
+  if (qrChanged && qrText && *qrText && !drawQr(qrText, MARGIN, MARGIN, box)) {
     s_gfx->setTextColor(RED);
     s_gfx->setTextSize(1);
     s_gfx->setCursor(MARGIN + 4, MARGIN + box / 2 - 4);
     s_gfx->print("QR encode failed");
   }
 
-  const int16_t tx = MARGIN + box + MARGIN;
-  int16_t       ty = MARGIN + 4;
+  int16_t ty = MARGIN + 4;
 
   if (caption && *caption) {
     s_gfx->setTextColor(CYAN);
