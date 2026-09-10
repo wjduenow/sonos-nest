@@ -187,13 +187,15 @@ polls the accelerometer (±8 g @ 500 Hz) every 5 ms from `uiTick` and fires on s
 Gravity cancels in the difference, so it needs no baseline and no orientation assumption — the box
 can be mounted any way up.
 
-> ⚠️ **`TAP_JERK_LSB` = 1200, measured on a BARE BOARD — re-measure against the printed case.**
-> 45 s capture, 2026-09-08: idle 44-95 LSB with one 471 excursion; deliberate fingertip taps
-> 3674-80123, weakest 3674. That is ~8x of separation, so 1200 sits ~2.5x above the worst idle and
-> ~3x below the weakest tap. In a case the PCB sits on ledges and the knock lands on a wall
-> instead — if attenuation is 3x, the weakest tap arrives right at the threshold. The case is also
-> where false positives live (a drawer, a glass set down), so both sides of the margin move.
-> `TAP_DEBUG 1` in `imu.cpp` repeats the capture. Same role `WAKE_DEBUG` plays for the wake word.
+> ✅ **`TAP_JERK_LSB` = 7000, measured IN THE PRINTED CASE 2026-09-10.** Hands off 290; typing on
+> the same desk 1,688; deliberate taps 29,814-80,823. A 17.7x band with nothing in it, so the
+> threshold is the geometric midpoint: 4.1x above typing, 4.3x below the weakest tap.
+>
+> ⚠️ **The bench figure of 1200 was not transferable, and that is the lesson.** On a loose PCB
+> taps read 3,674-80,123 against an idle floor of 44-95. Bolted into a case on a desk, BOTH sides
+> moved and not by the same factor: the case is a far better path to the surface, so typing went
+> from invisible to 1,688 — straight through the old threshold — while a fingertip tap also
+> transmits better, lifting the weakest tap from 3,674 to 29,814. Measure in the enclosure.
 
 ### The unit id — do not merge it back
 

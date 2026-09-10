@@ -77,23 +77,27 @@ static const uint32_t REFRACTORY_MS = 400;
 // through the accelerometer, and a phantom tap at boot would light the screen for no reason.
 static const uint32_t SETTLE_MS    = 750;
 
-// MEASURED ON HARDWARE 2026-09-08 (bring-up, bare board on a desk, 45 s capture):
+// MEASURED IN THE PRINTED CASE, ON A DESK, 2026-09-10 — 139 s in four phases:
 //
-//   idle, untouched, 25 s   44 - 95 LSB, with ONE excursion to 471 (a desk bump)
-//   deliberate fingertip taps   3674 - 80123 LSB, median ~10k, weakest 3674
+//   hands off the desk        max     290
+//   TYPING on the same desk   max   1,688   (top five: 1325 1328 1383 1494 1688)
+//   deliberate taps           29,814 · 56,335 · 60,792 · 65,486 · 78,840 · 80,823
 //
-// So the real separation is about 8x, far wider than the 2250 originally guessed here — and the
-// guess was in the wrong direction, high enough that a lightly-tapped case might have missed.
-// 1200 is ~2.5x above the worst idle excursion and ~3x below the weakest tap, which spends the
-// margin on the side that matters: a tap that does nothing is a broken feature, whereas a false
-// wake merely lights the screen for 20 s.
+// A 17.7x band with nothing whatsoever inside it, so 7000 — the geometric midpoint — sits 4.1x
+// above the worst typing spike and 4.3x below the weakest real tap. Balanced on BOTH sides rather
+// than merely clearing one, which matters because the two failure modes are equally bad: a screen
+// that wakes when someone types, and a tap that does nothing.
 //
-// ⚠️ RE-MEASURE AGAINST THE PRINTED CASE. Every number above is a bare PCB struck directly. In a
-// case the PCB sits on ledges and the knock lands on a wall instead, which attenuates it — if 3x
-// of attenuation is possible then the weakest tap lands right on this threshold. The case is also
-// where false positives will come from (a nightstand drawer, a glass set down), so both sides of
-// the margin move. Set TAP_DEBUG 1 and repeat the capture once there is a case.
-static const int32_t  TAP_JERK_LSB = 1200;
+// ⚠️ THE OLD VALUE OF 1200 CAME FROM A BARE BOARD AND WAS NOT TRANSFERABLE. On a loose PCB, taps
+// read 3,674-80,123 against an idle floor of 44-95; bolted into a case on a desk BOTH sides moved
+// and not by the same factor. The case is a far better mechanical path to the surface — typing
+// went from invisible to 1,688, right through the old threshold, which is exactly the reported
+// symptom — while also transmitting a fingertip tap better, lifting the weakest tap from 3,674 to
+// 29,814. Re-measure in the enclosure, never on the bench.
+//
+// The gap is wide enough that a plain threshold is sufficient; discriminating on shape (a sharp
+// impulse against a quiet background, versus sustained chatter) was considered and is unnecessary.
+static const int32_t  TAP_JERK_LSB = 7000;
 
 static uint8_t  s_addr      = 0;
 static bool     s_have      = false;
