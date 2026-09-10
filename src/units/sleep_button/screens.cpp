@@ -50,6 +50,14 @@
 // start that was simply still in progress, and the next press then stopped what it had just
 // started. Sizing this off a big playlist rather than a small one is the whole point.
 static const uint32_t START_TIMEOUT_MS = 45000;
+// ⚠️ COMPARE THE DEADLINE SIGNED — `now - s_startMs > START_TIMEOUT_MS` is a trap here.
+// `now` is sampled once at the top of uiTick, but startPlaylist() calls millis() again a few ms
+// later, so s_startMs ends up AHEAD of now. Unsigned, that subtraction wraps to ~4.29e9, which
+// beats any timeout: the start timed out on the very same tick as the press, every time, and
+// raising the limit from 20 s to 45 s changed nothing at all. The symptom was a start that
+// "failed" instantly and a next press that stopped what it had just started.
+// Signed also keeps the genuine 49.7-day millis() rollover working. Same trap as
+// appSupervisorTick() in core/app.cpp — see CLAUDE.md.
 
 // Press-acknowledge pulse. The press-to-audio path is several SOAP calls; without instant local
 // feedback a user wonders whether the press registered and mashes the button. So the ring gives
@@ -131,6 +139,7 @@ static uint32_t s_screenUntil = 0;       // 0 = dark
 static bool     s_screenLit   = false;
 static uint32_t s_screenPoll  = 0;
 static String   s_screenSig;             // content signature of what is currently painted
+static int      s_shownRssi   = 0;       // last RSSI actually PAINTED — see the hysteresis below
 
 // Escape an SSID for a `WIFI:` QR payload. `\ ; , :` are the payload's own delimiters and must be
 // backslash-escaped. NOT theoretical: the SSID is wifiHostname(), which is settingsDeviceName()
@@ -213,13 +222,16 @@ static void screenTick(uint32_t now) {
   const String roomAscii = asciiFold(room);
   snprintf(l0, sizeof(l0), "room  %s", roomAscii.length() ? roomAscii.c_str() : "-");
   snprintf(l1, sizeof(l1), "ip    %s", ip ? ipStr : "-");
-  // ⚠️ RSSI ROUNDED TO 5 dB, and that is not cosmetic. The page repaints whenever its content
-  // signature changes, and a repaint starts with fillScreen(BLACK) — so a raw RSSI, which moves
-  // every second and moves more when the box is handled, made the screen flash once a second. It
-  // is decoration on a signpost; quantising it keeps the signature stable while still showing
-  // whether the link is strong.
-  snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones",
-           ((int)g_linkRssi / 5) * 5, (unsigned)g_linkZones);
+  // ⚠️ RSSI NEEDS HYSTERESIS, NOT ROUNDING. The page repaints when its content signature changes
+  // and a repaint starts with fillScreen(BLACK), so a value that moves on its own makes the screen
+  // flash. Rounding to 5 dB was the obvious fix and did NOT work: measured drift of -51/-54/-50/
+  // -49/-52 rounds to -50/-50/-50/-45/-50, so a 1 dB wobble across a boundary still flips it.
+  // Only update what is DISPLAYED once it has moved 5 dB from the displayed value.
+  {
+    const int rssi = (int)g_linkRssi;
+    if (abs(rssi - s_shownRssi) >= 5) s_shownRssi = rssi;
+  }
+  snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones", s_shownRssi, (unsigned)g_linkZones);
   snprintf(l3, sizeof(l3), "fw    %s", FW_VERSION);
 
   // settingsBrightness() is in the signature because infoScreenShow() applies it — without it,
@@ -494,7 +506,7 @@ void uiTick() {
         // slot, since any of the three can be the first press after a reboot.
         for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s)
           library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true);
-      } else if (now - s_startMs > START_TIMEOUT_MS) {
+      } else if ((int32_t)(now - s_startMs) > (int32_t)START_TIMEOUT_MS) {
         s_listed = true;                 // don't retry forever; the page just shows a text box
         s_st     = St::Idle;
       }
@@ -507,8 +519,8 @@ void uiTick() {
       // here that identified the real behaviour.
       static TransportState lastTr = TransportState::Unknown;
       if (tr != lastTr) {
-        LOG.printf("[unit   ] starting: transport -> %s (%lu ms in)\n",
-                   trName(tr), (unsigned long)(now - s_startMs));
+        LOG.printf("[unit   ] starting: transport -> %s (%ld ms in)\n",
+                   trName(tr), (long)(int32_t)(now - s_startMs));
         lastTr = tr;
       }
       // requestPlayNamed() is doing the work on netTask. We just wait for the room to reach
@@ -520,7 +532,7 @@ void uiTick() {
       } else if (tr == TransportState::Playing) {
         s_st = St::Playing;
         LOG.println("[unit   ] playing");
-      } else if (now - s_startMs > START_TIMEOUT_MS) {
+      } else if ((int32_t)(now - s_startMs) > (int32_t)START_TIMEOUT_MS) {
         String coord;
         if (stateLock()) { coord = g_player.coordinatorIp; stateUnlock(); }
         LOG.printf("[unit   ] timed out starting playback — coord=%s tr=%s uri=%s\n",
