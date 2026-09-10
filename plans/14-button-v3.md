@@ -48,6 +48,8 @@ It exists because a headless button cannot answer two questions:
 >   dims under PWM off GP4, and GP2 classified four consecutive presses (190/210/220/190 ms) with
 >   no chatter. **The last item that could have forced a BOM change is closed** — the low-side ring
 >   drive carries over from button-v2 completely unchanged.
+> - ✅ **REPLACEMENT BOARD 2026-09-09**: panel good, QR on screen, harness working, and the printed
+>   case's **mounting height confirmed** — the glass sits flush in the bezel.
 > - ⬜ The **provisioning QR path is untested** — see Open.
 
 ---

@@ -103,12 +103,16 @@ USB_OFF_Z    = PCB_H / 2.0   # CONFIRMED 2026-09-09 centred on that edge = 10.16
 # components. Shortening the posts alone would pull the board back into a plane that stayed put and
 # bury 1.5 mm of USB-C connector in it.
 #
-# ⚠️ AND IT LEAVES STACK_TOTAL INCONSISTENT — re-measure both on the new board. 7.5 + 3.3 = 10.8,
-# against a measured total of 8.5. One of the two is wrong by ~2 mm and the assembly says it is not
-# this one. COMP_Z_MAX takes the max of the two routes, so the cavity is still sized off the USB-C
-# connector's own measured height and cannot come out short.
+# ✅ CONFIRMED BY FIT 2026-09-09: with 7.5 the glass sits flush in the bezel on a printed case and
+# a live board. That also settles which of the two measurements was wrong — 7.5 + 3.3 = 10.8
+# against a measured STACK_TOTAL of 8.5, and the assembly says the error is in STACK_TOTAL, not
+# here. Harmless either way: COMP_Z_MAX takes the max of the two routes, so the cavity is sized off
+# the USB-C connector's own measured height and cannot come out short.
 DISP_STACK   = 7.5     # glass top -> PCB BACK face (LCD module + PCB)
-STACK_TOTAL  = 8.5     # MEASURED 2026-09-08 — glass top -> tallest part on the component side
+STACK_TOTAL  = 8.5     # ⚠️ SUSPECT — see DISP_STACK above. Nominally glass top -> tallest part on
+                       # the component side, but it cannot be reconciled with a DISP_STACK that a
+                       # printed case has now confirmed. Kept only because COMP_Z_MAX takes the
+                       # max() of both routes and so cannot be made too small by it.
 
 # Falls straight out, and the fact that it lands on ~3.0 is the cross-check that the two
 # measurements above were read correctly: a standard top-mount USB-C shell stands 3.16 mm proud,
