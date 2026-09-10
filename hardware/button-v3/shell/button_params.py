@@ -218,8 +218,19 @@ EYELET_THREADED = True   # CONFIRMED 2026-09-09 — an M2 screw bites
 # ============================================================================================
 # 2. THE BUTTON — FILN FLM12-FJ-6, identical to button-v2 and cam-button
 # ============================================================================================
-BUTTON_BODY_D    = 11.71   # measured thread major diameter (plans/04 §6)
-BUTTON_BORE_D    = 12.0    # thread + ~0.3. FDM prints holes undersize — test-coupon it.
+# ⚠️ 11.85, RE-MEASURED 2026-09-09 on the button in hand. plans/04 §6 recorded 11.71, and the
+# 0.14 mm difference mattered: the bore was a typed 12.0, i.e. 0.15 of nominal clearance, and FDM
+# prints holes UNDERSIZE — so the printed hole came out at or below the thread and the button
+# would not pass. Reported from a real print as "a little tight".
+BUTTON_BODY_D    = 11.85   # thread major diameter
+BUTTON_BORE_CLR  = 0.45    # spend it freely — see below
+BUTTON_BORE_D    = BUTTON_BODY_D + BUTTON_BORE_CLR             # = 12.30, DERIVED
+
+# Why 0.45 and not a tighter fit: the Ø14 flange sits ON the outer face and covers the bore
+# completely, so slop here is INVISIBLE, while a bore 0.1 too small is a part you cannot assemble
+# without a file. The asymmetry is total, so the clearance goes where the risk is. It is also
+# derived now rather than typed, which is what let a 0.14 mm change in the thread silently eat the
+# entire margin last time.
 BUTTON_HEAD_D    = 14.0    # datasheet ø14 flange; sits ON the outer face and hides the bore
 BUTTON_NUT_AF    = 16.0    # datasheet hex ACROSS FLATS
 BUTTON_NUT_AC    = BUTTON_NUT_AF / 0.8660254   # = 18.48 ACROSS CORNERS — the real keep-out, and

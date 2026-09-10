@@ -92,6 +92,22 @@ board, and it produced two readings (5.75, then 5.5) that looked like two quanti
 They were one quantity twice. **Ask for a dimension between two surfaces a caliper can actually
 touch**, not between one surface and a plane buried inside an assembly.
 
+### ⚠️ Superseded — the FLM12 thread is 11.85, not 11.71
+
+`plans/04` §6 recorded the thread major diameter as **11.71**. Re-measured 2026-09-09 on the button
+in hand it is **11.85**, and that 0.14 mm mattered: the bore was a typed 12.0, so nominal clearance
+was 0.15 — and FDM prints holes **undersize**, which put the printed hole at or below the thread.
+Reported from a real print as "a little tight".
+
+The bore is derived now (`BUTTON_BODY_D + BUTTON_BORE_CLR`, 0.45) rather than typed, which is
+exactly what let a small change in the thread silently eat the whole margin. Clearance is spent
+freely here because the asymmetry is total: the Ø14 flange sits on the outer face and hides the
+bore completely, so slop is **invisible**, while 0.1 mm too small is a part you cannot assemble.
+
+> ⚠️ `hardware/button-v2` and `hardware/cam-button` still carry **11.71** with a typed 12.0 bore.
+> Same physical button, so they are likely tight too — not changed here, because their STLs are
+> committed and may already be printed.
+
 ### ⚠️ Superseded — what the drawing got wrong
 
 Tolerance is friendlier than it looks: the M2s get **Ø2.6 clearance holes**, so ±0.3 mm per hole

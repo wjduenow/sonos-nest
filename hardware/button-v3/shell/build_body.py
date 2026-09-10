@@ -123,6 +123,12 @@ def check_clearances(verbose=True):
     rec("opening clears the board, top",    P.PCB_TOP_Z - P.WIN_Z0, 0.1)
     rec("opening clears the board, bottom", P.WIN_Z1 - (P.PCB_TOP_Z + P.PCB_H), 0.1)
 
+    # 3b. The bore must clear the thread with room for FDM undersizing, AND stay hidden under the
+    #     flange. Those pull in opposite directions, so both ends get a row — a bore that clears
+    #     the thread but peeks out from under the head is just as wrong, only uglier.
+    rec("bore clears the thread", P.BUTTON_BORE_D - P.BUTTON_BODY_D, 0.40)
+    rec("flange still covers the bore", P.BUTTON_HEAD_D - P.BUTTON_BORE_D, 1.0)
+
     # 4. The M12 nut is what sets the box depth; prove it still fits after everything else moved.
     rec("cavity depth for M12 nut", P.IN_Y - P.BUTTON_NUT_AC, 2 * P.NUT_SOCKET_CLR)
     rec("cavity width for M12 nut", P.IN_X - P.BUTTON_NUT_AC, 2 * P.NUT_SOCKET_CLR)
