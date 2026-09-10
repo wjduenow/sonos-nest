@@ -42,9 +42,14 @@
 #endif
 #endif
 
-// Enqueue + play round-trip over SOAP. The sleep-machine allows the same 20 s before giving up;
-// matching it keeps the two units' failure behaviour identical.
-static const uint32_t START_TIMEOUT_MS = 20000;
+// Enqueue + play round-trip over SOAP.
+//
+// ⚠️ 45 s, not the 20 s the sleep-machine uses. Measured on hardware: a saved queue ("Sleep") sat
+// in PAUSED_PLAYBACK well past 20 s before reaching Playing — Sonos accepts the enqueue and the
+// play, then takes its time expanding the queue and buffering. The old 20 s declared failure on a
+// start that was simply still in progress, and the next press then stopped what it had just
+// started. Sizing this off a big playlist rather than a small one is the whole point.
+static const uint32_t START_TIMEOUT_MS = 45000;
 
 // Press-acknowledge pulse. The press-to-audio path is several SOAP calls; without instant local
 // feedback a user wonders whether the press registered and mashes the button. So the ring gives
@@ -496,7 +501,16 @@ void uiTick() {
       break;
     }
 
-    case St::Starting:
+    case St::Starting: {
+      // Log every transport change while starting. "timed out" on its own could not distinguish a
+      // start that never happened from one that was still happening — it was the Paused sighting
+      // here that identified the real behaviour.
+      static TransportState lastTr = TransportState::Unknown;
+      if (tr != lastTr) {
+        LOG.printf("[unit   ] starting: transport -> %s (%lu ms in)\n",
+                   trName(tr), (unsigned long)(now - s_startMs));
+        lastTr = tr;
+      }
       // requestPlayNamed() is doing the work on netTask. We just wait for the room to reach
       // Playing, surface a resolve failure, or time out.
       if (library::playNamedFailed()) {
@@ -526,6 +540,7 @@ void uiTick() {
         }
       }
       break;
+    }
 
     case St::Playing:
       // Stopped from the Sonos app, or the queue ran out despite REPEAT_ALL.
