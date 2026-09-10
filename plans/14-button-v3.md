@@ -50,7 +50,10 @@ It exists because a headless button cannot answer two questions:
 >   drive carries over from button-v2 completely unchanged.
 > - ✅ **REPLACEMENT BOARD 2026-09-09**: panel good, QR on screen, harness working, and the printed
 >   case's **mounting height confirmed** — the glass sits flush in the bezel.
-> - ⬜ The **provisioning QR path is untested** — see Open.
+> - ✅ **PROVISIONING QR WORKS 2026-09-10.** Held through power-on, the device raises its setup AP
+>   and paints "Scan to set up Wi-Fi" with `http://192.168.4.1/`, lit indefinitely. That is the
+>   feature the screen exists for, and it is the last of the four originally-specified behaviours
+>   to be proven on hardware.
 
 ---
 
@@ -221,7 +224,7 @@ can be mounted any way up.
 | A | Software: board, unit, envs, ladders, CI | ✅ build-verified |
 | B | Phase-0 bring-up on hardware | ⬜ |
 | C | App on hardware: QR scans, screen sleeps, tap wake | ✅ 2026-09-08 |
-| D | Provisioning QR joins the setup AP | ⬜ blocked on the switch |
+| D | Provisioning QR raises the setup AP | ✅ 2026-09-10 |
 | E | Case, `hardware/button-v3/` | ⬜ |
 
 ### Phase B, in order
@@ -273,11 +276,17 @@ board.
   the tap threshold: pressing the button produces accelerometer jerk up to **6597**, about 5.5x
   `TAP_JERK_LSB`, so a press always registers as a tap too. Harmless — both wake the screen — but
   it means the two inputs can never be told apart by the IMU.
-- **The provisioning QR (`uiProvisioning`) has never run.** It cannot: `include/secrets.h` bakes in
-  `WIFI_SSID`, so `wifiHaveCreds()` is always true and the portal is only reachable by holding the
-  button through power-on — which needs the switch wired. Test it as soon as it is. Until then the
-  `WIFI:` payload and its SSID escaping are code-reviewed only.
-- **Press-wake is untested** for the same reason; only tap-wake has run.
+- ~~The provisioning QR has never run~~ — **PROVEN 2026-09-10** by holding the button through
+  power-on.
+  > ⚠️ **The SSID ESCAPING is still untested.** `sonos-button3-setup` contains none of the `\ ; , :`
+  > characters `wifiQrEscape()` exists to handle, so that function was a no-op in the test that
+  > passed. The escaping only matters once an owner sets a device name containing one — and a bad
+  > payload does not look wrong, it just sends the phone to a network that does not exist. Set a
+  > device name with a semicolon on the `:8080` page and repeat to cover it.
+- ⚠️ **There is no way to re-provision without physical access.** The only trigger is a hold
+  through power-on, which is fine on a desk and useless on a wall — exactly the situation this
+  screen exists to solve. A config-page field that sets a flag and reboots into the portal would
+  fix it, and would have turned a fiddly two-handed test into one HTTP request.
 - ⚠️ **`TAP_JERK_LSB`** — a guess. Measure it against the printed case, not a bare board: a case
   transmits a knock quite differently from a PCB on a desk.
 - ⚠️ **Mounting-hole centres.** The board is **36.37 × 20.32 mm** with four **M2** corner holes

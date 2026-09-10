@@ -267,6 +267,10 @@ void uiProvisioning(const char *apSsid) {
   // and a setup screen that darkens after 20 s while someone is fetching their phone is a screen
   // that has failed at its only job. The first uiTick() after provisioning takes it down.
   const String qr = String("WIFI:T:nopass;S:") + wifiQrEscape(apSsid) + ";;";
+  // Log the exact payload. It is the one thing on this screen that cannot be checked by looking at
+  // it — a QR renders identically whether or not the SSID escaping is right, and a wrong payload
+  // sends the phone to a network that does not exist.
+  LOG.printf("[unit   ] provisioning QR: %s\n", qr.c_str());
   char l0[48], l1[48];
   snprintf(l0, sizeof(l0), "join  %s", apSsid ? apSsid : "?");
   snprintf(l1, sizeof(l1), "then  http://192.168.4.1/");
