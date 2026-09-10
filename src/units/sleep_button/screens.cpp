@@ -82,6 +82,16 @@ static uint32_t s_edges     = 0;
 // body — see core/board.h.
 static void ringRest() { ringSet(settingsRing()); }
 
+static const char *trName(TransportState t) {
+  switch (t) {
+    case TransportState::Playing:       return "Playing";
+    case TransportState::Paused:        return "Paused";
+    case TransportState::Stopped:       return "Stopped";
+    case TransportState::Transitioning: return "Transitioning";
+    default:                            return "Unknown";
+  }
+}
+
 // Kick a press-acknowledge pulse. Drive the ring to the opposite extreme of where it's resting
 // so the transient is visible either way: resting bright -> dip dark, resting dim/off -> flash
 // bright. uiTick() restores the resting level when s_pulseEnd passes.
@@ -289,7 +299,13 @@ static void startPlaylist(uint8_t slot) {
   s_slot    = slot;
   s_st      = St::Starting;
   s_startMs = millis();
-  LOG.printf("[unit   ] press x%u start \"%s\" @ vol %u\n", slot, name.c_str(), vol);
+  // Name the TARGET, not just the intent. "timed out" on its own says nothing about whether we
+  // aimed at the right speaker, and that was the first thing worth ruling out when this failed.
+  String room, coord;
+  if (stateLock()) { room = g_player.zoneName; coord = g_player.coordinatorIp; stateUnlock(); }
+  LOG.printf("[unit   ] press x%u start \"%s\" @ vol %u -> %s (coord %s)\n",
+             slot, name.c_str(), vol, room.length() ? room.c_str() : "?",
+             coord.length() ? coord.c_str() : "?");
 }
 
 static void stopPlayback() {
@@ -393,6 +409,11 @@ void uiTick() {
     s_startMs = now;            // Listing shares the same timeout; without this it fires at once
   }
 
+  // Is the room playing the queue WE fill? Hoisted out of the press handler because the start
+  // timeout needs the same answer — see St::Starting below.
+  const bool playingOurQueue =
+      (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
+
   // --- the button -------------------------------------------------------------------------
   // Short is the toggle this product exists for; Double/Triple start their own press slot. Long is
   // reserved: §1 wants hold-at-boot for the WiFi portal, which is a boot-time check, not a runtime
@@ -424,7 +445,6 @@ void uiTick() {
     // start/override: a soundbar plays TV/line-in as a DIFFERENT source (x-sonos-htastream /
     // x-rincon-stream), so a press there takes the room onto the sleep playlist rather than toggling
     // nothing — which is why this can't simply stop on tr==Playing (see df5141a).
-    const bool playingOurQueue = (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
     if (s_st == St::Starting || playingOurQueue) stopPlayback();
     else                                         startPlaylist(1);
   } else if (ev == KnobEvent::Double) {
@@ -472,8 +492,23 @@ void uiTick() {
         s_st = St::Playing;
         LOG.println("[unit   ] playing");
       } else if (now - s_startMs > START_TIMEOUT_MS) {
-        LOG.println("[unit   ] timed out starting playback");
-        s_st = St::Idle;
+        String coord;
+        if (stateLock()) { coord = g_player.coordinatorIp; stateUnlock(); }
+        LOG.printf("[unit   ] timed out starting playback — coord=%s tr=%s uri=%s\n",
+                   coord.length() ? coord.c_str() : "?", trName(tr),
+                   srcUri.length() ? srcUri.c_str() : "-");
+
+        // SELF-CORRECT. If the room is in fact playing our queue, the start worked and only our
+        // observation of it was late — dropping to Idle there desyncs the toggle, so the NEXT
+        // press reads as "start" and re-enqueues instead of stopping. That is the symptom this
+        // actually produced on hardware: three starts, three timeouts, and a toggle that had to be
+        // pressed twice. Recovering here fixes the behaviour whatever the underlying latency was.
+        if (playingOurQueue) {
+          s_st = St::Playing;
+          LOG.println("[unit   ] ...but the room IS playing our queue — recovered to Playing");
+        } else {
+          s_st = St::Idle;
+        }
       }
       break;
 
