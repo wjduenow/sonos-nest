@@ -114,9 +114,10 @@ static void ringPulse() {
 // =========================================================================================
 #ifdef BUTTON_SCREEN
 
-// How long the page stays lit. Long enough to get a phone out of a pocket and point it, short
-// enough that a knocked shelf doesn't leave a lit box overnight.
-static const uint32_t SCREEN_ON_MS   = 20000;
+// How long the page stays lit. Long enough to get a phone out of a pocket, point it, and have the
+// camera actually resolve the code; short enough that a knocked shelf doesn't leave a lit box
+// overnight. 20 s proved too short in use.
+static const uint32_t SCREEN_ON_MS   = 45000;
 // Rebuild-and-compare cadence while lit. The page only repaints when its CONTENT changes, so this
 // is just how often we ask; a repaint is ~40 ms of SPI and would visibly flicker every second.
 static const uint32_t SCREEN_POLL_MS = 1000;
@@ -139,12 +140,20 @@ static String wifiQrEscape(const char *in) {
   return out;
 }
 
-// Light the screen (or extend an already-lit one) and force a repaint on the next tick.
+// Light the screen — but ONLY from dark. While it is already showing, every further tap and press
+// is ignored outright: no extension, no repaint.
+//
+// Extending looked harmless and was not. A repaint begins with fillScreen(BLACK), so re-waking an
+// already-lit screen is a visible flash, and the IMU fires repeatedly whenever the box is handled
+// — picking it up produced a strobe. Letting the period simply run out is also more predictable in
+// use: the screen is up for a known 45 s from the gesture that woke it, not for an unbounded time
+// that any passing vibration renews.
 static void screenWake() {
   if (!infoScreenPresent()) return;
+  if (s_screenLit || s_screenUntil) return;    // already showing — leave it entirely alone
   s_screenUntil = millis() + SCREEN_ON_MS;
-  s_screenPoll  = 0;          // repaint immediately rather than up to a second later
-  s_screenSig   = "";         // ...and unconditionally, even if the content is unchanged
+  s_screenPoll  = 0;          // paint immediately rather than up to a second later
+  s_screenSig   = "";
 }
 
 // Fold to printable 7-bit ASCII. The panel's built-in font has no glyphs above 0x7F, so a UTF-8
@@ -199,7 +208,13 @@ static void screenTick(uint32_t now) {
   const String roomAscii = asciiFold(room);
   snprintf(l0, sizeof(l0), "room  %s", roomAscii.length() ? roomAscii.c_str() : "-");
   snprintf(l1, sizeof(l1), "ip    %s", ip ? ipStr : "-");
-  snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones", (int)g_linkRssi, (unsigned)g_linkZones);
+  // ⚠️ RSSI ROUNDED TO 5 dB, and that is not cosmetic. The page repaints whenever its content
+  // signature changes, and a repaint starts with fillScreen(BLACK) — so a raw RSSI, which moves
+  // every second and moves more when the box is handled, made the screen flash once a second. It
+  // is decoration on a signpost; quantising it keeps the signature stable while still showing
+  // whether the link is strong.
+  snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones",
+           ((int)g_linkRssi / 5) * 5, (unsigned)g_linkZones);
   snprintf(l3, sizeof(l3), "fw    %s", FW_VERSION);
 
   // settingsBrightness() is in the signature because infoScreenShow() applies it — without it,
