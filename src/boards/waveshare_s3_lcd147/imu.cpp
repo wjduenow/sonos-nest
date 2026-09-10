@@ -44,7 +44,23 @@ static const uint8_t CTRL1_ADDR_AI = 0x40;
 //   and an ODR near the poll rate would alias it away entirely.
 static const uint8_t CTRL2_8G_500HZ = 0x24;
 
-// CTRL7: accelerometer only. The gyro is 2-3 mA and answers a question nobody here is asking.
+// ⚠️⚠️ CTRL6 = 0 (ATTITUDE ENGINE OFF) IS LOAD-BEARING. Without it this part accepts every other
+// register, reports them back correctly, and produces NOTHING: STATUSINT stays 0x00 and all three
+// axes sit pinned at 0x7FFF. With the AttitudeEngine running the raw accel registers simply are
+// not updated — it emits fused output instead — so the failure looks nothing like a configuration
+// error and everything like a dead sensor.
+//
+// It bites only on a board still holding Waveshare's FACTORY DEMO state, because the IMU is not
+// power-cycled by an ESP32 reset and keeps whatever mode the last firmware left it in. The first
+// board here happened to come up with AE off and worked on a config that omitted CTRL6 entirely;
+// the replacement did not, and the identical firmware read 0x7FFF forever.
+//
+// Isolated by bisection, not assumed: with CTRL6 cleared this works at CTRL7 = 0x01, so the gyro
+// (0x43) and the "high speed internal clock" bit (0x41) that Waveshare's own driver sets are both
+// unnecessary here. Enabling the gyro would have cost 2-3 mA for nothing.
+static const uint8_t REG_CTRL6      = 0x07;   // ⚠️ 0x07. 0x06 is CTRL5 — an off-by-one here writes
+                                              // the LPF register and leaves AE running.
+static const uint8_t CTRL6_AE_OFF   = 0x00;
 static const uint8_t CTRL7_ACC_ONLY = 0x01;
 
 // --- Detection tuning --------------------------------------------------------------------
@@ -126,6 +142,7 @@ bool imuInit() {
 
     if (!wr(REG_CTRL1, CTRL1_ADDR_AI) ||
         !wr(REG_CTRL2, CTRL2_8G_500HZ) ||
+        !wr(REG_CTRL6, CTRL6_AE_OFF) ||
         !wr(REG_CTRL7, CTRL7_ACC_ONLY)) {
       LOG.printf("[imu    ] 0x%02X found but configuration write failed\n", s_addr);
       continue;

@@ -107,9 +107,16 @@ static uint8_t imuProbe() {
 }
 
 static bool imuStart(uint8_t addr) {
+  // ⚠️ BIT 6 IS THE HIGH-SPEED INTERNAL CLOCK, AND WITHOUT IT THE PART DOES NOT SAMPLE.
+  // 0x01 (aEN alone) leaves CTRL1/CTRL2/CTRL7 all reading back correctly, STATUSINT at 0x00 and
+  // every axis pinned at 0x7FFF — configured, enabled, and producing nothing. Waveshare's own
+  // driver writes 0x43 and comments bit 6 as "enable high speed internal clock"; 0x41 is the same
+  // thing with the gyro left off, which this unit has no use for (~2-3 mA saved).
+  // CTRL6 = 0 disables the AttitudeEngine, which the factory demo may have left running.
   struct { uint8_t reg, val; } init[] = {
-    { 0x02, 0x40 },   // CTRL1: ADDR_AI — without it a burst read returns one register six times
+    { 0x02, 0x40 },   // CTRL1: ADDR_AI on; bit0 clear = 2 MHz oscillator enabled
     { 0x03, 0x24 },   // CTRL2: accel +/-8 g @ 500 Hz
+    { 0x07, 0x00 },   // CTRL6: ATTITUDE ENGINE OFF — see the note above. This is the one.
     { 0x08, 0x01 },   // CTRL7: accelerometer only
   };
   for (auto &w : init) {
@@ -155,7 +162,32 @@ void waveshareBringupRun() {
   Serial.println("\n[3] QMI8658 on I2C");
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ_HZ);
   const uint8_t imu = imuProbe();
-  if (imu && imuStart(imu)) Serial.printf("    configured at 0x%02X\n", imu);
+  if (imu && imuStart(imu)) {
+    Serial.printf("    configured at 0x%02X\n", imu);
+
+    // ⚠️ Read the control registers BACK, and read the data registers BOTH ways. A burst that
+    // returns 0xFF on every byte is an idle bus, not a measurement — and the single-byte path
+    // separates the two causes that produce it: config that never took (CTRL7 reads 0), versus
+    // address auto-increment not working (single reads fine, burst all 0xFF).
+    struct { uint8_t reg; const char *name; } regs[] = {
+      {0x02, "CTRL1 (want 0x40 ADDR_AI)"}, {0x03, "CTRL2 (want 0x24)"},
+      {0x08, "CTRL7 (want 0x01 aEN)"},     {0x2D, "STATUSINT"},
+    };
+    for (auto &r : regs) {
+      uint8_t v = 0xEE;
+      Wire.beginTransmission(imu); Wire.write(r.reg);
+      if (Wire.endTransmission(false) == 0 && Wire.requestFrom((int)imu, 1) == 1) v = Wire.read();
+      Serial.printf("      0x%02X = 0x%02X  %s\n", r.reg, v, r.name);
+    }
+    Serial.print("      AX_L..AZ_H one byte at a time:");
+    for (uint8_t r = 0x35; r <= 0x3A; ++r) {
+      uint8_t v = 0xEE;
+      Wire.beginTransmission(imu); Wire.write(r);
+      if (Wire.endTransmission(false) == 0 && Wire.requestFrom((int)imu, 1) == 1) v = Wire.read();
+      Serial.printf(" %02X", v);
+    }
+    Serial.println();
+  }
   else if (imu)             Serial.println("    found but configuration FAILED");
   else                      Serial.println("    *** not found — tap wake will be unavailable ***");
 
@@ -240,7 +272,16 @@ void waveshareBringupRun() {
 
     if ((int32_t)(now - nextReport) >= 0) {
       nextReport = now + 1000;
-      if (imu) Serial.printf("    jerk peak %ld LSB  (1 g = 4096 at +/-8 g)\n", (long)peak);
+      // Print the RAW axes alongside the jerk. A jerk of 0 says only "nothing changed", which is
+      // ambiguous between a dead sensor, a failed read, and a burst read returning the same
+      // register six times (CTRL1 ADDR_AI not taking). The raw values separate all three: a live
+      // part at rest reads ~4096 on one axis and near zero on the others, and dithers by an LSB.
+      if (imu) {
+        int16_t ax, ay, az;
+        const bool ok = imuRead(imu, ax, ay, az);
+        Serial.printf("    jerk peak %ld  |  raw %s a=%d,%d,%d  (1 g = 4096 at +/-8 g)\n",
+                      (long)peak, ok ? "ok " : "FAIL", ax, ay, az);
+      }
       peak = 0;
     }
     delay(5);
