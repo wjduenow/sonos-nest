@@ -377,6 +377,12 @@ fetch pushes up to 220 KB through it — the failures cluster around exactly tha
 load often improve when you slow the bus. Widening to 4-bit would need D2/D3, which Elecrow does
 not document for this board.
 
+> ⚠️ **REOPENED 2026-09-14 — "matching the host" was wrong.** The host this build compiles is
+> esp_hosted **2.12.13** (`managed_components/`, not the platform package's prebuilt 2.12.11 — see
+> plans/13's 2026-09-14 correction), so a C6 reporting 2.12.11 is a **mismatch**, and matching it is
+> the open lead in [#26](https://github.com/wjduenow/sonos-nest/issues/26). The paragraph below is
+> kept as the record of what was believed.
+
 **CLOSED 2026-09-07 — the C6 is already at 2.12.11, matching the host exactly** (read back by the
 `jukebox-c6` probe env; the attempt below evidently took, since a pre-2.6 slave activates on `end`, and
 nobody re-read the version). The link still dies on matched versions, so this was never the cause.

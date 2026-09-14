@@ -1,10 +1,13 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status (2026-09-08): **bisected and root-caused — the fault is esp-hosted-mcu #220, fixed upstream
-in esp_hosted 2.12.12; we ship 2.12.11.** Candidates 1 (CDN cover) and 4 (inbound gate) are built
-and kept on merit but do not cure it; the jukebox runs with GENA eventing and tile artwork OFF until
-host AND C6 are on ≥ 2.12.12 — the upgrade is [issue #26](https://github.com/wjduenow/sonos-nest/issues/26),
-watched weekly. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
+Status (2026-09-14): **bisected, NOT root-caused.** Until 2026-09-14 this said the fault was
+esp-hosted-mcu #220, fixed in esp_hosted 2.12.12, and that we shipped 2.12.11. **That was wrong: the
+host has compiled esp_hosted 2.12.13, fix included, all along, and the link still dies** — see
+*Correction 2026-09-14* at the end, which supersedes the upstream sections before it. The open lead
+is the C6 slave, which reports 2.12.11 (a mismatch with the host), tracked in
+[issue #26](https://github.com/wjduenow/sonos-nest/issues/26). Candidates 1 (CDN cover) and 4
+(inbound gate) are built and kept on merit but do not cure it; the jukebox runs with GENA eventing
+and tile artwork OFF. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
 stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
 
 ## What is known (all measured on hardware, 2026-09-07)
@@ -17,7 +20,8 @@ stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
   #167 / #121 are the same fault. All open, no maintainer response, no fix.
 - **Every transport-side lead is closed.** SDIO is already 1-bit at 10 MHz (#167 says 20 MHz did
   not help). Packet mode instead of stream mode is a hard assert at init (boot loop, USB recovery).
-  The C6 already runs slave **2.12.11**, matching the host library exactly (`jukebox-c6` probe).
+  The C6 reports slave **2.12.11** (`jukebox-c6` probe). *(This said "matching the host library
+  exactly" — wrong: the host compiles 2.12.13. See the 2026-09-14 correction.)*
 - The largest inbound transfer the panel makes is the Now Playing cover at play time: the speaker
   serves a Spotify cover through `/getaa` as **158 KB, chunked, in 0.39 s** — full LAN speed into
   the C6. `getaa` has no rendition knob (`s=`, `&v=`, `&size=` are byte-identical). Tiles already
@@ -241,7 +245,8 @@ Left for another day: the Radio-page artist radio that never plays (Search's doe
   2026-07-31, "fix(sdio): recover a dropped RX read instead of deadlocking"; also in 2.12.13 and
   3.0.7). The reporter's overnight measurement: **43 wedges in 21 h on 2.12.11 → 0 in 14.5 h
   patched**, 196 GB inbound.
-- **We are on 2.12.11 on both sides** — the last version WITHOUT that fix. pioarduino's newest
+- ⚠️ *SUPERSEDED 2026-09-14 — the host was 2.12.13, with the fix; see the correction at the end.*
+  **We are on 2.12.11 on both sides** — the last version WITHOUT that fix. pioarduino's newest
   platform (55.03.311, 2026-07-24) shipped a week before the fix landed; there is no newer
   pioarduino release yet. The host driver is inside the prebuilt `framework-arduinoespressif32-libs`,
   so it cannot be swapped without rebuilding the Arduino libs, and the slave (C6) firmware needs the
@@ -266,6 +271,11 @@ a fairly new unit, so #184's AP explanation does not apply here.
 > `^2.9.2` caret picking the fix up automatically, and an approved PR removes that caret.
 
 ## Upstream re-read 2026-09-13 — the wait is no longer just a wait
+
+> ⚠️ **Read *Correction 2026-09-14* below first.** This section assumed the jukebox compiles the
+> platform package's prebuilt esp_hosted 2.12.11. It does not — so its account of the upstream
+> packaging chain is accurate, but its conclusion (that the chain is what stands between us and a
+> fix) is not.
 
 Nothing has moved on the packaging side, and one thing has moved the wrong way. The section above
 frames the remaining work as waiting for a core that bundles ≥ 2.12.12. That framing depended on
@@ -297,8 +307,9 @@ creating the SDIO DMA buffer pool. DMA-capable **internal SRAM**, which PSRAM ca
 reporter has 32 MB PSRAM, so it is a P4-class board like ours. Still open, no fix in esp_hosted
 `main` as of 2026-09-10.
 
-We are on the good side of it — this board runs 2.12.11 at ~98 KB free internal heap and has never
-hit the assert. Plausibly because `MBEDTLS_EXTERNAL_MEM_ALLOC=y` already moved the 16 KB in +
+We are on the good side of it — this board runs ~98 KB free internal heap and has never hit the
+assert. *(Corrected 2026-09-14: this said "runs 2.12.11". It runs **2.12.13**, i.e. the
+pre-allocating mempool #191 complains about, which makes the point stronger.)* Plausibly because `MBEDTLS_EXTERNAL_MEM_ALLOC=y` already moved the 16 KB in +
 16 KB out TLS buffers out of exactly that pool.
 
 So the two upstream needs collide: RAM says go back to 2.12.3, our wedging says go forward to
@@ -308,7 +319,12 @@ forward ([esp-hosted-mcu#231](https://github.com/espressif/esp-hosted-mcu/issues
 mempool), or make the pool sizing a Kconfig choice — with this device's bisection table as a second
 field report, and an offer to test a candidate pin on P4 + C6 hardware.
 
-> ⚠️ **`esp_hosted_host_fw_ver.h` IS NOT AUTHORITATIVE — read `dependencies.lock` instead.** Those
+> ⚠️ **WRONG FOR THE JUKEBOX — corrected 2026-09-14.** Neither the header nor `dependencies.lock` in
+> the platform package describes what this env links, because `custom_sdkconfig` rebuilds the libs
+> from `managed_components/`. The point about the header drifting still stands; the remedy does not.
+> See the correction below for how to read the real version.
+>
+> ~~`esp_hosted_host_fw_ver.h` IS NOT AUTHORITATIVE — read `dependencies.lock` instead.~~ Those
 > macros were hand-maintained and are known to have drifted: esp-hosted commit
 > [`627228c`](https://github.com/espressif/esp-hosted-mcu/commit/627228c603445481ae3b1b7a5903631d10eafb46)
 > (2026-09-07, "host: report the real component version in `ESP_HOSTED_VERSION_*`") replaced
@@ -321,8 +337,77 @@ field report, and an offer to test a candidate pin on P4 + C6 hardware.
 > ```
 > Both agree in our tree today, but only by luck. #26's step 1 has been corrected to match.
 
-**What the weekly watch tracks now — two things, not one:** (1) a pioarduino release newer than
+**What the weekly watch tracked (superseded 2026-09-14 — see below):** (1) a pioarduino release newer than
 55.03.311, read via `dependencies.lock`; (2) the merge state of #12879 and the value of
 `espressif/esp_hosted` in arduino-esp32's `idf_component.yml` on `master`. If it lands at `2.12.3`,
 step 1 of #26 needs replacing — the realistic options then are building the Arduino libs ourselves
 against a pinned 2.12.13, or staying on 55.03.311 indefinitely with GENA and tiles off.
+
+## Correction 2026-09-14 — the host has had the #220 fix all along
+
+**The jukebox host has compiled esp_hosted 2.12.13 — with the #220 fix — since at least
+v0.4.2-66, and it still dies.** Every bisection build (-75, -76, -77) had it. So the fix did not
+cure this failure, #220 is not (or not only) our bug, and #26's "upgrade once pioarduino ships
+≥ 2.12.12" was waiting for something we already had.
+
+**Why everyone read 2.12.11.** `[jukebox_base]` sets `custom_sdkconfig`, and that makes pioarduino
+rebuild the Arduino libs ("HybridCompile"): the IDF component manager runs at build time against
+arduino-esp32's `idf_component.yml` and fetches into the project's gitignored
+**`managed_components/`**. arduino-esp32 3.3.11 pins `espressif/esp_hosted: "^2.9.2"`, which on
+2026-09-07 resolved to **2.12.13** (`managed_components/espressif__esp_hosted/`, fetched 13:17,
+its own header reads 2.12.13). Meanwhile `~/.platformio-p4/packages/framework-arduinoespressif32-libs`
+keeps the prebuilt 2.12.11 library, header and `dependencies.lock` — accurate descriptions of a
+library this env never links. The "authoritative lock file" advice in the section above was
+therefore wrong here.
+
+**How it was proven — do this, not a grep of the package.** esp-hosted commit
+[`0985253`](https://github.com/espressif/esp-hosted-mcu/commit/098525357e19c81099f2c3769938bd877190a8f5)
+(the #220 fix, version bump 2.12.11 → 2.12.12) adds
+`PKT_LEN reg reads 0x%08lx (all 32 bits set): SDIO bus fault` to `sdio_drv.c`. That string is absent
+at the commit's parent (`cd0e5c3`, `version: "2.12.11"`) and absent from the prebuilt 2.12.11 `.a`,
+and present at the fix commit:
+
+```bash
+for f in ~/sonos-nest-elf/*/sonos-jukebox.elf; do
+  echo "$(basename $(dirname $f)) $(strings -n 8 $f | grep -c 'all 32 bits set')"
+done   # every archived jukebox ELF, v0.4.2-66 … -78: 1
+grep -E 'VERSION_(MAJOR|MINOR|PATCH)_1' \
+  managed_components/espressif__esp_hosted/host/esp_hosted_host_fw_ver.h   # 2 / 12 / 13
+```
+
+A present string cannot come from absent code, so this is a lower bound (≥ 2.12.12) that the
+compiled copy's header then pins to 2.12.13. (The fix also adds `...failing fast` to
+`rpc_core.c`, which does *not* appear in the ELFs — an absent string can be stripped or
+gc-sectioned, so it proves nothing either way.)
+
+**The #220 fix is host-only.** Under `slave/`, `0985253` touches only
+`esp_hosted_coprocessor_fw_ver.h` (+1/-1, the version number). So the C6 being on 2.12.11 did not
+leave the fix half-applied.
+
+**What that leaves.**
+- **The C6 slave reports 2.12.11** (`jukebox-c6` probe; that is also a hand-maintained constant, so
+  treat it as approximate). Host 2.12.13 + slave 2.12.11 is a **mismatch**, which the host warns can
+  cause RPC timeouts. Between `cd0e5c3` and `v2.12.13` there are 44 commits, including slave changes
+  to `esp_hosted_coprocessor.c` (+51/-40) and `sdio_slave_api.c`. **Matching the slave to 2.12.13 is
+  the next experiment** — plans/07's C6-flashing notes apply.
+- Upstream issues that fit a C6-side fault: **#221** (the slave's Wi-Fi task wedges on
+  `portMAX_DELAY` under overload) and **#240** (a wedged C6 is not recovered by CHIP_PU, only by a
+  power cycle).
+- **A cheap discriminator:** the fixed host now logs `SDIO bus fault` at ERROR when it hits the #220
+  condition. `ESP_LOGE` goes to the UART, not the TCP mirror (which dies with the link anyway), so
+  one serial capture across a death shows whether the host sees a bus fault or the C6 simply goes
+  quiet.
+
+**Two build hazards this exposed.**
+1. **The driver version floats.** Nothing in the repo records it: a fresh worktree or CI job
+   resolves `^2.9.2` on the day it builds. Pinning esp_hosted in the project would make the firmware
+   reproducible and let the slave be matched to a known host.
+2. **arduino-esp32#12879 would downgrade us through a platform bump.** It hard-pins `2.12.3`, and
+   the maintainer's answer (2026-09-14) is that it stays until esp-hosted stops "wasting 80KB of
+   RAM". Any pioarduino release built from a core with that pin would re-resolve our rebuild to
+   2.12.3. Stay on 55.03.311, or pin the component ourselves before bumping.
+
+**Upstream record.** The 2026-09-13 comment on #12879 argued from this board's data that 2.12.12
+fixes the deaths. A correction withdrawing that went up the same day it was found
+([comment](https://github.com/espressif/arduino-esp32/pull/12879#issuecomment-5669988494)); the
+pin is not ours to contest on this evidence.
