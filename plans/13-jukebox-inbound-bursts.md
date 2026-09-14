@@ -260,3 +260,69 @@ off, tiles off, detector at 7 s. **Tracked as
 weekly cloud routine (Mondays 09:00 PT) that watches pioarduino releases newer than 55.03.311,
 reads the bundled esp_hosted version, and comments on #26 when there is news. The access point is
 a fairly new unit, so #184's AP explanation does not apply here.
+
+> ⚠️ **"Waiting for a core that bundles it" is no longer sufficient — read the 2026-09-13 section
+> at the end of this file before acting on the paragraph above.** It depended on arduino-esp32's
+> `^2.9.2` caret picking the fix up automatically, and an approved PR removes that caret.
+
+## Upstream re-read 2026-09-13 — the wait is no longer just a wait
+
+Nothing has moved on the packaging side, and one thing has moved the wrong way. The section above
+frames the remaining work as waiting for a core that bundles ≥ 2.12.12. That framing depended on
+something it never stated, and that something is now up for removal.
+
+**The packaging chain, re-read.** pioarduino `platform-espressif32` is still **55.03.311**
+(2026-07-24); the only commit since is `dd01e49` (flash_extra_images paths, 2026-08-02), and there
+is no new release. Its libs come from the `espressif/arduino-esp32` release tarball
+`esp32-core-3.3.11-libs.tar.xz`, and arduino-esp32 is still **3.3.11** (2026-07-22) — nine days
+before the fix landed — with `master` active through 2026-09-01 but unreleased. Meanwhile the fix
+has been in the registry for six weeks: 2.12.12 (07-31), 2.12.13 (2026-09-04), 3.0.7 (2026-09-05).
+
+**The unstated assumption: the caret.** arduino-esp32 pins `espressif/esp_hosted: "^2.9.2"`, so the
+next libs build picks up 2.12.13 *automatically* — no upstream PR needed, just a release. That is
+the only reason "wait for a release" was ever a sufficient plan.
+
+**[arduino-esp32#12879](https://github.com/espressif/arduino-esp32/pull/12879) removes the caret.**
+"fix(hosted): Pin version for lower hosted RAM usage" changes it to a hard **`2.12.3`**. Opened
+2026-09-02 by me-no-dev, **approved by lucasssvaz on 2026-09-09**, mergeable, checks green. If it
+merges before a release, the next arduino-esp32 ships esp_hosted 2.12.3 — eight patch versions
+below what this panel runs today, nine below the deadlock fix. **Bumping the platform would then be
+a driver downgrade**, and would also give back #210 (the streaming-mode RX double-free) which we
+currently have.
+
+The motivation is legitimate and lands in our scarce resource:
+[esp-hosted-mcu#191](https://github.com/espressif/esp-hosted-mcu/issues/191), "2.12.6 takes more
+memory than 2.12.3, cant start" — `mempool create failed: no mem`, assert at `sdio_drv.c:249`
+creating the SDIO DMA buffer pool. DMA-capable **internal SRAM**, which PSRAM cannot back. The
+reporter has 32 MB PSRAM, so it is a P4-class board like ours. Still open, no fix in esp_hosted
+`main` as of 2026-09-10.
+
+We are on the good side of it — this board runs 2.12.11 at ~98 KB free internal heap and has never
+hit the assert. Plausibly because `MBEDTLS_EXTERNAL_MEM_ALLOC=y` already moved the 16 KB in +
+16 KB out TLS buffers out of exactly that pool.
+
+So the two upstream needs collide: RAM says go back to 2.12.3, our wedging says go forward to
+2.12.12. The case was made on #12879 (2026-09-13) — pin `>=2.12.12,<2.13` instead, or fix #191
+forward ([esp-hosted-mcu#231](https://github.com/espressif/esp-hosted-mcu/issues/231) caps
+`ESP_TRANSPORT_SDIO_MAX_BUF_SIZE` at the IDF DMA limit and looks like it bears on the same
+mempool), or make the pool sizing a Kconfig choice — with this device's bisection table as a second
+field report, and an offer to test a candidate pin on P4 + C6 hardware.
+
+> ⚠️ **`esp_hosted_host_fw_ver.h` IS NOT AUTHORITATIVE — read `dependencies.lock` instead.** Those
+> macros were hand-maintained and are known to have drifted: esp-hosted commit
+> [`627228c`](https://github.com/espressif/esp-hosted-mcu/commit/627228c603445481ae3b1b7a5903631d10eafb46)
+> (2026-09-07, "host: report the real component version in `ESP_HOSTED_VERSION_*`") replaced
+> hardcoded constants that read `2.12.6` while the component was well past it. The component
+> manager's lock file is generated, so it cannot drift:
+> ```bash
+> grep -A12 'espressif/esp_hosted:' \
+>   ~/.platformio-p4/packages/framework-arduinoespressif32-libs/esp32p4/dependencies.lock
+> #   version: 2.12.11
+> ```
+> Both agree in our tree today, but only by luck. #26's step 1 has been corrected to match.
+
+**What the weekly watch tracks now — two things, not one:** (1) a pioarduino release newer than
+55.03.311, read via `dependencies.lock`; (2) the merge state of #12879 and the value of
+`espressif/esp_hosted` in arduino-esp32's `idf_component.yml` on `master`. If it lands at `2.12.3`,
+step 1 of #26 needs replacing — the realistic options then are building the Arduino libs ourselves
+against a pinned 2.12.13, or staying on 55.03.311 indefinitely with GENA and tiles off.
