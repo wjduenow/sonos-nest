@@ -102,6 +102,46 @@ def _patch_esp_wifi_remote_kconfig(env):
                 print(f"fix_p4_linker.py: WARNING - no donor Kconfig for IDF {idf_version}")
 
 
+# esp_hosted version GUARD. Read this before changing ESP_HOSTED_VERSION.
+#
+# custom_sdkconfig makes pioarduino rebuild the Arduino libs, so the IDF component manager resolves
+# esp_hosted at BUILD time, from arduino-esp32's floating "^2.9.2", into the gitignored
+# managed_components/. That copy is what links. The prebuilt one in framework-arduinoespressif32-libs
+# never does, and neither does its header or dependencies.lock. The core's hostedGetHostVersion()
+# still compiles against those stale package headers, so /api/config and the jukebox-c6 probe
+# report the PACKAGE version, not the linked one (plans/13, 2026-09-14).
+#
+# This is enforcement, not a pin. pioarduino's pin mechanism (custom_component_remove + _add) is
+# unusable for esp_hosted: removal rmtree's include/espressif__esp_hosted out of the SHARED package
+# and strips it from pioarduino-build.py, and the Arduino core's esp32-hal-hosted.c needs those
+# headers. So the build FAILS the moment the caret resolves to anything else. The C6 slave must run
+# the same version: build it from managed_components/espressif__esp_hosted/slave (idf.py
+# set-target esp32c6 && idf.py build, IDF 5.5.5). Arduino publishes slave images only up to 2.12.11.
+# Runs in both HybridCompile passes. On the first pass of a fresh tree managed_components/ does not
+# exist yet, and the child pass checks it.
+ESP_HOSTED_VERSION = "2.12.13"
+
+
+def _check_esp_hosted_version(env):
+    manifest = Path(env.subst("$PROJECT_DIR")) / "managed_components" / "espressif__esp_hosted" / "idf_component.yml"
+    if not manifest.is_file():
+        print(f"p4_hosted_patch.py: esp_hosted not resolved yet; expecting {ESP_HOSTED_VERSION}")
+        return
+    resolved = next(
+        (line.split(":", 1)[1].strip().strip("'\"") for line in manifest.read_text().splitlines()
+         if line.startswith("version:")),
+        "")
+    if resolved != ESP_HOSTED_VERSION:
+        print(
+            "\n*** p4_hosted_patch.py: esp_hosted resolved to %r, but this build requires %r. ***\n"
+            "*** The component manager follows arduino-esp32's floating caret, so the driver changed under\n"
+            "*** you. Do NOT just bump ESP_HOSTED_VERSION: the C6 slave firmware must be rebuilt and flashed\n"
+            "*** to the same version first (tools/p4_hosted_patch.py header, plans/13). ***\n"
+            % (resolved or "<unreadable>", ESP_HOSTED_VERSION))
+        env.Exit(1)
+    print(f"p4_hosted_patch.py: esp_hosted {resolved} (matches the required version)")
+
+
 def patch_esp32p4_linker_scripts(target, source, env):
     build_dir = Path(env.subst("$BUILD_DIR"))
     project_dir = Path(env.subst("$PROJECT_DIR"))
@@ -145,5 +185,6 @@ def patch_esp32p4_linker_scripts(target, source, env):
 
 
 _check_littlefs_payload(env)
+_check_esp_hosted_version(env)
 _patch_esp_wifi_remote_kconfig(env)
 env.AddPreAction("$PROGPATH", patch_esp32p4_linker_scripts)
