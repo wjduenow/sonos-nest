@@ -106,10 +106,11 @@ def _patch_esp_wifi_remote_kconfig(env):
 #
 # custom_sdkconfig makes pioarduino rebuild the Arduino libs, so the IDF component manager resolves
 # esp_hosted at BUILD time, from arduino-esp32's floating "^2.9.2", into the gitignored
-# managed_components/. That copy is what links. The prebuilt one in framework-arduinoespressif32-libs
-# never does, and neither does its header or dependencies.lock. The core's hostedGetHostVersion()
-# still compiles against those stale package headers, so /api/config and the jukebox-c6 probe
-# report the PACKAGE version, not the linked one (plans/13, 2026-09-14).
+# managed_components/, and the rebuild copies the resulting archives back over the package's
+# framework-arduinoespressif32-libs/esp32p4_es/lib/ (this board's chip_variant; esp32p4/ is never
+# used). The package's HEADERS and dependencies.lock are not refreshed and still say 2.12.11. The
+# core's hostedGetHostVersion() compiles against those stale headers, so /api/config and the
+# jukebox-c6 probe report the PACKAGE version, not the linked one (plans/13, 2026-09-14).
 #
 # This is enforcement, not a pin. pioarduino's pin mechanism (custom_component_remove + _add) is
 # unusable for esp_hosted: removal rmtree's include/espressif__esp_hosted out of the SHARED package
