@@ -209,6 +209,12 @@ void linkStart() {
 // search for albums returns mediaCollection, and a browse of "root" returns only collections.
 static void eachItem(const String &xml, std::vector<Item> &out, int max) {
   int p = 0;
+#ifdef SPOTIFY_ROW_DIAG
+  // One-off check (2026-09-15): does Spotify's SMAPI say which tracks are explicit? Logs the first
+  // track row of every response in full, so every field is visible, plus any row mentioning
+  // "xplicit" in any casing. smapi::cstr() because these Strings came off the network.
+  bool loggedTrack = false;
+#endif
   while ((int)out.size() < max) {
     const int c = xml.indexOf("mediaCollection>", p);
     const int m = xml.indexOf("mediaMetadata>", p);
@@ -222,6 +228,19 @@ static void eachItem(const String &xml, std::vector<Item> &out, int max) {
     if (open < 0 || end < 0) break;
     const String blk = xml.substring(open, end + (int)strlen(close));
     p = end + (int)strlen(close);
+#ifdef SPOTIFY_ROW_DIAG
+    {
+      String lower = blk; lower.toLowerCase();
+      const bool isTrack = !coll && lower.indexOf("spotify:track:") >= 0;
+      const bool mentions = lower.indexOf("xplicit") >= 0;
+      if ((isTrack && !loggedTrack) || mentions) {
+        LOG.printf("[rowdiag] %s%s %u B: %.*s\n", isTrack ? "track" : (coll ? "collection" : "metadata"),
+                   mentions ? " EXPLICIT-MENTION" : "", (unsigned)blk.length(),
+                   (int)(blk.length() < 1400 ? blk.length() : 1400), smapi::cstr(blk));
+        if (isTrack) loggedTrack = true;
+      }
+    }
+#endif
 
     Item it;
     it.title    = unescapeXml(tagValue(blk, "title"));
