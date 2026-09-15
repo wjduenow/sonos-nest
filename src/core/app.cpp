@@ -175,6 +175,7 @@ struct PlayWatch {
   bool     active = false;
   uint32_t startMs = 0, lastCheckMs = 0;
   String   title;
+  bool     explicitItem = false;
 };
 static PlayWatch s_playWatch;
 static const uint32_t kWatchFirstMs = 6000, kWatchEveryMs = 2000, kWatchMaxMs = 20000;
@@ -186,20 +187,22 @@ static String didlTitle(const String &didl) {
   return b < 0 ? String() : sonos::xmlUnescape(didl.substring(a + 10, b));
 }
 
-static void reportPlayFailure(const String &title, const char *why) {
-  LOG.printf("[play] speaker refused \"%s\" (%s)\n", title.c_str(), why);
+static void reportPlayFailure(const String &title, bool explicitItem, const char *why) {
+  LOG.printf("[play] speaker refused \"%s\" (%s%s)\n", title.c_str(), why, explicitItem ? ", explicit" : "");
   if (stateLock()) {
     g_player.playFailSeq++;
     g_player.playFailTitle = title;
+    g_player.playFailExplicit = explicitItem;
     g_player.dirty = true;
     stateUnlock();
   }
 }
 
-static void playWatchArm(const String &title) {
+static void playWatchArm(const String &title, bool explicitItem) {
   s_playWatch.active = true;
   s_playWatch.startMs = s_playWatch.lastCheckMs = millis();
   s_playWatch.title = title;
+  s_playWatch.explicitItem = explicitItem;
 }
 
 static void playWatchTick() {
@@ -216,7 +219,8 @@ static void playWatchTick() {
   if (st == TransportState::Playing || st == TransportState::Paused) { s_playWatch.active = false; return; }
   if (st == TransportState::Transitioning && age < kWatchMaxMs) return;   // still buffering
   s_playWatch.active = false;
-  reportPlayFailure(s_playWatch.title, st == TransportState::Stopped ? "stayed stopped" : "never started");
+  reportPlayFailure(s_playWatch.title, s_playWatch.explicitItem,
+                    st == TransportState::Stopped ? "stayed stopped" : "never started");
 }
 
 static void processPending() {
@@ -280,8 +284,12 @@ static void processPending() {
     const bool started = staged && sonos::play(s_coordIp);
     s_lastPoll = 0;                        // reflect the new track immediately
     const String title = didlTitle(p.playMeta);
-    if (!started) { s_playWatch.active = false; reportPlayFailure(title, staged ? "Play rejected" : "URI rejected"); }
-    else          playWatchArm(title);
+    if (!started) {
+      s_playWatch.active = false;
+      reportPlayFailure(title, p.playExplicit, staged ? "Play rejected" : "URI rejected");
+    } else {
+      playWatchArm(title, p.playExplicit);
+    }
   }
 
   // Grouping. Every op in the batch is applied first, and the topology is re-read ONCE at the

@@ -47,6 +47,7 @@ struct PlayerState {
   // (app.cpp, playWatch*) and bumps the counter; a unit shows a notice when it moves.
   uint32_t      playFailSeq = 0;
   String        playFailTitle;   // what was refused, from the request's DIDL; may be empty
+  bool          playFailExplicit = false;   // the refused item was flagged explicit by its service
 
   bool          dirty = false;   // set by writers, cleared by ui_task after redraw
 };
@@ -88,6 +89,8 @@ struct PendingCmds {
   String playMeta;            // with this DIDL. Used by the Radio page, where the unit already has
                               // both from the station cache and there is nothing for netTask to
                               // look up — unlike a favourite, which goes through library::.
+  bool   playExplicit = false; // the item is flagged explicit by its service (Spotify tracks); only
+                              // used to explain a refusal more specifically — see playFailExplicit
   String wifiSsid;            // non-empty: apply these WiFi creds (with wifiPass) on netTask
   String wifiPass;
   bool   reboot = false;      // reboot the device. Set on a device-name change: a clean boot
