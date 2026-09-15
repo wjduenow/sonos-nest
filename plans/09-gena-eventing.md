@@ -1,12 +1,15 @@
 # Plan 09 — UPnP GENA eventing instead of polling (Now Playing first)
 
-Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **BUILT AND MERGED for the
-jukebox, then DISABLED at the flag.** `-DGENA_EVENTS` is commented out in `platformio.ini` as of
-`6ef9b70` (PR #27) — inbound NOTIFY bursts turned out to be half the load profile that wedges the
-esp_hosted 2.12.11 SDIO link ([#24](https://github.com/wjduenow/sonos-nest/issues/24)), so the
-jukebox is back on the 1 Hz poll until host **and** C6 run esp_hosted ≥ 2.12.12
-([#26](https://github.com/wjduenow/sonos-nest/issues/26)). See §8. Not enabled on any other unit —
-see §2 for why.
+Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **ON for the jukebox again
+(2026-09-15).** It was disabled from `6ef9b70` (PR #27), blamed for the ESP-Hosted SDIO link death
+([#24](https://github.com/wjduenow/sonos-nest/issues/24),
+[#26](https://github.com/wjduenow/sonos-nest/issues/26)). That death turned out to be an ESP-Hosted
+host-driver bug: a failed SDIO RX buffer allocation from the P4's DMA-capable internal pool wedged
+receive for good. GENA only supplied the bursts that made the allocation large. With ESP-Hosted's
+buffers served from PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y`, plans/13 **ROOT CAUSE AND
+FIX 2026-09-15**), GENA with tile artwork runs the reproduction clean. §8's deferral reasoning is
+kept below as the record, but its conclusion no longer holds. Not enabled on any other unit — see
+§2 for why.
 
 Replace the continuous 1 Hz SOAP poll behind Now Playing with UPnP GENA eventing — subscribe once
 per coordinator, let Sonos push changes — keeping a slow poll as a backstop.
@@ -177,8 +180,8 @@ first, the fix landed first time; where symptoms were reasoned about, it took th
 The argument in §1 was that polling is the load profile that kills the ESP-Hosted link. That was
 half right. Bisecting the link deaths under
 [#24](https://github.com/wjduenow/sonos-nest/issues/24) — commits `0da011f`, `98ca8fb`, `00a46c6`,
-landing as `04a0ed0` — showed **inbound** bursts are what the esp_hosted 2.12.11 SDIO host driver
-mishandles, and a GENA `NOTIFY` is inbound: a 6.5 KB body the speaker pushes at us, arriving
+landing as `04a0ed0` — showed **inbound** bursts are what the ESP-Hosted SDIO link
+mishandles (on host esp_hosted 2.12.13 — this said 2.12.11 until the 2026-09-14 correction in plans/13), and a GENA `NOTIFY` is inbound: a 6.5 KB body the speaker pushes at us, arriving
 alongside station tiles and browses. Upstream esp-hosted-mcu #184 names the mechanism (inbound
 flow control) and the only workaround offered is pacing inbound reads. Eventing cannot be paced —
 the speaker decides when to push.
@@ -191,7 +194,7 @@ is not one of those things.
 **This is a deferral, not a retraction.** The code is merged, proven on hardware, and costs
 nothing while the flag is off (`gena.cpp` compiles to an empty translation unit). Re-enabling is
 one line in `platformio.ini` plus a soak, and the trigger is
-[#26](https://github.com/wjduenow/sonos-nest/issues/26) landing esp_hosted ≥ 2.12.12 on host and
-C6. Re-verify against §5's acceptance list, and watch `health.inbound` timeouts (must stay 0) and
+[#26](https://github.com/wjduenow/sonos-nest/issues/26) curing the link death — which, as of
+2026-09-14, is no longer believed to be an esp_hosted version bump: the host already runs 2.12.13. Re-verify against §5's acceptance list, and watch `health.inbound` timeouts (must stay 0) and
 `health.lastReboot` for `netlink` — those are the two readings that would say the burst problem
 survived the upgrade.

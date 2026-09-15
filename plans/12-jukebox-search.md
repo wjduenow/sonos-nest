@@ -103,6 +103,8 @@ struct Item {                    // one search hit or one browse row
   String id;                     // native id VERBATIM: "spotify:track:6vLa…" — never rebuild it
   String artUrl;                 // may be empty
   enum class Kind : uint8_t { Track, Artist, Album, Playlist, Container } kind;
+  bool isExplicit = false;       // Spotify's <explicit> flag; tracks only (albums/artists/playlists
+                                 // do not carry it) — see §13
 };
 
 // --- linking (blocking HTTPS; runs on its own task, driven from the UI by state) ---
@@ -578,4 +580,34 @@ below every tagged low-water (`gena.didl` at 44 KB) and ~10 KB above where TLS s
 The consumer is untagged; `spotify.browse` / `spotify.search` notes now sit where response and
 parsed rows are both held, so the next reading names it or rules it out.
 
----
+## 13. Explicit tracks: Spotify's flag, and the refusals Sonos does not explain (2026-09-15)
+
+**What happens.** On an account with explicit content turned off, Sonos refuses an explicit
+Spotify track **silently**, and Now Playing still shows its title. Measured on "Bobby Brown Goes
+Down" (Frank Zappa):
+- With the jukebox's URI (`x-sonos-spotify:…?sid=12&flags=8224&sn=10`), `Play` returns **UPnP 701**.
+- With the Sonos app's favourite form (`flags=8232`), `Play` is accepted, but the transport **sits
+  at STOPPED and never changes**. So no GENA event ever reports it.
+
+A non-explicit control ("Pink Pony Club") played with **both** flag values. The URI form is fine,
+and the flags are not the cause. (`spotify.cpp`'s comment that 8224 is "the form proven on this
+household's favourite" is wrong: both saved Spotify favourites use 8232. It is harmless.)
+
+**The flag is on the wire.** Every SMAPI track row carries
+`<ns2:tags><ns2:explicit>0|1</ns2:explicit></ns2:tags>`. Read off 12 Zappa rows (artist Top
+Tracks and a search): only "Bobby Brown Goes Down" was `1`, exactly the track the speaker refused.
+It is Spotify's own flag, the one behind the "E" in its apps. It does not always match intuition:
+"Titties & Beer" is `0`. Albums, artists and playlists do not carry it. `canPlay` stays `true` for
+a filtered track, so it is no warning.
+
+**What the jukebox does with it** (`f32d912`, with `81d5474` before it):
+- `spotify::Item::isExplicit` is parsed, and Radio (Spotify) and Search rows draw a small **E**
+  badge. **Explicit results stay visible**; the owner asked for that explicitly.
+- netTask detects both refusal forms: an error from `SetAVTransportURI`, `AddURIToQueue` or `Play`;
+  or `GetTransportInfo` polled from 6 s never reaching PLAYING or PAUSED, with up to 20 s allowed
+  while TRANSITIONING. It reports through `PlayerState::playFailSeq` / `playFailTitle` /
+  `playFailExplicit`.
+- The unit shows *Couldn't play "…"*. For a track flagged explicit it adds *It's marked explicit,
+  and explicit content is turned off on this Spotify account*; otherwise the generic *may be
+  explicit, or unavailable on this account*. Verified on the panel.
+

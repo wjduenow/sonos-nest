@@ -38,6 +38,11 @@ struct Item {
   String id;          // the NATIVE id, verbatim: "spotify:track:6vLa…". Never rebuild one.
   String artUrl;      // may be empty
   Kind   kind = Kind::Container;
+  // Spotify's own explicit flag, from <tags><explicit>1</explicit></tags> on a track row — the same
+  // flag behind the "E" in Spotify's apps and the one an account's explicit-content filter acts on.
+  // Tracks only: albums, artists and playlists do not carry it. canPlay stays "true" for a filtered
+  // track, so this is the only advance warning that the speaker will refuse it (plans/12).
+  bool   isExplicit = false;
 };
 
 // Which search index to hit. The strings these map to are per-service — Spotify wants `track`

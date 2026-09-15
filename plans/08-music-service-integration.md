@@ -163,8 +163,10 @@ Refresh now, favourites Refresh now, device name, brightness. Everything goes th
 - **No soak.** The scheduled 4am crawl has never actually fired on its own; every crawl so far was
   manual or first-boot.
 - **The link fault** (plans/07) is unchanged and untested under this new traffic. Note the C6 now
-  reports slave firmware **2.12.11 matching the host**, where plans/07 recorded a 2.3.0 slave — that
-  gap was one of the two leading suspects, so the fault may have changed character.
+  reports slave firmware **2.12.11**, where plans/07 recorded a 2.3.0 slave — that
+  gap was one of the two leading suspects, so the fault may have changed character. (Corrected
+  2026-09-14: this originally said "matching the host". The host actually compiles esp_hosted
+  **2.12.13** from `managed_components/`, so they do NOT match — see plans/13.)
 
 ## What is left
 

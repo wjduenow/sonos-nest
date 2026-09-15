@@ -258,6 +258,14 @@ static uint32_t  s_volToastUntil = 0;
 static const lv_coord_t VT_W = 300, VT_H = 84, VT_BAR_W = 210;
 static const uint32_t   VT_HOLD_MS = 1400;
 
+// Refused-play notice. Sonos keeps a refused item loaded and just never starts it, so Now Playing
+// alone reads as success; netTask detects the refusal (PlayerState::playFailSeq) and this says so.
+// Built once on the top layer like the volume toast, above it so the two cannot overlap.
+static lv_obj_t *s_playFail = nullptr, *s_playFailTitle = nullptr, *s_playFailWhy = nullptr;
+static uint32_t  s_playFailUntil = 0, s_playFailSeqShown = 0;
+static const lv_coord_t PF_W = 640, PF_H = 104;
+static const uint32_t   PF_HOLD_MS = 7000;
+
 // --- Small builders ---------------------------------------------------------------------------
 static lv_obj_t *panel(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, uint32_t bg, lv_coord_t r) {
   lv_obj_t *o = lv_obj_create(parent);
@@ -276,6 +284,17 @@ static lv_obj_t *label(lv_obj_t *parent, const char *txt, const lv_font_t *font,
   lv_obj_set_style_text_font(l, font, 0);
   lv_obj_set_style_text_color(l, lv_color_hex(colour), 0);
   return l;
+}
+
+// Spotify's "E" in front of a track's second line, from the service's own flag. Results are never
+// hidden for being explicit; this only says in advance what the speaker may refuse. Returns the
+// horizontal space it took, so the caller can shift the text after it.
+static lv_coord_t explicitBadge(lv_obj_t *row, lv_coord_t x, lv_coord_t yOff) {
+  lv_obj_t *b = panel(row, 18, 18, JB_TEXT_MUTED, 3);
+  lv_obj_align(b, LV_ALIGN_LEFT_MID, x, yOff);
+  lv_obj_t *e = label(b, "E", &jbFont12, JB_SCREEN_BG);
+  lv_obj_center(e);
+  return 18 + 8;
 }
 
 // Volume readout for dial turns made away from Now Playing, which has no volume bar of its own.
@@ -310,6 +329,43 @@ static void showVolToast(int vol) {
                                   : (vol < 50 ? LV_SYMBOL_VOLUME_MID : LV_SYMBOL_VOLUME_MAX));
   lv_obj_remove_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
   s_volToastUntil = lv_tick_get() + VT_HOLD_MS;
+}
+
+static void buildPlayFailToast() {
+  s_playFail = panel(lv_layer_top(), PF_W, PF_H, JB_SCREEN_ELEV, JB_R_LG);
+  lv_obj_set_style_border_width(s_playFail, 1, 0);
+  lv_obj_set_style_border_color(s_playFail, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_align(s_playFail, LV_ALIGN_BOTTOM_MID, 0, -46 - VT_H - 16);
+  lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_CLICKABLE);   // tap to dismiss
+  lv_obj_add_event_cb(s_playFail, [](lv_event_t *) { lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN); },
+                      LV_EVENT_CLICKED, nullptr);
+
+  s_playFailTitle = label(s_playFail, "", &jbFont22, JB_TEXT);
+  lv_label_set_long_mode(s_playFailTitle, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(s_playFailTitle, PF_W - 48);
+  lv_obj_align(s_playFailTitle, LV_ALIGN_TOP_LEFT, 24, 18);
+
+  s_playFailWhy = label(s_playFail, "", &jbFont16, JB_TEXT_MUTED);
+  lv_label_set_long_mode(s_playFailWhy, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_playFailWhy, PF_W - 48);
+  lv_obj_align(s_playFailWhy, LV_ALIGN_TOP_LEFT, 24, 56);
+}
+
+// `explicitItem` is the service's own flag on what was played (Spotify's <explicit>1</explicit>).
+// A flagged track that the speaker refuses is, in practice, the account's explicit-content filter:
+// that is exactly the case that led here (plans/12). Anything else stays deliberately vague, because
+// Sonos gives no reason.
+static void showPlayFail(const String &title, bool explicitItem) {
+  if (!s_playFail) return;
+  const String head = title.length() ? "Couldn't play \"" + title + "\"" : String("Couldn't play that");
+  lv_label_set_text(s_playFailTitle, head.c_str());
+  lv_label_set_text(s_playFailWhy,
+                    explicitItem ? "It's marked explicit, and explicit content is turned off on this Spotify account."
+                                 : "Sonos wouldn't start it. It may be explicit, or unavailable on this account.");
+  lv_obj_remove_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
+  s_playFailUntil = lv_tick_get() + PF_HOLD_MS;
+  uiSoundPlay(UiSound::Error);
 }
 
 // Round transport control. `solid` is the design's accent-filled primary — reserved for
@@ -1072,6 +1128,7 @@ static void favPlayCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = s_favs[i].uri;
     g_pending.playMeta = s_favs[i].meta;
+    g_pending.playExplicit = false;   // every play request sets all three: g_pending coalesces
     stateUnlock();
   }
 }
@@ -1502,7 +1559,8 @@ static String artKey(const String &id, const String &url);
 static void radioShowSpotify(String id, String title);
 static void radioSrcPaint();
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
-                          lv_event_cb_t cb, const String &subtitle = "Prime Station");
+                          lv_event_cb_t cb, const String &subtitle = "Prime Station",
+                          bool explicitMark = false);
 static void radioPaintArt();
 static void radioShowStations(int genreIdx);
 static void radioPaintArt();
@@ -1520,6 +1578,7 @@ static void radioPlayCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = amazon::playUri(st);
     g_pending.playMeta = amazon::playMeta(st, s_radioGenreId);
+    g_pending.playExplicit = false;
     stateUnlock();
   }
 }
@@ -1682,6 +1741,7 @@ static void radioSpotCb(lv_event_t *e) {
       if (stateLock()) {
         g_pending.playUri  = uri;
         g_pending.playMeta = spotify::playMeta(s_spCurItem);
+        g_pending.playExplicit = false;   // a container; only track rows carry the flag
 
         stateUnlock();
       }
@@ -1703,6 +1763,7 @@ static void radioSpotCb(lv_event_t *e) {
     if (stateLock()) {
       g_pending.playUri  = uri;
       g_pending.playMeta = spotify::playMeta(it);
+      g_pending.playExplicit = it.isExplicit;
 
       stateUnlock();
     }
@@ -1771,7 +1832,7 @@ static void radioSpotPaint() {
              s_spCurItem.title);
   for (size_t i = 0; i < s_spItems.size(); i++)
     radioRow(i + off, s_spItems[i].title, s_spItems[i].id, s_spItems[i].artUrl, radioSpotCb,
-             spotifyKindLine(s_spItems[i]));
+             spotifyKindLine(s_spItems[i]), s_spItems[i].isExplicit);
   radioPaintArt();
 }
 
@@ -1864,7 +1925,7 @@ static void radioShowGenres() {
 // One carousel row. `artUrl` empty means "show art only if it is already decoded" — used by search
 // results, whose flat index deliberately omits the art URL to keep all.tsv small.
 static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const String &artUrl,
-                          lv_event_cb_t cb, const String &subtitle) {
+                          lv_event_cb_t cb, const String &subtitle, bool explicitMark) {
   const lv_coord_t w = SCREEN_W - RAIL_W - PAD_X * 2, h = 96;
   lv_obj_t *row = lv_button_create(s_radioList);
   lv_obj_remove_style_all(row);
@@ -1892,10 +1953,13 @@ static lv_obj_t *radioRow(size_t i, const String &title, const String &id, const
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 100, -12);
   // The second line said "Prime Station" for every row, on both sources — right for Amazon, which
   // is all this page ever showed, and wrong for every Spotify playlist, album and artist.
-  lv_obj_t *sub = label(row, subtitle.c_str(), &jbFont12, JB_TEXT_DIM);
+  // 16 px, not 12: the row always had the room. Title box y 22-50, this line y 54-73 at +16, all
+  // inside the 96 px row — the row height did not change.
+  const lv_coord_t badgeW = explicitMark ? explicitBadge(row, 100, 16) : 0;
+  lv_obj_t *sub = label(row, subtitle.c_str(), &jbFont16, JB_TEXT_DIM);
   lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(sub, w - 120);
-  lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100, 14);
+  lv_obj_set_width(sub, w - 120 - badgeW);
+  lv_obj_align(sub, LV_ALIGN_LEFT_MID, 100 + badgeW, 16);
   return row;
 }
 
@@ -1913,6 +1977,7 @@ static void radioHitCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = amazon::playUri(st);
     g_pending.playMeta = amazon::playMeta(st, gid);
+    g_pending.playExplicit = false;
     stateUnlock();
   }
 }
@@ -2373,6 +2438,7 @@ static void srchRowCb(lv_event_t *e) {
       if (stateLock()) {
         g_pending.playUri  = uri;
         g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
+        g_pending.playExplicit = false;   // a container; only track rows carry the flag
 
         stateUnlock();
       }
@@ -2389,6 +2455,7 @@ static void srchRowCb(lv_event_t *e) {
     if (stateLock()) {
       g_pending.playUri  = uri;
       g_pending.playMeta = spotify::playMeta(it);
+      g_pending.playExplicit = it.isExplicit;
 
       stateUnlock();
     }
@@ -2442,11 +2509,11 @@ static void srchPaintRows() {
     lv_obj_add_event_cb(row, srchRowCb, LV_EVENT_CLICKED, (void *)(intptr_t)0);
     lv_obj_t *t = label(row, "Play all", &jbFont22, JB_ACCENT_INK);
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 24, -11);
-    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &jbFont12,
+    lv_obj_t *sl = label(row, s_srchInsideItem.title.c_str(), &jbFont16,
                          JB_ACCENT_INK);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(sl, w - 48);
-    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 24, 15);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 24, 17);
     s_srchTiles.push_back(nullptr);       // keeps tiles parallel to rows for the artwork pass
   }
 
@@ -2475,11 +2542,13 @@ static void srchPaintRows() {
     lv_obj_set_size(t, w - 88, 28);      // ONE line: LONG_DOT needs a fixed height or it wraps
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 80, -11);
 
+    // 16 px, not 12, in the same 88 px row: title box y 19-47, this line y 51-70 at +17.
     const String sub = spotifyKindLine(it);
-    lv_obj_t *sl = label(row, sub.c_str(), &jbFont12, JB_TEXT_DIM);
+    const lv_coord_t badgeW = it.isExplicit ? explicitBadge(row, 80, 17) : 0;
+    lv_obj_t *sl = label(row, sub.c_str(), &jbFont16, JB_TEXT_DIM);
     lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(sl, w - 88);
-    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80, 15);
+    lv_obj_set_width(sl, w - 88 - badgeW);
+    lv_obj_align(sl, LV_ALIGN_LEFT_MID, 80 + badgeW, 17);
   }
   srchPaintArt();
 }
@@ -3311,6 +3380,7 @@ void uiInit() {
   buildRooms();
   buildSettings();
   buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
+  buildPlayFailToast();   // top layer, hidden until the speaker refuses a play
   saverBuild();      // top layer too, and AFTER the toast so it covers it
   // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
   // Started here rather than in appStartTasks() so the S3 units never spawn it.
@@ -3443,6 +3513,14 @@ void uiTick() {
   if (s_volToast && !lv_obj_has_flag(s_volToast, LV_OBJ_FLAG_HIDDEN) &&
       (int32_t)(lv_tick_get() - s_volToastUntil) >= 0) {
     lv_obj_add_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (p.playFailSeq != s_playFailSeqShown) {
+    s_playFailSeqShown = p.playFailSeq;
+    showPlayFail(p.playFailTitle, p.playFailExplicit);
+  }
+  if (s_playFail && !lv_obj_has_flag(s_playFail, LV_OBJ_FLAG_HIDDEN) &&
+      (int32_t)(lv_tick_get() - s_playFailUntil) >= 0) {
+    lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));

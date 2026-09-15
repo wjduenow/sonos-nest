@@ -377,6 +377,12 @@ fetch pushes up to 220 KB through it — the failures cluster around exactly tha
 load often improve when you slow the bus. Widening to 4-bit would need D2/D3, which Elecrow does
 not document for this board.
 
+> ⚠️ **CLOSED AGAIN 2026-09-14, properly this time.** "Matching the host" was wrong: the host
+> compiles esp_hosted **2.12.13** (`managed_components/`, see plans/13's 2026-09-14 correction). So
+> the C6 was built and flashed to **2.12.13** the same day, wirelessly, with the `jukebox-c6` probe.
+> The link still dies on the genuinely matched pair (plans/13, *Matched C6 + GENA re-test*). The
+> paragraph below is kept as the record of what was believed.
+
 **CLOSED 2026-09-07 — the C6 is already at 2.12.11, matching the host exactly** (read back by the
 `jukebox-c6` probe env; the attempt below evidently took, since a pre-2.6 slave activates on `end`, and
 nobody re-read the version). The link still dies on matched versions, so this was never the cause.
