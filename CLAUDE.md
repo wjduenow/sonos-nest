@@ -227,7 +227,8 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   >   pool.** That is why "heap exhaustion" never predicted a death.
   > - **The shipping build is ERROR-only.** That compiles out every ESP-Hosted WARN/INFO line,
   >   including the one that named this.
-  > - **The upstream bug is not fixed**, only avoided. A future esp_hosted bump keeps both lines, or
+  > - **The upstream bug is not fixed**, only avoided (filed as esp-hosted-mcu#243: the 2.12.12
+  >   retry re-checks a `NEW_PACKET` bit it already cleared, so it never retries). A future esp_hosted bump keeps both lines, or
   >   proves the drop path was fixed.
   > The full evidence, the diagnostic build recipe and the serial-console notes are in plans/13
   > (**ROOT CAUSE AND FIX 2026-09-15**). Everything in plans/13 before that section is an

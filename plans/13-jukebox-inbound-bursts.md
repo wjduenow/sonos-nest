@@ -634,8 +634,12 @@ the fast death. A longer soak should still confirm it.
   - "The C6 is the open lead": C6-side config is not needed.
   - "Matching versions / upgrading esp_hosted is the fix": the fix is buffer placement. The bug is
     still in 2.12.13 and needs reporting upstream.
-- **The upstream bug is still real.** Any board running streaming mode with internal DMA buffers
-  can wedge the same way. Moving the buffers makes the allocation not fail; it does not fix the
+- **The upstream bug is still real**, and is filed as
+  [esp-hosted-mcu#243](https://github.com/espressif/esp-hosted-mcu/issues/243) (2026-09-15).
+  The retry `0985253` added (`pending = true`) never runs: the first pass already cleared
+  `NEW_PACKET`, so the retry pass `continue`s past the read and then blocks waiting for an
+  interrupt the C6 does not re-raise. That is why each capture shows the warning exactly once. Any
+  board running streaming mode with internal DMA buffers can wedge the same way. Moving the buffers makes the allocation not fail; it does not fix the
   dropped-read path. A future esp_hosted bump must keep `PREFER_SPIRAM` + 64 B, or confirm the drop
   path is fixed.
 
