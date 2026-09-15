@@ -213,20 +213,31 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
   > Recovered automatically by reboot, not cured. Any sustained **inbound** stream triggers it
   > (plans/13's bisection); it died **three runs out of three on 2026-09-07 at the same spot**.
-  > **It is NOT esp-hosted-mcu #220 — the host already has that fix, and still dies.**
+  > **It is NOT esp-hosted-mcu #220, and NOT a version mismatch — host AND C6 both run 2.12.13
+  > (C6 flashed 2026-09-14) and it still dies.** On that matched pair **every GENA-on build died**
+  > (tiles on: 88 s, 96 s; tiles off: 25 s, 763 s, 7,503 s), two of them with no inbound transfer
+  > for minutes and one with 80 KB of free heap. GENA is proven sufficient, not proven necessary.
+  > plans/13's *Matched C6 + GENA re-test* has the table and the next steps. The next useful step is
+  > a serial capture across one GENA-on death.
   > ⚠️ **THE esp_hosted THIS ENV COMPILES IS NOT THE ONE IN THE PLATFORM PACKAGE.** `custom_sdkconfig`
-  > makes pioarduino rebuild the Arduino libs, so the driver linked is the project's gitignored
-  > **`managed_components/espressif__esp_hosted`** — **2.12.13**, resolved at build time from
-  > arduino-esp32's floating `^2.9.2` — while `framework-arduinoespressif32-libs` still carries a
-  > prebuilt 2.12.11 whose header AND `dependencies.lock` describe a library this build never links.
+  > makes pioarduino rebuild the Arduino libs from the project's gitignored
+  > **`managed_components/espressif__esp_hosted`** and copy the archives over the package's
+  > `esp32p4_es/lib/` (this board's chip_variant; `esp32p4/` is never used). The package's HEADERS
+  > and `dependencies.lock` are not refreshed and still say 2.12.11, and so do
+  > `hostedGetHostVersion()` and the `jukebox-c6` probe's "host" line, because they compile against
+  > them.
   > Believing the package misdirected issue #26, plans/13 and an upstream PR comment, all of which
   > rested on "we ship 2.12.11". Proven 2026-09-14 from the flashed ELFs, which all carry a log string that
   > first exists in 2.12.12 (plans/13 has the method). **Read the version off `managed_components/`
-  > or `strings` the ELF — never off the package.** Two consequences: the version floats (a fresh
-  > worktree or CI can compile a different driver, with nothing recording which), and bumping to a
-  > platform that includes arduino-esp32#12879 would re-resolve to its hard **2.12.3 pin** — a
-  > downgrade. The C6 slave *reports* **2.12.11** (`jukebox-c6` probe; also a hand-maintained
-  > constant), so **host and slave are MISMATCHED, and matching them is the open lead (#26).**
+  > or `strings` the ELF — never off the package.** The version used to float with that caret.
+  > **`tools/p4_hosted_patch.py` now fails the build unless it resolves exactly 2.12.13**.
+  > pioarduino's `custom_component_remove`/`_add` pin is unusable here, because removal deletes the
+  > component's include dir from the SHARED package. Moving that version means rebuilding the C6
+  > image to match: Arduino publishes slave images only up to 2.12.11, so build it from
+  > `managed_components/espressif__esp_hosted/slave` in `espressif/idf:v5.5.5` and flash it
+  > wirelessly with the `jukebox-c6` probe (`-DC6_IMAGE_URL` + `-DC6_EXPECT_SLAVE`). plans/13 has the
+  > recipe; the C6 has no app rollback. Bumping to a platform that includes arduino-esp32#12879
+  > would re-resolve to its hard **2.12.3 pin**, and the guard now stops that at build time.
   > **The "slower SDIO clock" lead is closed** — this board is already 1-bit at 10 MHz
   > (`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000`), and #167 reports 20 MHz did not help either.
   > The other lever is inbound volume: the 158 KB `/getaa` cover at play time is the largest
@@ -296,7 +307,8 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > plans/09, issue #6).** The flag is commented out in `platformio.ini` as of `6ef9b70` (PR #27):
   > inbound NOTIFY bursts are half the load profile that wedges the ESP-Hosted SDIO link
   > (#24), so the device is back on the 1 Hz poll until that death is actually cured (#26). That is
-  > **not** an esp_hosted version bump — the host already runs 2.12.13. Without the flag `gena.cpp` is an empty translation unit. **Re-enabling it is one line
+  > **not** an esp_hosted version bump: re-tested 2026-09-14 with host AND C6 on 2.12.13, GENA-on
+  > died 5 of 5, tiles or no tiles (plans/13). Without the flag `gena.cpp` is an empty translation unit. **Re-enabling it is one line
   > plus a soak** — the code is merged and was proven on hardware. What it does when on: Sonos
   > pushes state and the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP
   > calls/sec → 0.09). Two things to know before touching it. The backstop is the **same poll, just

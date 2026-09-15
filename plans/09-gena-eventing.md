@@ -7,7 +7,10 @@ ESP-Hosted SDIO link ([#24](https://github.com/wjduenow/sonos-nest/issues/24)), 
 jukebox is back on the 1 Hz poll until that link death is cured
 ([#26](https://github.com/wjduenow/sonos-nest/issues/26)). See §8. (Corrected 2026-09-14: this
 used to wait for "host and C6 on esp_hosted ≥ 2.12.12". The host already compiles 2.12.13 and
-still dies, so no version bump is known to be the trigger — plans/13.) Not enabled on any other unit —
+still dies, so no version bump is known to be the trigger — plans/13.) **Re-tested 2026-09-14 with
+host AND C6 on 2.12.13: GENA-on died 5 of 5** (tiles on 2, tiles off 3), including deaths with no
+inbound transfer for minutes and with 80 KB of free heap. So GENA is sufficient to kill the link,
+and "re-enable once the driver is fixed" has no known driver to wait for. Not enabled on any other unit —
 see §2 for why.
 
 Replace the continuous 1 Hz SOAP poll behind Now Playing with UPnP GENA eventing — subscribe once

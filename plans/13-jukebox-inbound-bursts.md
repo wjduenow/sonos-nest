@@ -1,13 +1,13 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status (2026-09-14): **bisected, NOT root-caused.** Until 2026-09-14 this said the fault was
-esp-hosted-mcu #220, fixed in esp_hosted 2.12.12, and that we shipped 2.12.11. **That was wrong: the
-host has compiled esp_hosted 2.12.13, fix included, all along, and the link still dies** — see
-*Correction 2026-09-14* at the end, which supersedes the upstream sections before it. The open lead
-is the C6 slave, which reports 2.12.11 (a mismatch with the host), tracked in
+Status (2026-09-14, evening): **bisected, NOT root-caused, and every esp_hosted lead is closed.**
+Host AND C6 now both run esp_hosted **2.12.13** (the C6 was flashed wirelessly on 2026-09-14), and
+the link still dies. **Every GENA-on configuration died on the matched pair** — tiles on: 2 deaths
+at ~90 s; tiles off: 3 deaths, one with no inbound burst and 80 KB of free heap. The jukebox is back
+on tiles OFF + GENA OFF (v0.4.2-98-g1a121d3). See *Matched C6 + GENA re-test 2026-09-14* at the
+end; *Correction 2026-09-14* before it explains why the host was never on 2.12.11. Tracked in
 [issue #26](https://github.com/wjduenow/sonos-nest/issues/26). Candidates 1 (CDN cover) and 4
-(inbound gate) are built and kept on merit but do not cure it; the jukebox runs with GENA eventing
-and tile artwork OFF. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
+(inbound gate) are built and kept on merit but do not cure it. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
 stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
 
 ## What is known (all measured on hardware, 2026-09-07)
@@ -21,7 +21,8 @@ stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
 - **Every transport-side lead is closed.** SDIO is already 1-bit at 10 MHz (#167 says 20 MHz did
   not help). Packet mode instead of stream mode is a hard assert at init (boot loop, USB recovery).
   The C6 reports slave **2.12.11** (`jukebox-c6` probe). *(This said "matching the host library
-  exactly" — wrong: the host compiles 2.12.13. See the 2026-09-14 correction.)*
+  exactly" — wrong: the host compiles 2.12.13. See the 2026-09-14 correction. The C6 was then
+  flashed to 2.12.13 the same day; the link still dies.)*
 - The largest inbound transfer the panel makes is the Now Playing cover at play time: the speaker
   serves a Spotify cover through `/getaa` as **158 KB, chunked, in 0.39 s** — full LAN speed into
   the C6. `getaa` has no rendition knob (`s=`, `&v=`, `&size=` are byte-identical). Tiles already
@@ -411,3 +412,115 @@ leave the fix half-applied.
 fixes the deaths. A correction withdrawing that went up the same day it was found
 ([comment](https://github.com/espressif/arduino-esp32/pull/12879#issuecomment-5669988494)); the
 pin is not ours to contest on this evidence.
+
+## Matched C6 + GENA re-test 2026-09-14 — the version lead is closed; GENA dies on its own
+
+**Result: matching the C6 to the host did not cure the link death, and every GENA-on configuration
+still dies.** The jukebox went back to tiles OFF + GENA OFF at 21:08 (v0.4.2-98-g1a121d3).
+
+### How the C6 got to 2.12.13 (repeatable, no cable)
+
+1. **Build the slave.** Arduino publishes slave images only up to 2.12.11 (2.12.12, 2.12.13 and
+   3.0.7 all 404 at `espressif.github.io/arduino-esp32/hosted/`), so it was built from the same
+   source the host compiles, with Arduino's own recipe (esp32-arduino-lib-builder
+   `tools/build-hosted.sh`: stock defaults, `set-target` + `build`):
+   ```bash
+   cp -a managed_components/espressif__esp_hosted/. /tmp/eh && cd /tmp/eh/slave
+   docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v "$PWD":/project -w /project \
+     espressif/idf:v5.5.5 bash -c 'idf.py set-target esp32c6 && idf.py build'
+   ```
+   The result is `network_adapter.bin`: App version 2.12.13, ESP-IDF v5.5.5, SDIO streaming mode,
+   1,226,976 B, within 176 B of Arduino's published 2.12.11 image (1,226,800 B). Its sha256 is
+   `e74eb39339f0d3092bd800f6ebf24338327cce04f337c0c6a03787afec9f4662`. Archived with its ELF and
+   `sdkconfig.h` at `~/sonos-nest-elf/c6-slave/2.12.13/`.
+2. **Serve it** from the build host: `python3 -m http.server 8765` in that directory. WSL inbound
+   must be `Allow` (the `/ota` skill's step 0).
+3. **Build the probe** with the image baked in, then OTA it over the running app (it uses the app's
+   hostname):
+   ```bash
+   PLATFORMIO_BUILD_FLAGS="-DC6_PHASE=3 -DC6_IMAGE_SHA256=\\\"<sha>\\\" -DC6_IMAGE_URL=\\\"http://<host>:8765/esp32c6-v2.12.13.bin\\\" -DC6_EXPECT_SLAVE=\\\"2.12.13\\\"" \
+     tools/pio run -e jukebox-c6
+   ```
+   The probe downloads into PSRAM and checks the SHA-256 before touching the C6, then writes,
+   activates and restarts. `nc <ip> 2323` shows its transcript, and it answers `/ota` so the app
+   can go back on. It fetched the image at 14:22:02; after the restart the C6 reported
+   **slave 2.12.13**. The first boot's transcript is lost on that restart, because it lives in
+   PSRAM. Connect before it finishes, or read the second boot's `RESULT:` line.
+
+The slave has two OTA slots and **no app rollback** (`partitions.esp32c6.csv`, no
+`APP_ROLLBACK` in its sdkconfig). 2.12.11 is still in the inactive slot. An image that boots but
+never answers SDIO would need the C6's UART.
+
+⚠️ The probe's "host" number and `hostedHasUpdate()` are **wrong for this env**: they compile
+against the package's stale 2.12.11 headers. Take the host version from `managed_components/`
+or from the guard in `tools/p4_hosted_patch.py`, which now fails any build that resolves
+anything but 2.12.13. pioarduino's own `custom_component_remove`/`_add` pin cannot be used for
+esp_hosted: removal deletes the component's include directory from the shared package, and the
+Arduino core needs it.
+
+### The re-test (host AND C6 on 2.12.13)
+
+| build | tiles | GENA | outcome |
+|---|---|---|---|
+| v0.4.2-99-g40299cf | on | on | **died at 88 s and 96 s of uptime** |
+| v0.4.2-100-g5901135 | off | on | **died at 25 s, 7,503 s and 763 s of uptime** |
+| v0.4.2-98-g1a121d3 | off | off | restored 21:08; not yet soaked on the matched pair |
+
+The deaths in detail (all `netlink:fast dead=7s`, `resetReason 3`):
+
+- **88 s** (tiles + GENA): Radio → Spotify → New Releases → album → play (39 KB cover) → artist
+  browse (24 rows, tiles; the gate serialised them at 658/430 ms) → `artistTopTracks` browse
+  starts → log ends. Heap min 49 KB. Diary `gapmax=2s@coord-refresh … art=39474B/195ms cdn 30s ago`.
+- **96 s** (tiles + GENA): the mirror recorder had hung (fixed since), so there is no transcript.
+  Diary `gapmax=0s@registrar … art=31921B/90ms cdn 25s ago`.
+- **25 s** (GENA only): right after a power cycle. Boot → portal registration → GENA subscribes
+  `avt` + `rc` on the coordinator → a 65 KB cover via CDN → dead. No browse, no tiles. Diary
+  `gapmax=0s@gena`.
+- **7,503 s** (GENA only): ~28 min into use, after ~1.6 h idle. **No burst preceded it**: the last
+  cover was 218 s earlier and no browse or tile traffic appears. Internal heap had sat at 20–29 KB
+  free, largest block 7 KB, **all-time min 404 B**, for at least 25 min. Diary
+  `gapmax=12s@roomstatus … cdn 218s ago`.
+- **763 s** (GENA only): **no burst and no heap pressure.** Free heap 75–82 KB for the whole
+  session, min 57 KB; last cover 284 s earlier. Diary `gapmax=7s@coord-refresh … cdn 284s ago`.
+
+That last one **rules out internal-heap exhaustion as the cause**. The 7,503 s session looked
+like it until the next session died with 80 KB free.
+
+After the 763 s death the same GENA build stayed up 9,865 s until it was replaced. It was idle
+from 19:02, so that proves nothing.
+
+Transcripts: `~/sonos-nest-elf/v0.4.2-99-g40299cf/test-logs/` (the 88 s death; the second file
+also covers v0.4.2-100's first boot) and `~/sonos-nest-elf/v0.4.2-100-g5901135/test-logs/` (the
+404 B session and both later deaths).
+
+### What it means
+
+- **The esp_hosted version is not the lever.** Host and slave match at 2.12.13, the newest 2.x on
+  either side. No upstream release on the watch list is known to change this.
+- **GENA is sufficient to kill the link on the matched pair, even without a burst.** Two of the
+  three GENA-only deaths had no inbound transfer for 3–5 minutes before them. What GENA adds
+  permanently: subscriptions renewed against the coordinator, and speaker-initiated TCP
+  connections into the panel's listener (`:3401`).
+- **It is not proven that GENA is necessary.** On 2026-09-07 (old C6) tiles on + GENA off also
+  died, at 3.5 min. That configuration has not been re-run on the matched pair, and tiles off +
+  GENA off has not yet been soaked on it either. Do not read the table above as "no GENA, no
+  death".
+- **Separate bug, unexplained: ~65 KB of internal heap never came back** after about 20 minutes of
+  use in the 7,503 s session. It went from 91 KB free idle to ~26 KB, flat, with a 404 B minimum.
+  Every `heapwatch` tag stayed ≥ 15 KB (`webconfig.json` lowest), so the holder is untagged code
+  or lwIP. The death at 763 s shows it is not what kills the link, but 404 B is far past the
+  ~15 KB lwIP floor.
+
+### Next steps, most informative first
+
+1. **A serial capture across one GENA-on death.** They come within minutes to two hours, and the
+   25 s post-boot death is the fastest to reproduce. The fixed host logs `SDIO bus fault` at ERROR
+   on the all-ones register read, and that goes to the UART, not the TCP mirror. Seeing it or not
+   separates "the host sees the bus fail" from "the C6 goes silent".
+2. **Soak the restored tiles-off + GENA-off build on the matched pair**, then re-run tiles on +
+   GENA off, to settle whether GENA is necessary as well as sufficient.
+3. **Instrument before fixing the heap hold:** DMA-capable internal free/largest
+   (`MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`, the pool the SDIO driver uses), lwIP socket/PCB counts,
+   and the current page on the `[health]` line.
+4. **C6-side configuration** (Wi-Fi RX buffers, SDIO queue depth; #221's measured fixes are in that
+   area), now that building and flashing the slave is a known procedure.
