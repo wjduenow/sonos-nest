@@ -26,8 +26,33 @@
 #include "touch.h"
 #include "web_config.h"
 #include "ui_sound.h"
+#ifdef HOSTED_DIAG
+#include "esp_log.h"
+#endif
+
+#ifdef HOSTED_DIAG
+// Diagnostic build for the ESP-Hosted link death (#26, plans/13). The env raises
+// CONFIG_LOG_MAXIMUM_LEVEL to INFO and enables CONFIG_ESP_HOSTED_PKT_STATS, while the default
+// level stays ERROR so the rest of IDF keeps quiet. Only these tags are raised, and this must run
+// before appBoot() starts ESP-Hosted so the stats timer logs from its first tick.
+//   stats       — s2h/h2s packet counters + flow control + internal heap, every 2 s (the point)
+//   H_SDIO_DRV  — RX/TX mempool OOM, "RX buffer alloc failed", dropped packets, queue-full
+// RPC and transport stay at WARN: rpc_core logs EVERY request at INFO, and the RSSI read alone
+// makes one per network pass — it would bury the stats and slow the 115200 console.
+static void hostedDiagLogLevels() {
+  esp_log_level_set("stats", ESP_LOG_INFO);
+  esp_log_level_set("H_SDIO_DRV", ESP_LOG_INFO);
+  for (const char *tag : {"sdio_wrapper", "transport", "H_API", "rpc_core", "rpc_rsp", "rpc_req",
+                          "rpc_utils", "RPC_WRAP"})
+    esp_log_level_set(tag, ESP_LOG_WARN);
+  LOG.println("[board ] HOSTED_DIAG: esp_hosted stats + H_SDIO_DRV at INFO, rpc/transport at WARN");
+}
+#endif
 
 bool boardInit() {
+#ifdef HOSTED_DIAG
+  hostedDiagLogLevels();
+#endif
   LOG.printf("[board ] CrowPanel Advance 7\" ESP32-P4 — %s, %lu KB internal heap free\n",
                 ESP.getChipModel(), (unsigned long)(ESP.getFreeHeap() / 1024));
 
