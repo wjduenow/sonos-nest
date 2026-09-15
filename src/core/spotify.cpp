@@ -228,6 +228,7 @@ static void eachItem(const String &xml, std::vector<Item> &out, int max) {
     it.id       = unescapeXml(tagValue(blk, "id"));
     it.artUrl   = unescapeXml(tagValue(blk, "albumArtURI"));
     it.subtitle = unescapeXml(tagValue(blk, "artist"));
+    it.isExplicit = tagValue(blk, "explicit") == "1";
     if (it.subtitle.isEmpty()) it.subtitle = unescapeXml(tagValue(blk, "owner"));
     // itemType is the service's word for it; the id prefix agrees and is the simpler check.
     if      (it.id.startsWith("spotify:track:"))    it.kind = Item::Kind::Track;
