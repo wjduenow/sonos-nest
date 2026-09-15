@@ -234,3 +234,53 @@ a screw driven from either side would push past its own thread engagement.
 6. **No USB-C strain relief.** `button-v2` needs pinch ribs because the XIAO has no mounting
    holes; here the board is screwed down at four corners, so the load path is probably fine — but
    it is untested.
+
+## 6. Locating the mounting holes — `gauge/`
+
+The hole positions are the least-verified numbers in the build: the **Z centres are measured**
+(3.5 / 16.8, and 3.5 + 16.8 = 20.3 against a 20.32 board proves they are true centres), the **X
+pitch is agreed** by drawing and caliper (32.00), but the **X absolute position comes from the
+vendor drawing alone** and has never been checked.
+
+> ⚠️ **Waveshare documents almost nothing here.** There is no STEP model, no hole table and no
+> mechanical PDF — just one annotated photo giving `M2`, the 36.37 x 20.32 outline, and four
+> insets (1.97 / 2.40 / 2.00 / 3.52) whose leader lines are ambiguous. Two of them even conflict:
+> top-left reads 3.52 from the top edge while top-right reads 2.00. Magnifying the drawing
+> confirms **3.52 is top-edge-to-centre** (matching the measured 3.5); the 1.97 leader stays
+> unreadable at any magnification.
+
+**Do not reach for calipers.** The centre of a hole is not a feature a jaw can touch, and
+measuring to its near edge is exactly what produced the bogus "1 and 33" reading — 1.97 and 33.97
+each one hole-radius short.
+
+Two better tools, both driven off `shell/button_params.py` so they always show what the model
+currently believes:
+
+```
+conda run -n img23d python gauge/build_paper_gauge.py   ->  hole_gauge.pdf   (seconds)
+conda run -n img23d python gauge/build_gauge.py         ->  three .stl       (minutes)
+```
+
+**The paper sheet is the one to reach for first**, and it works because the eyelets are
+THROUGH-holes: lay the board on the printed outline and each eyelet becomes a ~2 mm window onto
+the paper. A bullseye is printed where the model thinks the hole is, and **the heavy 1.0 mm ring
+is the M2 bore's own radius** — so on a correctly modelled hole it sits exactly under the eyelet's
+rim all the way round. Gap on one side, hidden on the other, means that hole is off, that way, and
+the 0.25 mm rings size it.
+
+> ⚠️ **Print at exactly 100%.** "Fit to page" scales by a few percent, which is the same order as
+> the error being hunted. The sheet carries a 100 mm check bar — measure it first.
+
+What the pattern of errors means, which is why seeing all four at once beats four separate
+readings:
+
+| observation | cause |
+|---|---|
+| all four off the same way | the pattern needs shifting — an offset |
+| off in opposite directions | the pitch is wrong, not the position |
+| only one off | the board is not square on the outline; re-seat it |
+
+The STL gauges are the same idea in plastic — `check` (3.6 mm holes, always drops on, shows the
+error), `fit` (2.6, the real clearance), `tight` (2.2, seats only if the pattern is right to
+~0.1 mm). A notch marks the USB-C edge so a plate cannot be laid on flipped and hide an
+asymmetric error.
