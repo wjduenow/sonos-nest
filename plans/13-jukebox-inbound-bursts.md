@@ -1,14 +1,15 @@
 # 13 — The jukebox link death: shrink the inbound bursts
 
-Status (2026-09-14, evening): **bisected, NOT root-caused, and every esp_hosted lead is closed.**
-Host AND C6 now both run esp_hosted **2.12.13** (the C6 was flashed wirelessly on 2026-09-14), and
-the link still dies. **Every GENA-on configuration died on the matched pair** — tiles on: 2 deaths
-at ~90 s; tiles off: 3 deaths, one with no inbound burst and 80 KB of free heap. The jukebox is back
-on tiles OFF + GENA OFF (v0.4.2-98-g1a121d3). See *Matched C6 + GENA re-test 2026-09-14* at the
-end; *Correction 2026-09-14* before it explains why the host was never on 2.12.11. Tracked in
-[issue #26](https://github.com/wjduenow/sonos-nest/issues/26). Candidates 1 (CDN cover) and 4
-(inbound gate) are built and kept on merit but do not cure it. Dead-link detection is 7 s. Bisection tables and upstream record are below; #24
-stays open until #26 is measured. Branch `fix/jukebox-inbound-bursts` / PR #27.
+Status (2026-09-15): **ROOT-CAUSED AND FIXED.** The link death is an ESP-Hosted host-driver bug:
+the SDIO streaming RX buffer could not grow from the P4's small DMA-capable internal pool, the
+driver dropped the read, and esp_hosted 2.12.13 never delivered C6-to-host data again. Caught on
+the USB serial console with a diagnostic build (four deaths, one mechanism). **Fixed** by serving
+ESP-Hosted's buffers from DMA-capable PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y`) with the
+64 B L2 cache line esp-hosted-mcu #219 requires. GENA eventing and tile artwork are back on.
+Everything between here and that section is the investigation record. Its main conclusions were
+wrong: that inbound bursts, eventing or tiles were the trigger, that an esp_hosted version or the
+C6 firmware was the fix, and that heap exhaustion was the mechanism. Start with **ROOT CAUSE AND
+FIX 2026-09-15** at the end. Tracked in [issue #26](https://github.com/wjduenow/sonos-nest/issues/26).
 
 ## What is known (all measured on hardware, 2026-09-07)
 
@@ -415,6 +416,10 @@ pin is not ours to contest on this evidence.
 
 ## Matched C6 + GENA re-test 2026-09-14 — the version lead is closed; GENA dies on its own
 
+> ⚠️ **Superseded 2026-09-15 by ROOT CAUSE AND FIX below.** The measurements here stand, but GENA
+> was never the cause. Its deaths were the SDIO RX allocation bug, and the heap readings missed it
+> because they never measured the DMA-capable pool. The next-steps list at the end is obsolete.
+
 **Result: matching the C6 to the host did not cure the link death, and every GENA-on configuration
 still dies.** The jukebox went back to tiles OFF + GENA OFF at 21:08 (v0.4.2-98-g1a121d3).
 
@@ -524,3 +529,125 @@ also covers v0.4.2-100's first boot) and `~/sonos-nest-elf/v0.4.2-100-g5901135/t
    and the current page on the `[health]` line.
 4. **C6-side configuration** (Wi-Fi RX buffers, SDIO queue depth; #221's measured fixes are in that
    area), now that building and flashing the slave is a known procedure.
+
+## ROOT CAUSE AND FIX 2026-09-15 — a failed SDIO RX allocation wedges ESP-Hosted; buffers now from PSRAM
+
+**This supersedes every theory above.** The link death is a host-side ESP-Hosted bug. In streaming
+mode the SDIO RX buffer has to grow to the size of the pending stream. That allocation asks for
+**DMA-capable internal RAM**, which on the P4 is a small region. When it fails, the driver "drops"
+the read, and **esp_hosted 2.12.13 never delivers C6-to-host data again**. The fix is two sdkconfig
+lines in `[jukebox_base]` that serve those buffers from DMA-capable PSRAM. With it, GENA eventing
+and tile artwork are back on, and the reproduction runs clean. Shipped in v0.4.2-108 (`698b18a`)
+and everything after.
+
+### How it was caught: the serial console
+
+- **Where it is:** the CrowPanel's second USB-C port (the CH340K, `1a86:7522`, `/dev/ttyUSB0`).
+  The rear port is power only.
+- **Opening the port resets the P4** through the auto-reset circuit, even with DTR/RTS set low
+  before `open()`. So the recorder opens it **once** and holds it across OTA reboots.
+  `~/sonos-nest-elf/serial-captures/2026-09-15-jukebox-serial.log` is the capture (09:00 → ongoing).
+- **ERROR-only builds could not have shown this.** `CONFIG_LOG_MAXIMUM_LEVEL=1` compiles out every
+  ESP-Hosted WARN/INFO line, including the one that names the failure. The first serial-captured
+  death (v0.4.2-100) showed only `rpc_core: Response not received`. It took a diagnostic build:
+  - `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=n` and `CONFIG_LOG_MAXIMUM_LEVEL_INFO=y`, with the default
+    still at ERROR;
+  - `CONFIG_ESP_HOSTED_PKT_STATS=y` with `_INTERVAL_SEC=2`;
+  - `-DHOSTED_DIAG`, which raises only `stats` and `H_SDIO_DRV` to INFO and the RPC/transport tags
+    to WARN (`boards/crowpanel_p4_7in/board.cpp`). `rpc_core` logs every request at INFO, and the
+    RSSI read alone would bury the stats.
+- **Reading the stats line.** `stats: STA: s2h{in[N] out[N]} h2s{... out(ok[N] drop[N])}
+  flwctl{on off}` counts C6→host packets received and delivered, and host→C6 packets sent. The
+  second line gives internal free / largest block / min-free and PSRAM. **Its heap numbers are
+  `MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL`, not the DMA-capable pool**, and neither is
+  `health.heapLargest`. That blind spot is why heap never predicted a death.
+
+### The four captured deaths (v0.4.2-105, GENA on, tiles off, Spotify browsing)
+
+| # | time | `RX buffer alloc failed (len=…)` | internal free / largest block | C6→host frozen at | host→C6 after |
+|---|---|---|---|---|---|
+| 1 | 09:18:20 | 18,432 B | 34.7 KB / 19,444 B | 2,427 | still counting |
+| 2 | 09:24:14 | 15,360 B | 54.1 KB / **31,732 B** | 15,837 | still counting |
+| 3 | 09:27:50 | 21,504 B | 67.1 KB / **31,732 B** | 8,539 | still counting |
+| 4 | 09:31:17 | 23,040 B | **83.2 KB / 31,732 B** | 8,094 | still counting |
+
+The same sequence each time:
+1. A Spotify browse or cover queues a 15–23 KB stream on the C6.
+2. `sdio_rx_get_buffer()` (`sdio_drv.c`, streaming branch) tries to grow its double buffer with
+   `hosted_malloc_align(len, 64)`. That is `heap_caps_aligned_alloc(..., MALLOC_CAP_INTERNAL |
+   MALLOC_CAP_DMA | MALLOC_CAP_8BIT)` unless `MEMPOOL_PREFER_SPIRAM` is set.
+3. It fails and logs `W H_SDIO_DRV: RX buffer alloc failed … dropping read`, returning NULL on the
+   stated assumption that "the slave resends / the RPC retries".
+4. **It doesn't.** `s2h in` froze at the next stats line and never moved again, while `h2s out ok`
+   kept climbing. The RSSI RPC timed out 5–6 s later, and `deadLinkFast()` rebooted at dead=7s.
+   A C6 reset always recovers it.
+
+Deaths 2–4 failed with **31.7 KB general internal blocks free**, larger than the request, and death
+4 with 83 KB free. So the pool that runs out is the DMA-capable subset, which none of our metrics
+measured.
+
+**How this explains everything upstream of it:**
+- **Inbound bursts** decide the size of the pending read.
+- **GENA, tiles and browsing** add inbound traffic and heap churn.
+- **"Heap exhaustion" looked plausible**, including the 404 B session on 2026-09-14, but it was
+  never the real variable. The DMA-capable pool can be empty while general heap is fine.
+- **#220's "dropped RX read deadlocks RX"** is this failure mode. 2.12.12's fix (`0985253`) covers
+  the all-ones register read, not the allocation-failure drop.
+
+### The fix (`[jukebox_base]` custom_sdkconfig)
+
+```ini
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y   ; try DMA-capable PSRAM first (CONFIG_SOC_PSRAM_DMA_CAPABLE=y on the P4)
+CONFIG_CACHE_L2_CACHE_LINE_128B=n
+CONFIG_CACHE_L2_CACHE_LINE_64B=y           ; REQUIRED with it — esp-hosted-mcu #219
+```
+
+- **The cache line has to move with it.** #219 shows `PREFER_SPIRAM` with a 128 B L2 cache line
+  leaving half the 1,600 B zero-copy TX pool blocks DMA-misaligned (`Failed to send data: 258 …
+  Unrecoverable host sdio state`). The 128 B line was inherited from Arduino's prebuilt P4
+  sdkconfig (`esp32p4_es/sdkconfig.orig`). 64 B is IDF's own default for a 256 KB L2 cache.
+- **It frees internal RAM besides.** At the first stats line, internal free went from 175 KB to
+  264 KB, and the largest block from 74 KB to 139 KB. During use the internal low is **145 KB**,
+  against 17–58 KB on the diagnostic build.
+
+### Evidence
+
+| build (all host + C6 2.12.13) | GENA | tiles | buffers | result |
+|---|---|---|---|---|
+| v0.4.2-105 (diag) | on | off | internal DMA | **4 deaths in ~13 min of use** (table above) |
+| v0.4.2-106 (diag + fix) | on | off | PSRAM | 19 min, 11 browses, 53,600 C6→host packets, **0 failures** |
+| v0.4.2-107 (diag + fix) | on | **on** | PSRAM | 10+ min, 14 tile fetches, **0 failures** |
+| v0.4.2-108 → -112 (shipping) | on | on | PSRAM | clean through 12:25 |
+
+Across all fix builds from 09:33:48 to 12:25:20 (2 h 52 min, 5 boots, every one an OTA): 34 Spotify
+browses, 31 covers, 26 tile/gate hand-offs; **0 dead-link restarts, 0 RPC timeouts, 0
+`RX buffer alloc failed` (visible on -106/-107), 0 `Failed to send data`**. That is strong against
+the fast death. A longer soak should still confirm it.
+
+### What stays true, and what does not
+
+- **Still worth keeping:** the inbound gate, the 300 px CDN cover, the 7 s dead-link detector (it
+  is how every capture got a clean reboot), and the esp_hosted version guard.
+- **No longer true:**
+  - "GENA/tiles off until the link death is cured": both are back on (`-DEXPERIMENT_NO_TILES`
+    removed, `-DGENA_EVENTS` on).
+  - "The C6 is the open lead": C6-side config is not needed.
+  - "Matching versions / upgrading esp_hosted is the fix": the fix is buffer placement. The bug is
+    still in 2.12.13 and needs reporting upstream.
+- **The upstream bug is still real.** Any board running streaming mode with internal DMA buffers
+  can wedge the same way. Moving the buffers makes the allocation not fail; it does not fix the
+  dropped-read path. A future esp_hosted bump must keep `PREFER_SPIRAM` + 64 B, or confirm the drop
+  path is fixed.
+
+### Found on the way (not the link death)
+
+- **An OTA push can fail with `[ota] error 3` / `Broken pipe`** while the link stays healthy: the
+  counters kept moving, and a retry succeeds. That is the ordinary transient CLAUDE.md already
+  describes.
+- **A 5 s `/api/config` poller** (the external health watcher used on 2026-09-14) is ~2.1 KB per
+  call and did not cause deaths. It did make `webconfig.json` the `heapLow` tag. Serial replaces
+  it for this kind of test.
+- **Explicit Spotify tracks.** An account with explicit content off makes Sonos refuse the track
+  silently. Play returns UPnP 701, or is accepted and sits at STOPPED. Now Playing still showed
+  the title. The jukebox now reports refusals (`playFailSeq`) and badges explicit rows from
+  Spotify's `<explicit>1</explicit>` (plans/12).

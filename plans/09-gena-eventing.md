@@ -1,17 +1,15 @@
 # Plan 09 — UPnP GENA eventing instead of polling (Now Playing first)
 
-Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **BUILT AND MERGED for the
-jukebox, then DISABLED at the flag.** `-DGENA_EVENTS` is commented out in `platformio.ini` as of
-`6ef9b70` (PR #27) — inbound NOTIFY bursts turned out to be half the load profile that wedges the
-ESP-Hosted SDIO link ([#24](https://github.com/wjduenow/sonos-nest/issues/24)), so the
-jukebox is back on the 1 Hz poll until that link death is cured
-([#26](https://github.com/wjduenow/sonos-nest/issues/26)). See §8. (Corrected 2026-09-14: this
-used to wait for "host and C6 on esp_hosted ≥ 2.12.12". The host already compiles 2.12.13 and
-still dies, so no version bump is known to be the trigger — plans/13.) **Re-tested 2026-09-14 with
-host AND C6 on 2.12.13: GENA-on died 5 of 5** (tiles on 2, tiles off 3), including deaths with no
-inbound transfer for minutes and with 80 KB of free heap. So GENA is sufficient to kill the link,
-and "re-enable once the driver is fixed" has no known driver to wait for. Not enabled on any other unit —
-see §2 for why.
+Issue: [#6](https://github.com/wjduenow/sonos-nest/issues/6). Status: **ON for the jukebox again
+(2026-09-15).** It was disabled from `6ef9b70` (PR #27), blamed for the ESP-Hosted SDIO link death
+([#24](https://github.com/wjduenow/sonos-nest/issues/24),
+[#26](https://github.com/wjduenow/sonos-nest/issues/26)). That death turned out to be an ESP-Hosted
+host-driver bug: a failed SDIO RX buffer allocation from the P4's DMA-capable internal pool wedged
+receive for good. GENA only supplied the bursts that made the allocation large. With ESP-Hosted's
+buffers served from PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y`, plans/13 **ROOT CAUSE AND
+FIX 2026-09-15**), GENA with tile artwork runs the reproduction clean. §8's deferral reasoning is
+kept below as the record, but its conclusion no longer holds. Not enabled on any other unit — see
+§2 for why.
 
 Replace the continuous 1 Hz SOAP poll behind Now Playing with UPnP GENA eventing — subscribe once
 per coordinator, let Sonos push changes — keeping a slow poll as a backstop.

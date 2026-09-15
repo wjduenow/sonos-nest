@@ -210,15 +210,36 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > BODY, not in `<credentials><deviceId>` where the WSDL puts it** — the WSDL-correct form is a
   > hard `400 "householdId must not be blank or null!"`, so do not "fix" `amazon.cpp` to match the
   > schema. Full evidence: `plans/08` (2026-09-05).
-  > ⚠️ **One unresolved fault: the ESP-Hosted link dies under load** (`rssi=0` while `wifi=3`).
-  > Recovered automatically by reboot, not cured. Any sustained **inbound** stream triggers it
-  > (plans/13's bisection); it died **three runs out of three on 2026-09-07 at the same spot**.
-  > **It is NOT esp-hosted-mcu #220, and NOT a version mismatch — host AND C6 both run 2.12.13
-  > (C6 flashed 2026-09-14) and it still dies.** On that matched pair **every GENA-on build died**
-  > (tiles on: 88 s, 96 s; tiles off: 25 s, 763 s, 7,503 s), two of them with no inbound transfer
-  > for minutes and one with 80 KB of free heap. GENA is proven sufficient, not proven necessary.
-  > plans/13's *Matched C6 + GENA re-test* has the table and the next steps. The next useful step is
-  > a serial capture across one GENA-on death.
+  > ⚠️ **THE ESP-HOSTED LINK DEATH IS FIXED (2026-09-15) — by two sdkconfig lines you must not remove.**
+  > The link used to die under load (`rssi=0` while `wifi=3`, RPC `Response not received`). The cause
+  > is an ESP-Hosted host-driver bug, caught on the serial console. In streaming mode the SDIO RX
+  > buffer grows to the pending stream size with an **INTERNAL | DMA** allocation. On the P4 that
+  > pool is small, so a 15-23 KB request failed **even with 31.7 KB general internal blocks free**.
+  > The driver logged `RX buffer alloc failed … dropping read`, and esp_hosted 2.12.13 never
+  > delivered C6-to-host data again (the RX packet counter froze, TX kept counting) — four deaths out
+  > of four, one mechanism.
+  > **The fix:** `CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y` serves those buffers from DMA-capable
+  > PSRAM, and `CONFIG_CACHE_L2_CACHE_LINE_64B=y` must go with it (esp-hosted-mcu #219: PSRAM buffers
+  > plus the 128 B line inherited from Arduino's prebuilt sdkconfig misalign the TX pool). Internal
+  > heap low rose from 17-58 KB to 145 KB. **GENA eventing and tile artwork are back on**.
+  > **Three traps from the hunt:**
+  > - **`health.heapLargest` and every heap number here measure 8BIT|INTERNAL, not the DMA-capable
+  >   pool.** That is why "heap exhaustion" never predicted a death.
+  > - **The shipping build is ERROR-only.** That compiles out every ESP-Hosted WARN/INFO line,
+  >   including the one that named this.
+  > - **The upstream bug is not fixed**, only avoided. A future esp_hosted bump keeps both lines, or
+  >   proves the drop path was fixed.
+  > The full evidence, the diagnostic build recipe and the serial-console notes are in plans/13
+  > (**ROOT CAUSE AND FIX 2026-09-15**). Everything in plans/13 before that section is an
+  > investigation record with wrong conclusions: bursts, GENA or tiles as the trigger; versions or
+  > the C6 as the fix.
+  > ⚠️ **The jukebox HAS a serial console: the second USB-C port (CH340K, `1a86:7522`,
+  > `/dev/ttyUSB0`).** The rear port is power only. **Opening the port resets the P4**, even with
+  > DTR/RTS preset low, so open it once and hold it; it survives OTA reboots. To see ESP-Hosted's
+  > own diagnostics, add `CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=n` + `CONFIG_LOG_MAXIMUM_LEVEL_INFO=y` +
+  > `CONFIG_ESP_HOSTED_PKT_STATS=y` to the sdkconfig lines and `-DHOSTED_DIAG` to the env
+  > (`boards/crowpanel_p4_7in/board.cpp` raises only the hosted tags). Either sdkconfig change forces
+  > a full lib rebuild.
   > ⚠️ **THE esp_hosted THIS ENV COMPILES IS NOT THE ONE IN THE PLATFORM PACKAGE.** `custom_sdkconfig`
   > makes pioarduino rebuild the Arduino libs from the project's gitignored
   > **`managed_components/espressif__esp_hosted`** and copy the archives over the package's
@@ -238,10 +259,6 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > wirelessly with the `jukebox-c6` probe (`-DC6_IMAGE_URL` + `-DC6_EXPECT_SLAVE`). plans/13 has the
   > recipe; the C6 has no app rollback. Bumping to a platform that includes arduino-esp32#12879
   > would re-resolve to its hard **2.12.3 pin**, and the guard now stops that at build time.
-  > **The "slower SDIO clock" lead is closed** — this board is already 1-bit at 10 MHz
-  > (`CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=10000`), and #167 reports 20 MHz did not help either.
-  > The other lever is inbound volume: the 158 KB `/getaa` cover at play time is the largest
-  > transfer this panel makes.
   > **Never "fix" it by re-initialising the transport**: `esp_hosted_deinit()` under live lwIP
   > users hard-freezes the device.
   > ⚠️ **Detection is in SECONDS now; keep it there.** The original check lived inside the
@@ -303,13 +320,11 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > 120 px clock is **a real font** (`lv_font_clock_120.c`), not a scaled label: scaling allocates a
   > ~240 KB ARGB draw layer per repaint from the 512 KB pool, and pool exhaustion here is a UI
   > freeze, not a dropped frame. That file's header has the regeneration command.
-  > ⚠️ **Now Playing eventing is BUILT BUT CURRENTLY OFF (`core/sonos/gena.*`, `-DGENA_EVENTS`,
-  > plans/09, issue #6).** The flag is commented out in `platformio.ini` as of `6ef9b70` (PR #27):
-  > inbound NOTIFY bursts are half the load profile that wedges the ESP-Hosted SDIO link
-  > (#24), so the device is back on the 1 Hz poll until that death is actually cured (#26). That is
-  > **not** an esp_hosted version bump: re-tested 2026-09-14 with host AND C6 on 2.12.13, GENA-on
-  > died 5 of 5, tiles or no tiles (plans/13). Without the flag `gena.cpp` is an empty translation unit. **Re-enabling it is one line
-  > plus a soak** — the code is merged and was proven on hardware. What it does when on: Sonos
+  > ⚠️ **Now Playing eventing is ON (`core/sonos/gena.*`, `-DGENA_EVENTS`, plans/09, issue #6).**
+  > It was off from `6ef9b70` (PR #27) to 2026-09-15, blamed for the ESP-Hosted link death. The real
+  > cause was the SDIO RX allocation bug above: GENA only fed it bursts, and it runs clean with the
+  > PSRAM buffer fix. If the link dies again, capture it on serial before blaming eventing. Without
+  > the flag `gena.cpp` is an empty translation unit. What it does when on: Sonos
   > pushes state and the poll drops to a 15 s backstop while eventing is trusted (3.00 SOAP
   > calls/sec → 0.09). Two things to know before touching it. The backstop is the **same poll, just
   > slower** — it was briefly reduced to position-only and Now Playing went blank, because nothing
