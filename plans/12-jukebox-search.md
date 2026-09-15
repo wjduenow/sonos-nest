@@ -103,6 +103,8 @@ struct Item {                    // one search hit or one browse row
   String id;                     // native id VERBATIM: "spotify:track:6vLa…" — never rebuild it
   String artUrl;                 // may be empty
   enum class Kind : uint8_t { Track, Artist, Album, Playlist, Container } kind;
+  bool isExplicit = false;       // Spotify's <explicit> flag; tracks only (albums/artists/playlists
+                                 // do not carry it) — see §13
 };
 
 // --- linking (blocking HTTPS; runs on its own task, driven from the UI by state) ---

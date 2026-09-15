@@ -333,6 +333,9 @@ static void processPending() {
     sonos::setVolume(p.roomVolIp, (uint8_t)constrain(p.roomVolTarget, 0, 100));
   }
   if (p.roomPlayCoordIp.length() && p.roomSetPlay >= 0) {
+    // A room play/pause on OUR coordinator supersedes a watched play. It runs after the playUri
+    // block, so cancelling here also covers a watch armed earlier in this same batch.
+    if (p.roomPlayCoordIp == s_coordIp) s_playWatch.active = false;
     if (p.roomSetPlay) sonos::play(p.roomPlayCoordIp);
     else               sonos::pause(p.roomPlayCoordIp);
     // If that was the room we are following, reflect it on Now Playing without waiting a second.
@@ -342,6 +345,7 @@ static void processPending() {
   // looped. Enqueue it with minimal DIDL so Sonos accepts the http mp3, switch the transport
   // to the queue, set REPEAT_ALL, and play.
   if (p.localStreamUrl.length()) {
+    s_playWatch.active = false;   // replaces the watched URI; its result would describe the stream
     String meta =
         "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" "
         "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "

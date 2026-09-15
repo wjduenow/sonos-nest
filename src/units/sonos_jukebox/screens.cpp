@@ -1128,6 +1128,7 @@ static void favPlayCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = s_favs[i].uri;
     g_pending.playMeta = s_favs[i].meta;
+    g_pending.playExplicit = false;   // every play request sets all three: g_pending coalesces
     stateUnlock();
   }
 }
@@ -1577,6 +1578,7 @@ static void radioPlayCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = amazon::playUri(st);
     g_pending.playMeta = amazon::playMeta(st, s_radioGenreId);
+    g_pending.playExplicit = false;
     stateUnlock();
   }
 }
@@ -1739,6 +1741,7 @@ static void radioSpotCb(lv_event_t *e) {
       if (stateLock()) {
         g_pending.playUri  = uri;
         g_pending.playMeta = spotify::playMeta(s_spCurItem);
+        g_pending.playExplicit = false;   // a container; only track rows carry the flag
 
         stateUnlock();
       }
@@ -1974,6 +1977,7 @@ static void radioHitCb(lv_event_t *e) {
   if (stateLock()) {
     g_pending.playUri  = amazon::playUri(st);
     g_pending.playMeta = amazon::playMeta(st, gid);
+    g_pending.playExplicit = false;
     stateUnlock();
   }
 }
@@ -2434,6 +2438,7 @@ static void srchRowCb(lv_event_t *e) {
       if (stateLock()) {
         g_pending.playUri  = uri;
         g_pending.playMeta = spotify::playMeta(s_srchInsideItem);
+        g_pending.playExplicit = false;   // a container; only track rows carry the flag
 
         stateUnlock();
       }

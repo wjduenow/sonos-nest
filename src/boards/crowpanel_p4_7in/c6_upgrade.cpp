@@ -43,6 +43,10 @@
 #else
 #error "include/secrets.h must define WIFI_SSID / WIFI_PASS for this probe"
 #endif
+// The probe runs ArduinoOTA so the app can be flashed back over it. Never unauthenticated.
+#ifndef OTA_PASSWORD
+#error "include/secrets.h must define OTA_PASSWORD: this probe runs ArduinoOTA and must not accept unauthenticated uploads"
+#endif
 #ifndef C6_PHASE
 #define C6_PHASE 1
 #endif
@@ -177,17 +181,22 @@ static bool writeToSlave(const uint8_t *img, int len) {
   return ended;
 }
 
+static bool s_servicesStarted = false;
+
+// Idempotent: setup() calls it when Wi-Fi is up by the end of its wait, and loop() calls it if Wi-Fi
+// only connects later. Without the loop() path, a slow join left the probe with no OTA and no :2323,
+// which on a wall-mounted panel means reaching for a cable.
 static void otaBegin() {
+  if (s_servicesStarted) return;
 #ifdef DEVICE_HOSTNAME
   ArduinoOTA.setHostname(DEVICE_HOSTNAME);
 #endif
-#ifdef OTA_PASSWORD
   ArduinoOTA.setPassword(OTA_PASSWORD);
-#endif
   ArduinoOTA.onStart([]() { say("[c6] OTA of the P4 starting\n"); });
   ArduinoOTA.onError([](ota_error_t e) { say("[c6] OTA error %u\n", (unsigned)e); });
   ArduinoOTA.begin();
   s_statusServer.begin();
+  s_servicesStarted = true;
   say("[c6] OTA + status :2323 up at %s\n", WiFi.localIP().toString().c_str());
 }
 
@@ -260,6 +269,10 @@ void setup() {
 }
 
 void loop() {
+  if (!s_servicesStarted) {
+    if (WiFi.status() != WL_CONNECTED) { delay(200); return; }
+    otaBegin();
+  }
   ArduinoOTA.handle();
   statusPump();
   static uint32_t last = 0;
