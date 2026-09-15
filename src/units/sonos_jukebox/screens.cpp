@@ -258,6 +258,14 @@ static uint32_t  s_volToastUntil = 0;
 static const lv_coord_t VT_W = 300, VT_H = 84, VT_BAR_W = 210;
 static const uint32_t   VT_HOLD_MS = 1400;
 
+// Refused-play notice. Sonos keeps a refused item loaded and just never starts it, so Now Playing
+// alone reads as success; netTask detects the refusal (PlayerState::playFailSeq) and this says so.
+// Built once on the top layer like the volume toast, above it so the two cannot overlap.
+static lv_obj_t *s_playFail = nullptr, *s_playFailTitle = nullptr;
+static uint32_t  s_playFailUntil = 0, s_playFailSeqShown = 0;
+static const lv_coord_t PF_W = 640, PF_H = 104;
+static const uint32_t   PF_HOLD_MS = 7000;
+
 // --- Small builders ---------------------------------------------------------------------------
 static lv_obj_t *panel(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, uint32_t bg, lv_coord_t r) {
   lv_obj_t *o = lv_obj_create(parent);
@@ -310,6 +318,38 @@ static void showVolToast(int vol) {
                                   : (vol < 50 ? LV_SYMBOL_VOLUME_MID : LV_SYMBOL_VOLUME_MAX));
   lv_obj_remove_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
   s_volToastUntil = lv_tick_get() + VT_HOLD_MS;
+}
+
+static void buildPlayFailToast() {
+  s_playFail = panel(lv_layer_top(), PF_W, PF_H, JB_SCREEN_ELEV, JB_R_LG);
+  lv_obj_set_style_border_width(s_playFail, 1, 0);
+  lv_obj_set_style_border_color(s_playFail, lv_color_hex(JB_ACCENT), 0);
+  lv_obj_align(s_playFail, LV_ALIGN_BOTTOM_MID, 0, -46 - VT_H - 16);
+  lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_CLICKABLE);   // tap to dismiss
+  lv_obj_add_event_cb(s_playFail, [](lv_event_t *) { lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN); },
+                      LV_EVENT_CLICKED, nullptr);
+
+  s_playFailTitle = label(s_playFail, "", &jbFont22, JB_TEXT);
+  lv_label_set_long_mode(s_playFailTitle, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(s_playFailTitle, PF_W - 48);
+  lv_obj_align(s_playFailTitle, LV_ALIGN_TOP_LEFT, 24, 18);
+
+  lv_obj_t *why = label(s_playFail,
+                        "Sonos wouldn't start it. It may be explicit, or unavailable on this account.",
+                        &jbFont16, JB_TEXT_MUTED);
+  lv_label_set_long_mode(why, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(why, PF_W - 48);
+  lv_obj_align(why, LV_ALIGN_TOP_LEFT, 24, 56);
+}
+
+static void showPlayFail(const String &title) {
+  if (!s_playFail) return;
+  const String head = title.length() ? "Couldn't play \"" + title + "\"" : String("Couldn't play that");
+  lv_label_set_text(s_playFailTitle, head.c_str());
+  lv_obj_remove_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
+  s_playFailUntil = lv_tick_get() + PF_HOLD_MS;
+  uiSoundPlay(UiSound::Error);
 }
 
 // Round transport control. `solid` is the design's accent-filled primary — reserved for
@@ -3311,6 +3351,7 @@ void uiInit() {
   buildRooms();
   buildSettings();
   buildVolToast();   // top layer, hidden until the dial is turned off the Now Playing page
+  buildPlayFailToast();   // top layer, hidden until the speaker refuses a play
   saverBuild();      // top layer too, and AFTER the toast so it covers it
   // Background crawler: waits for card + Wi-Fi + a linked account, then keeps the cache fresh.
   // Started here rather than in appStartTasks() so the S3 units never spawn it.
@@ -3443,6 +3484,14 @@ void uiTick() {
   if (s_volToast && !lv_obj_has_flag(s_volToast, LV_OBJ_FLAG_HIDDEN) &&
       (int32_t)(lv_tick_get() - s_volToastUntil) >= 0) {
     lv_obj_add_flag(s_volToast, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (p.playFailSeq != s_playFailSeqShown) {
+    s_playFailSeqShown = p.playFailSeq;
+    showPlayFail(p.playFailTitle);
+  }
+  if (s_playFail && !lv_obj_has_flag(s_playFail, LV_OBJ_FLAG_HIDDEN) &&
+      (int32_t)(lv_tick_get() - s_playFailUntil) >= 0) {
+    lv_obj_add_flag(s_playFail, LV_OBJ_FLAG_HIDDEN);
   }
 
   setTextIfChanged(s_room, s_shown.room, p.zoneName.length() ? p.zoneName : String("no room"));

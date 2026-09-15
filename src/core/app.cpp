@@ -161,9 +161,71 @@ static const uint32_t kDeadLinkWindowMs = 10000;
 
 // Drain + execute queued input commands. Kept cheap and called frequently (including
 // between the poll's SOAP calls) so a twist/press reaches the speaker with minimal lag.
+// --- Refused-play detection --------------------------------------------------------------------
+// See PlayerState::playFailSeq for why this exists. A play the speaker refuses is silent in both
+// forms it takes, so netTask has to look:
+//   rejected — SetAVTransportURI / AddURIToQueue / Play returned an error (UPnP 701 for the
+//              explicit Spotify track). Known at once.
+//   stalled  — Play was accepted and the transport never left STOPPED. No state CHANGE means no
+//              GENA event, so waiting for g_player.transport would wait forever; the watch asks
+//              the coordinator directly instead.
+// TRANSITIONING is given up to kWatchMaxMs, because a radio stream legitimately buffers for
+// seconds. A failed GetTransportInfo is a link problem, not a refusal, and says nothing.
+struct PlayWatch {
+  bool     active = false;
+  uint32_t startMs = 0, lastCheckMs = 0;
+  String   title;
+};
+static PlayWatch s_playWatch;
+static const uint32_t kWatchFirstMs = 6000, kWatchEveryMs = 2000, kWatchMaxMs = 20000;
+
+static String didlTitle(const String &didl) {
+  const int a = didl.indexOf("<dc:title>");
+  if (a < 0) return "";
+  const int b = didl.indexOf("</dc:title>", a);
+  return b < 0 ? String() : sonos::xmlUnescape(didl.substring(a + 10, b));
+}
+
+static void reportPlayFailure(const String &title, const char *why) {
+  LOG.printf("[play] speaker refused \"%s\" (%s)\n", title.c_str(), why);
+  if (stateLock()) {
+    g_player.playFailSeq++;
+    g_player.playFailTitle = title;
+    g_player.dirty = true;
+    stateUnlock();
+  }
+}
+
+static void playWatchArm(const String &title) {
+  s_playWatch.active = true;
+  s_playWatch.startMs = s_playWatch.lastCheckMs = millis();
+  s_playWatch.title = title;
+}
+
+static void playWatchTick() {
+  if (!s_playWatch.active) return;
+  const uint32_t now = millis(), age = now - s_playWatch.startMs;
+  if (age < kWatchFirstMs || now - s_playWatch.lastCheckMs < kWatchEveryMs) return;
+  s_playWatch.lastCheckMs = now;
+  TransportState st = TransportState::Unknown;
+  if (!sonos::getTransportInfo(s_coordIp, st)) {
+    if (age >= kWatchMaxMs) s_playWatch.active = false;   // link trouble: not ours to report
+    return;
+  }
+  // PAUSED counts as started: the user may already have paused it, which is not a refusal.
+  if (st == TransportState::Playing || st == TransportState::Paused) { s_playWatch.active = false; return; }
+  if (st == TransportState::Transitioning && age < kWatchMaxMs) return;   // still buffering
+  s_playWatch.active = false;
+  reportPlayFailure(s_playWatch.title, st == TransportState::Stopped ? "stayed stopped" : "never started");
+}
+
 static void processPending() {
   PendingCmds p;
   if (stateLock()) { p = g_pending; g_pending = PendingCmds(); stateUnlock(); }
+
+  // A zone switch or a transport command supersedes whatever play was being watched: its result
+  // would describe a different room, or a state the user has since changed on purpose.
+  if (p.requestZoneIp.length() || p.setPlay >= 0 || p.next || p.restartTrack) s_playWatch.active = false;
 
   if (p.requestZoneIp.length()) {
     selectZoneByIp(p.requestZoneIp);
@@ -207,15 +269,19 @@ static void processPending() {
   // the transport directly. Verified on hardware that an x-sonosapi-radio: URI needs no
   // getMediaURI resolve step first (plans/08).
   if (p.playUri.length()) {
+    bool staged;
     if (p.playUri.startsWith("x-rincon-cpcontainer:") || p.playUri.startsWith("file:")) {
       sonos::removeAllTracksFromQueue(s_coordIp);
-      sonos::addUriToQueue(s_coordIp, p.playUri, p.playMeta);
-      sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
+      staged = sonos::addUriToQueue(s_coordIp, p.playUri, p.playMeta) &&
+               sonos::setAvTransportUri(s_coordIp, "x-rincon-queue:" + s_coordUuid + "#0", "");
     } else {
-      sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
+      staged = sonos::setAvTransportUri(s_coordIp, p.playUri, p.playMeta);
     }
-    sonos::play(s_coordIp);
+    const bool started = staged && sonos::play(s_coordIp);
     s_lastPoll = 0;                        // reflect the new track immediately
+    const String title = didlTitle(p.playMeta);
+    if (!started) { s_playWatch.active = false; reportPlayFailure(title, staged ? "Play rejected" : "URI rejected"); }
+    else          playWatchArm(title);
   }
 
   // Grouping. Every op in the batch is applied first, and the topology is re-read ONCE at the
@@ -638,6 +704,8 @@ static void netTask(void *) {
 
     netStage("pending");
     processPending();
+    netStage("playwatch");
+    playWatchTick();   // no-op unless a play was just issued; one GetTransportInfo per 2 s at most
     netStage("registrar");
     registrarTick();   // heartbeat to the portal (self-rate-limited to ~45 s; retries discovery)
     netStage("updater");

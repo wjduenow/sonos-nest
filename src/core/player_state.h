@@ -39,6 +39,15 @@ struct PlayerState {
   String        coordinatorIp;
   String        coordinatorUuid;
 
+  // A play the SPEAKER refused. Sonos does not say why and does not change what it shows: it
+  // keeps the item loaded — title, art and all — and simply never starts, so Now Playing looks
+  // exactly like success. Proven on hardware with an explicit Spotify track on an account that
+  // has explicit content off (2026-09-15): Play either returned UPnP 701 outright, or was
+  // accepted and the transport sat at STOPPED without ever changing. netTask detects both
+  // (app.cpp, playWatch*) and bumps the counter; a unit shows a notice when it moves.
+  uint32_t      playFailSeq = 0;
+  String        playFailTitle;   // what was refused, from the request's DIDL; may be empty
+
   bool          dirty = false;   // set by writers, cleared by ui_task after redraw
 };
 
