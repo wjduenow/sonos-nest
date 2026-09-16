@@ -203,20 +203,37 @@ HOLE_Z1      = 3.5
 HOLE_Z2      = 16.8
 HOLE_Z_PITCH = HOLE_Z2 - HOLE_Z1                               # = 13.30, DERIVED
 
-# ⚠️ X IS STILL OPEN. The drawing gives insets of 1.97 (left) and 2.40 (right) -> x = 1.97 and
-# 33.97; the first caliper pass reported "1 and 33". Both give a 32.00 pitch, so the SPACING is
-# solid — it is the absolute position that differs by ~1 mm, which the 2.6 clearance hole (0.3 of
-# slop) does NOT absorb.
-HOLE_X_PITCH = 32.0    # agreed by both sources
-# RESOLVED 2026-09-09 in favour of the drawing. The eyelets are THREADED M2 inserts, whose brass
-# body measures ~4 mm across on the vendor drawing — so a centre 1.0 mm from the board edge would
-# put a millimetre of that body off the PCB. Impossible. At 1.97 it lands tangent to the edge,
-# which is exactly how it looks in Waveshare's photo. The caliper pass read "1 and 33", each
-# exactly one hole-radius short of 1.97 and 33.97: the signature of measuring to the NEAR EDGE of
-# the hole rather than its centre, easy to do on an eyelet where the centre is not a visible
-# feature. (The z pass did not have the problem — 3.5 + 16.8 = 20.3 proves those are centres.)
-HOLE_X1      = 1.97
-HOLE_X2      = HOLE_X1 + HOLE_X_PITCH                          # = 33.97, DERIVED
+# ⚠️ X IS DERIVED FROM SYMMETRY, NOT READ OFF A LEADER — and that CHANGED the value.
+#
+# It was 1.97, taken from the photo-drawing's left-hand leader, and a printed case came out
+# "slightly off". Waveshare's MECHANICAL drawing for the sibling ESP32-S3-LCD-1.47 (a real vector
+# drawing, not an annotated photo — 1200 KB of path data, dimensions exact) settles it:
+#
+#     board 20.33 x 36.4      holes 4 x dia 2.00
+#     short-axis pitch 13.28  ->  inset (20.33 - 13.28)/2 = 3.525
+#     long-axis  pitch 32.00  ->  inset (36.4  - 32.00)/2 = 2.200
+#
+# Both pitches match this board exactly (13.28 vs our measured 13.30, 32.00 vs 32.00), as do the
+# 2.54 header pitch, the 17.78 row spacing and the 20.33 width. The holes are SYMMETRIC about both
+# centrelines, which the measured Z already proved independently: 3.5 + 16.8 = 20.3 on a 20.32
+# board. So X is symmetric too, and the same arithmetic gives 2.185 rather than 1.97.
+#
+# The clincher is that the photo-drawing's TWO X leaders, 1.97 and 2.40, have a mean of exactly
+# 2.185. Neither was pointing at a hole centre — they straddle it. Reading one of them as the
+# inset put every hole 0.215 mm out, which is most of a 2.6 clearance hole's 0.3 mm of slop and
+# binds across four of them at once.
+#
+# ⚠️ The mechanical drawing is for the NON-B board and its hole pattern does NOT transfer wholesale:
+# that board is a USB-A stick whose TOP pair splays to 16.32 to anchor the USB shell, making its
+# four holes a trapezoid rather than a rectangle. Only the bottom pair (13.28) and the 32.00 long
+# pitch are shared with ours. What is taken from it here is the SYMMETRY, corroborated by our own
+# measured Z — not its geometry.
+HOLE_X_PITCH = 32.0    # drawing, caliper pass, and the sibling mechanical drawing all agree
+HOLE_X1      = (PCB_W - HOLE_X_PITCH) / 2.0                    # = 2.185, DERIVED
+HOLE_X2      = HOLE_X1 + HOLE_X_PITCH                          # = 34.185, DERIVED
+# Same treatment for Z, so the two axes are derived the same way and cannot drift apart. This
+# reproduces the measured 3.5 / 16.8 to within 0.02 mm.
+HOLE_Z1_SYM  = (PCB_H - HOLE_Z_PITCH) / 2.0                    # = 3.51 vs 3.5 measured
 EYELET_THREADED = True   # CONFIRMED 2026-09-09 — an M2 screw bites
 
 # ============================================================================================

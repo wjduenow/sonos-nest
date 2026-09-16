@@ -242,7 +242,27 @@ The hole positions are the least-verified numbers in the build: the **Z centres 
 pitch is agreed** by drawing and caliper (32.00), but the **X absolute position comes from the
 vendor drawing alone** and has never been checked.
 
-> ⚠️ **Waveshare documents almost nothing here.** There is no STEP model, no hole table and no
+> ✅ **RESOLVED 2026-09-15 — X was 0.215 mm out, and the pattern is symmetric.**
+> Waveshare publishes a real MECHANICAL drawing for the sibling **ESP32-S3-LCD-1.47** (non-B),
+> archived here as `ESP32-S3-LCD-1.47_mechanical_NON-B.pdf`. It is a true vector drawing, not an
+> annotated photo, so its dimensions are exact: board 20.33 x 36.4, **4 x dia 2.00**, short-axis
+> hole pitch **13.28**, long-axis **32.00**, header 2.54 at 17.78 spacing. Every one of those
+> matches this board.
+>
+> Both pitches imply SYMMETRIC holes — `(20.33-13.28)/2 = 3.525` and `(36.4-32.00)/2 = 2.200` —
+> and our own measured Z proves the symmetry independently (3.5 + 16.8 = 20.3 on a 20.32 board).
+> So X is symmetric too: `(36.37-32.00)/2` = **2.185**, not the 1.97 that was modelled.
+>
+> The clincher: the photo-drawing's two X leaders, **1.97 and 2.40, have a mean of exactly 2.185**.
+> Neither pointed at a hole centre — they straddle it. Both X values are now DERIVED from the
+> board width, so the two axes are computed the same way and cannot drift apart.
+>
+> ⚠️ **The non-B drawing's hole pattern does not transfer wholesale.** That board is a USB-A stick
+> whose top hole pair splays to 16.32 to anchor the USB shell, making its four holes a trapezoid.
+> Only the 13.28 and 32.00 pitches are shared. What was taken from it is the SYMMETRY, corroborated
+> by our own measured Z — not its geometry.
+
+> ⚠️ **The 1.47B's own documentation is almost nothing.** There is no STEP model, no hole table and no
 > mechanical PDF — just one annotated photo giving `M2`, the 36.37 x 20.32 outline, and four
 > insets (1.97 / 2.40 / 2.00 / 3.52) whose leader lines are ambiguous. Two of them even conflict:
 > top-left reads 3.52 from the top edge while top-right reads 2.00. Magnifying the drawing
