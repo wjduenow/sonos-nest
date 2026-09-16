@@ -242,27 +242,39 @@ The hole positions are the least-verified numbers in the build: the **Z centres 
 pitch is agreed** by drawing and caliper (32.00), but the **X absolute position comes from the
 vendor drawing alone** and has never been checked.
 
-> ✅ **RESOLVED 2026-09-15 — X was 0.215 mm out, and the pattern is symmetric.**
-> Waveshare publishes a real MECHANICAL drawing for the sibling **ESP32-S3-LCD-1.47** (non-B),
-> archived here as `ESP32-S3-LCD-1.47_mechanical_NON-B.pdf`. It is a true vector drawing, not an
-> annotated photo, so its dimensions are exact: board 20.33 x 36.4, **4 x dia 2.00**, short-axis
-> hole pitch **13.28**, long-axis **32.00**, header 2.54 at 17.78 spacing. Every one of those
-> matches this board.
+> ✅ **RESOLVED 2026-09-15 — THE FOUR HOLES ARE A TRAPEZOID, NOT A RECTANGLE.**
+> The pair flanking the USB-C sit **further apart** than the pair at the far end. Measured on
+> hardware (~15.5 at the USB-C end against ~12 at the other), and all three documentary sources
+> agree once read correctly:
 >
-> Both pitches imply SYMMETRIC holes — `(20.33-13.28)/2 = 3.525` and `(36.4-32.00)/2 = 2.200` —
-> and our own measured Z proves the symmetry independently (3.5 + 16.8 = 20.3 on a 20.32 board).
-> So X is symmetric too: `(36.37-32.00)/2` = **2.185**, not the 1.97 that was modelled.
+> ```
+> X:  36.37 - 1.97 - 2.40 = 32.00   the long-axis pitch, as printed
+> Z:  20.32 - 2 x 3.52    = 13.28   the pitch at the FAR end, as printed
+> Z:  20.32 - 2 x 2.00    = 16.32   the pitch at the USB-C end, as printed
+> ```
 >
-> The clincher: the photo-drawing's two X leaders, **1.97 and 2.40, have a mean of exactly 2.185**.
-> Neither pointed at a hole centre — they straddle it. Both X values are now DERIVED from the
-> board width, so the two axes are computed the same way and cannot drift apart.
+> The photo-drawing's four insets — 1.97, 2.40, 3.52, 2.00 — are **four different dimensions**,
+> not four readings of one pattern. The sibling's mechanical drawing
+> (`ESP32-S3-LCD-1.47_mechanical_NON-B.pdf`, a true vector drawing parsed straight off its path
+> data) has row spreads of exactly 16.32 and 13.28. Same trapezoid.
 >
-> ⚠️ **The non-B drawing's hole pattern does not transfer wholesale.** That board is a USB-A stick
-> whose top hole pair splays to 16.32 to anchor the USB shell, making its four holes a trapezoid.
-> Only the 13.28 and 32.00 pitches are shared. What was taken from it is the SYMMETRY, corroborated
-> by our own measured Z — not its geometry.
+> ⚠️ **Two wrong turns were taken here, both by assuming symmetry**, and they are worth recording
+> because the reasoning looked sound each time:
+>
+> 1. The 2.00 inset was written off as "a misread leader", because 3.52 against 2.00 on one board
+>    seemed implausible.
+> 2. The measured `3.5 + 16.8 = 20.3` was then read as *proof* of symmetry. It is not — it only
+>    proves the **far-end pair** is centred about the long axis, which it is. Both pairs are
+>    individually centred; the two pairs simply have different spreads.
+> 3. The sibling drawing's 16.32 row was even dismissed as the USB-A shell's width. It was the
+>    holes.
+>
+> **The general lesson: on that photo-drawing, a dimension that looks redundant with another is
+> probably measuring a different feature.** `HOLES` is now an explicit list of four `(x, z)` pairs
+> rather than a cross product of two axes — a cross product cannot express a trapezoid, and
+> writing one is exactly how the USB-C pair ended up 1.5 mm too close together.
 
-> ⚠️ **The 1.47B's own documentation is almost nothing.** There is no STEP model, no hole table and no
+> ⚠️ **The 1.47B's own documentation is almost nothing.**> ⚠️ **The 1.47B's own documentation is almost nothing.** There is no STEP model, no hole table and no
 > mechanical PDF — just one annotated photo giving `M2`, the 36.37 x 20.32 outline, and four
 > insets (1.97 / 2.40 / 2.00 / 3.52) whose leader lines are ambiguous. Two of them even conflict:
 > top-left reads 3.52 from the top edge while top-right reads 2.00. Magnifying the drawing

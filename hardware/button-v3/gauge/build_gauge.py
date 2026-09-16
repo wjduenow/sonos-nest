@@ -42,8 +42,8 @@ def plate(hole_d):
     m = trimesh.creation.extrude_polygon(poly, height=T)
 
     cutters = []
-    for x in (P.HOLE_X1, P.HOLE_X2):
-        for z in (P.HOLE_Z1, P.HOLE_Z2):
+    for x, z in P.HOLES:
+        if True:
             c = trimesh.creation.cylinder(radius=hole_d / 2, height=T + 2, sections=SEG)
             c.apply_translation((x, P.PCB_H - z, T / 2))   # z is from the TOP edge; plate Y is up
             cutters.append(c)
@@ -61,7 +61,7 @@ def plate(hole_d):
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     print(f"  outline    {P.PCB_W} x {P.PCB_H} mm, {T} thick, notch marks the USB-C edge")
-    print(f"  holes at   x {P.HOLE_X1} / {P.HOLE_X2}   z {P.HOLE_Z1} / {P.HOLE_Z2}  (from top-left)")
+    print("  holes at   " + "  ".join(f"({x:.2f},{z:.2f})" for x, z in P.HOLES))
     for name, d in (("fit", P.HOLE_CLR_D), ("check", 3.6), ("tight", 2.2)):
         m = plate(d)
         f = f"gauge_{name}.stl"

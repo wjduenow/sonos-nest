@@ -56,8 +56,8 @@ def main():
     ax.text(ox + bw, oy - bh - 3, "USB-C this end →", fontsize=7, ha='right', va='top')
 
     # --- a bullseye at each modelled hole position -----------------------------------------
-    for hx in (P.HOLE_X1, P.HOLE_X2):
-        for hz in (P.HOLE_Z1, P.HOLE_Z2):
+    for hx, hz in P.HOLES:
+        if True:
             cx, cy = ox + hx, oy - hz
             for r in [0.25 * k for k in range(1, 9)]:          # rings every 0.25 mm out to 2.0
                 ax.add_patch(Circle((cx, cy), r, fill=False, ec='black',
@@ -90,8 +90,9 @@ def main():
     # --- what the sheet is claiming, so a future reader can tell which build it came from ---
     ax.text(ox, oy - bh - 12,
             f"Modelled hole centres, from the board's top-left corner:\n"
-            f"   x = {P.HOLE_X1} and {P.HOLE_X2}   (pitch {P.HOLE_X_PITCH})\n"
-            f"   z = {P.HOLE_Z1} and {P.HOLE_Z2}   (pitch {P.HOLE_Z_PITCH})\n"
+            + "".join(f"   ({x:6.2f}, {z:5.2f})\n" for x, z in P.HOLES) +
+            f"They are a TRAPEZOID: pitch {P.HOLE_Z_PITCH_USB:.2f} at the USB-C end,\n"
+            f"{P.HOLE_Z_PITCH_FAR:.2f} at the far end, {P.HOLE_X_PITCH:.2f} along the board.\n"
             f"Board outline {P.PCB_W} x {P.PCB_H}. Rings are 0.25 mm apart.\n"
             f"The HEAVY ring is 1.0 mm radius = the M2 bore's own edge: if a hole is modelled\n"
             f"correctly the heavy ring sits exactly under the eyelet's rim, all the way round.",
@@ -116,7 +117,7 @@ def main():
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hole_gauge.pdf")
     fig.savefig(out)
     print(f"  {out}")
-    print(f"  A4, 1:1. Holes drawn at x {P.HOLE_X1}/{P.HOLE_X2}, z {P.HOLE_Z1}/{P.HOLE_Z2}")
+    print("  A4, 1:1. Holes at " + "  ".join(f"({x:.2f},{z:.2f})" for x, z in P.HOLES))
 
 
 if __name__ == "__main__":

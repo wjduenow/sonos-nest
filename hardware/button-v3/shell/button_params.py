@@ -195,45 +195,51 @@ HOLE_D       = 2.0     # M2 nominal
 HOLE_CLR_D   = 2.6     # clearance hole in the PCB pocket / boss pilot spacing. 0.3 mm of radial
                        # slop per hole, deliberately, so a +/-0.3 error in any measured centre
                        # still assembles rather than binding across four bosses.
-# MEASURED 2026-09-09: z = 3.5 and 16.8 from the top edge. 3.5 + 16.8 = 20.3 against a 20.32
-# board, so the holes ARE symmetric about the long centreline — 3.5 in from each long edge. That
-# also settles the drawing: its top-left 3.52 was right and its top-right "2.00" was a misread
-# leader, so the asymmetry flagged earlier is not real. Vertical pitch 13.3.
-HOLE_Z1      = 3.5
-HOLE_Z2      = 16.8
-HOLE_Z_PITCH = HOLE_Z2 - HOLE_Z1                               # = 13.30, DERIVED
+# ⚠️⚠️ THE FOUR HOLES ARE A TRAPEZOID, NOT A RECTANGLE. The pair flanking the USB-C are FURTHER
+# APART than the pair at the far end. Confirmed on hardware 2026-09-15 (measured ~15.5 at the USB-C
+# end against ~12 at the other), and it is what the documentation said all along.
+#
+# The photo-drawing carries FOUR insets — 1.97, 2.40, 3.52, 2.00 — and they are four DIFFERENT
+# dimensions, not four readings of one pattern. Every documented pitch falls out of them exactly:
+#
+#     X:  36.37 - 1.97 - 2.40 = 32.00   <- the drawing's long-axis pitch
+#     Z:  20.32 - 2 x 3.52    = 13.28   <- its pitch at the FAR end
+#     Z:  20.32 - 2 x 2.00    = 16.32   <- its pitch at the USB-C end
+#
+# and the sibling's MECHANICAL drawing, measured straight off its vector geometry, has row spreads
+# of exactly 16.32 and 13.28. Three independent sources, one trapezoid.
+#
+# ⚠️ TWO WRONG TURNS WERE TAKEN HERE, BOTH BY ASSUMING SYMMETRY. First the 2.00 inset was written
+# off as "a misread leader" because 3.52 vs 2.00 on one board looked implausible. Then the
+# measured 3.5 + 16.8 = 20.3 was read as proof of symmetry — it is not, it only proves the FAR-END
+# pair is symmetric about the long centreline, which it is. Both pairs are individually centred;
+# the two pairs simply have different spreads. The 16.32 row on the sibling drawing was even
+# dismissed as the USB-A shell's width. It was the holes.
+#
+# The lesson for anything else read off that photo-drawing: a dimension that looks redundant with
+# another is probably measuring a different feature.
+HOLE_Z_FAR   = 3.52                                            # inset at the far end, each side
+HOLE_Z_USB   = 2.00                                            # inset at the USB-C end, each side
+HOLE_X_FAR   = 1.97                                            # X inset, far end
+HOLE_X_USB   = 2.40                                            # X inset, USB-C end
 
-# ⚠️ X IS DERIVED FROM SYMMETRY, NOT READ OFF A LEADER — and that CHANGED the value.
-#
-# It was 1.97, taken from the photo-drawing's left-hand leader, and a printed case came out
-# "slightly off". Waveshare's MECHANICAL drawing for the sibling ESP32-S3-LCD-1.47 (a real vector
-# drawing, not an annotated photo — 1200 KB of path data, dimensions exact) settles it:
-#
-#     board 20.33 x 36.4      holes 4 x dia 2.00
-#     short-axis pitch 13.28  ->  inset (20.33 - 13.28)/2 = 3.525
-#     long-axis  pitch 32.00  ->  inset (36.4  - 32.00)/2 = 2.200
-#
-# Both pitches match this board exactly (13.28 vs our measured 13.30, 32.00 vs 32.00), as do the
-# 2.54 header pitch, the 17.78 row spacing and the 20.33 width. The holes are SYMMETRIC about both
-# centrelines, which the measured Z already proved independently: 3.5 + 16.8 = 20.3 on a 20.32
-# board. So X is symmetric too, and the same arithmetic gives 2.185 rather than 1.97.
-#
-# The clincher is that the photo-drawing's TWO X leaders, 1.97 and 2.40, have a mean of exactly
-# 2.185. Neither was pointing at a hole centre — they straddle it. Reading one of them as the
-# inset put every hole 0.215 mm out, which is most of a 2.6 clearance hole's 0.3 mm of slop and
-# binds across four of them at once.
-#
-# ⚠️ The mechanical drawing is for the NON-B board and its hole pattern does NOT transfer wholesale:
-# that board is a USB-A stick whose TOP pair splays to 16.32 to anchor the USB shell, making its
-# four holes a trapezoid rather than a rectangle. Only the bottom pair (13.28) and the 32.00 long
-# pitch are shared with ours. What is taken from it here is the SYMMETRY, corroborated by our own
-# measured Z — not its geometry.
-HOLE_X_PITCH = 32.0    # drawing, caliper pass, and the sibling mechanical drawing all agree
-HOLE_X1      = (PCB_W - HOLE_X_PITCH) / 2.0                    # = 2.185, DERIVED
-HOLE_X2      = HOLE_X1 + HOLE_X_PITCH                          # = 34.185, DERIVED
-# Same treatment for Z, so the two axes are derived the same way and cannot drift apart. This
-# reproduces the measured 3.5 / 16.8 to within 0.02 mm.
-HOLE_Z1_SYM  = (PCB_H - HOLE_Z_PITCH) / 2.0                    # = 3.51 vs 3.5 measured
+HOLE_X1      = HOLE_X_FAR                                      # = 1.97   far end
+HOLE_X2      = PCB_W - HOLE_X_USB                              # = 33.97  USB-C end
+HOLE_X_PITCH = HOLE_X2 - HOLE_X1                               # = 32.00, DERIVED — matches both
+                                                               # drawings' printed pitch exactly
+
+# The four centres, as (x, z) from the board's top-left corner. An explicit list, NOT a cross
+# product of two axes: a cross product cannot express a trapezoid, and writing one is exactly how
+# the USB-C pair ended up 1.5 mm too close together.
+HOLES = (
+    (HOLE_X1, HOLE_Z_FAR),               # far end, top
+    (HOLE_X1, PCB_H - HOLE_Z_FAR),       # far end, bottom     pitch 13.28
+    (HOLE_X2, HOLE_Z_USB),               # USB-C end, top
+    (HOLE_X2, PCB_H - HOLE_Z_USB),       # USB-C end, bottom   pitch 16.32
+)
+HOLE_Z_PITCH_FAR = PCB_H - 2 * HOLE_Z_FAR                      # = 13.28
+HOLE_Z_PITCH_USB = PCB_H - 2 * HOLE_Z_USB                      # = 16.32
+
 EYELET_THREADED = True   # CONFIRMED 2026-09-09 — an M2 screw bites
 
 # ============================================================================================
@@ -365,9 +371,8 @@ WIN_X1 = BOARD_X1 + BEZEL_GAP
 WIN_Z0 = PCB_TOP_Z - BEZEL_GAP
 WIN_Z1 = PCB_BOT_Z + BEZEL_GAP
 
-# The four threaded eyelets, in world coords.
-HOLE_XS = (BOARD_X0 + HOLE_X1, BOARD_X0 + HOLE_X2)             # = -16.215, +15.815
-HOLE_ZS = (PCB_TOP_Z + HOLE_Z1, PCB_TOP_Z + HOLE_Z2)           # = 19.50, 32.80
+# The four eyelets in WORLD coords, as (x, z) pairs. A trapezoid — see the HOLES note above.
+HOLE_POS = tuple((BOARD_X0 + hx, PCB_TOP_Z + hz) for hx, hz in HOLES)
 
 # ============================================================================================
 # 5. RETENTION — four pillars on the LID, screws from outside it into the eyelets
@@ -390,20 +395,27 @@ MID_Y1       = MID_Y0 + MID_T                                  # = 12.00
 POST_OD      = 4.0
 POST_BORE    = 2.6     # M2 clearance, 0.3 of radial slop
 
-# ⚠️ THE PLANE'S TOP EDGE IS PINNED BY TWO THINGS AT ONCE, FROM OPPOSITE DIRECTIONS.
+# ⚠️ THE PLANE'S TOP EDGE IS PINNED FROM BOTH DIRECTIONS AT ONCE.
 #
-# It ran 2 mm above the board's top edge, to z = 14, and that was wrong twice over. The button's
-# solder tail reaches z = 15 on the centreline, so the plane was sitting INSIDE the button — found
-# by intersecting the body with a modelled button, not by any dimension. And the board's header
-# pads sit at z = 17.27, with only 0.5 mm between the board's back face and the plane: the harness
-# had nowhere to leave the pads.
+# It must reach far enough up to carry the TOPMOST post, and the trapezoid put that at the USB-C
+# end (z = 2.00 from the edge, not 3.52) — 1.5 mm higher than when the holes were modelled as a
+# rectangle. It must also stay clear of the button's solder tail, which reaches z = 15.
 #
-# So it starts exactly where the upper posts need support and not a millimetre earlier. That clears
-# the button by 2.5 mm and leaves a 1.5 mm band behind the board's top edge for the four harness
-# wires to run along — which is the only route they have.
-MID_Z0       = PCB_TOP_Z + HOLE_Z1 - POST_OD / 2.0             # = 17.50, the upper posts' base
-MID_Z1       = PCB_BOT_Z + 2.0                                 # short of the lower corner bosses
-HARNESS_BAND = MID_Z0 - PCB_TOP_Z                              # = 1.50, behind the board's top edge
+# Those two now meet exactly: the topmost post needs the plane at z = 16.00 and the tail needs it
+# at or below... no, at or ABOVE 16.00. There is no slack left, which is why both are asserted.
+MID_Z0       = min(z for _, z in HOLE_POS) - POST_OD / 2.0     # = 16.00, the topmost post's base
+MID_Z1       = max(z for _, z in HOLE_POS) + POST_OD / 2.0     # = 36.32, the lowest post's base.
+# Derived the same way as MID_Z0 rather than "PCB_BOT_Z + 2", so both edges follow the trapezoid
+# automatically. It lands exactly on the board's bottom edge, which is coincidence, not intent.
+# ⚠️ AND THAT CLOSED THE HARNESS BAND, WHICH USED TO BE 1.50 mm OF FREE AIR.
+# The wires leave the header row at z = 17.27, which the plane now covers, and there is only
+# 0.5 mm between the board's back face and the plane — not a route. So the plane gets a SLOT.
+# It is cut between the posts, where there is nothing structural to lose.
+HARNESS_BAND   = 0.0                                           # gone; the slot replaces it
+HARNESS_SLOT_W = 26.0          # spans the pad rows, stops well short of both post columns
+HARNESS_SLOT_Z0 = MID_Z0 - 0.01
+HARNESS_SLOT_Z1 = PCB_TOP_Z + HDR_EDGE_OFF + 2.5               # past the header row, with room
+                                                               # for four wires to turn
 
 POST_LEN     = MID_Y0 - BOARD_Y_PCB_BACK                       # = 3.80, over the components
 

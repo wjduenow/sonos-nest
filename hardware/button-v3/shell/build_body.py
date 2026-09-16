@@ -63,7 +63,7 @@ def check_clearances(verbose=True):
     #    in the cavity wall; 4.5 clears by 0.12. Tightest thing in the assembly, and the reason
     #    CARRIER_POST_OD is not a round number.
     rec("cavity wall clear of board post",
-        P.IN_X / 2 - (max(abs(P.HOLE_XS[0]), P.HOLE_XS[1]) + P.POST_OD / 2), 0.05)
+        P.IN_X / 2 - (max(abs(x) for x, _ in P.HOLE_POS) + P.POST_OD / 2), 0.05)
 
     # 1d. Growing the box to centre the screen must not leave the board short of floor.
     rec("height covers the board", P.HEIGHT - P.HEIGHT_MIN, 0.0)
@@ -101,8 +101,12 @@ def check_clearances(verbose=True):
     # 1k. The harness has exactly one route: the band between the board's top edge and the plane.
     #     The header pads sit 1.27 in from that edge, and there is 0.4 mm beside the board and
     #     0.5 mm behind it — nowhere else for four wires to go.
-    rec("harness band behind the board's top edge", P.HARNESS_BAND, 1.2)
-    rec("harness band clears the header row", P.MID_Z0 - (P.PCB_TOP_Z + P.HDR_EDGE_OFF), 0.2)
+    # The harness band closed when the trapezoid raised the plane; a slot through the plane
+    # replaces it. It must clear the header row it serves and miss both post columns.
+    rec("harness slot past the header row",
+        P.HARNESS_SLOT_Z1 - (P.PCB_TOP_Z + P.HDR_EDGE_OFF), 1.5)
+    rec("harness slot clear of the post columns",
+        min(abs(x) for x, _ in P.HOLE_POS) - P.POST_OD / 2 - P.HARNESS_SLOT_W / 2, 0.5)
     rec("plane clear of the lower boss", (P.BOSS_ZS[1] - P.BOSS_OD / 2) - P.MID_Z1, 0.0)
 
 
@@ -151,7 +155,8 @@ def check_clearances(verbose=True):
     # ...and the post nearest the connector has to miss it. These live on different parts, which is
     # exactly why nothing was checking the pair until it was found by intersection.
     rec("post clear of the USB receptacle",
-        ((P.PCB_TOP_Z + P.USB_OFF_Z - P.USB_WIDTH / 2) - P.HOLE_ZS[0]) - P.POST_OD / 2, 0.1)
+        ((P.PCB_TOP_Z + P.USB_OFF_Z - P.USB_WIDTH / 2)
+         - max(z for x, z in P.HOLE_POS if z < P.PCB_TOP_Z + P.USB_OFF_Z)) - P.POST_OD / 2, 0.1)
 
     # 9. The bezel bosses must sit clear of the board, in the bands above and below it.
     rec("upper boss above the board", P.PCB_TOP_Z - (P.BOSS_ZS[0] + P.BOSS_OD / 2), 0.5)
@@ -191,7 +196,7 @@ def board_posts():
     """
     return trimesh.boolean.union(
         [cyl_y(P.POST_OD, P.BOARD_Y_PCB_BACK, P.MID_Y0 + 0.01, x=x, z=z)
-         for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
+         for x, z in P.HOLE_POS], engine=ENG)
 
 
 def bezel_bosses():
@@ -239,11 +244,24 @@ def middle_plane():
     return blk(-P.IN_X / 2, P.IN_X / 2, P.MID_Y0, P.MID_Y1, P.MID_Z0, P.MID_Z1)
 
 
+def harness_slot():
+    """A way out of the plane for the four button wires.
+
+    The trapezoid raised the plane to z = 16.00 to carry the USB-C-end posts, which closed the
+    1.5 mm band the harness used to run in. There is only 0.5 mm between the board's back face and
+    the plane, so the wires go THROUGH it instead — cut between the post columns, where the plane
+    carries nothing.
+    """
+    return blk(-P.HARNESS_SLOT_W / 2, P.HARNESS_SLOT_W / 2,
+               P.MID_Y0 - 1.0, P.MID_Y1 + 1.0,
+               P.HARNESS_SLOT_Z0, P.HARNESS_SLOT_Z1)
+
+
 def post_bores():
     """M2 clearance through the posts AND the plane, so the screws go in from behind."""
     return trimesh.boolean.union(
         [cyl_y(P.POST_BORE, P.BOARD_Y_PCB_BACK - 1.0, P.MID_Y1 + 1.0, x=x, z=z)
-         for x in P.HOLE_XS for z in P.HOLE_ZS], engine=ENG)
+         for x, z in P.HOLE_POS], engine=ENG)
 
 
 # ---------------------------------------------------------------- cutters
@@ -268,7 +286,8 @@ def build_body():
     m = outer_body()
     m = trimesh.boolean.difference([m, cavity()], engine=ENG)
     m = trimesh.boolean.union([m, middle_plane(), board_posts(), bezel_bosses()], engine=ENG)
-    for cutter in (nut_relief(), button_bore(), usb_notch(), boss_pilots(), post_bores()):
+    for cutter in (nut_relief(), button_bore(), usb_notch(), boss_pilots(), post_bores(),
+                   harness_slot()):
         m = trimesh.boolean.difference([m, cutter], engine=ENG)
     return m
 
@@ -323,9 +342,9 @@ if __name__ == "__main__":
         # relief, which the hexagon never reaches.
         "nut column": cyl_z(nut_d, P.BUTTON_PANEL_T, P.PCB_TOP_Z, x=P.BUTTON_CX, y=P.BUTTON_Y),
         # And the four harness wires, leaving the header row and running along the board's top edge.
-        "harness band": blk(-P.IN_X / 2 + 0.5, P.IN_X / 2 - 0.5,
-                            P.BOARD_Y_REAR, P.MID_Y0,
-                            P.PCB_TOP_Z, P.MID_Z0),
+        "harness slot": blk(-P.HARNESS_SLOT_W / 2 + 0.5, P.HARNESS_SLOT_W / 2 - 0.5,
+                            P.BOARD_Y_REAR, P.MID_Y1,
+                            P.HARNESS_SLOT_Z0 + 0.5, P.HARNESS_SLOT_Z1 - 0.5),
     }
     for name, env in button_env.items():
         v = trimesh.boolean.intersection([m, env], engine=ENG).volume / 1000.0
