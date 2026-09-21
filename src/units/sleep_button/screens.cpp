@@ -23,9 +23,22 @@
 #include <Arduino.h>
 #include "core/net/logmirror.h"   // LOG — tees to the TCP mirror where enabled, plain Serial otherwise
 
-// Enqueue + play round-trip over SOAP. The sleep-machine allows the same 20 s before giving up;
-// matching it keeps the two units' failure behaviour identical.
-static const uint32_t START_TIMEOUT_MS = 20000;
+// Enqueue + play round-trip over SOAP.
+//
+// ⚠️ 45 s, not the 20 s the sleep-machine uses. Measured on hardware: a saved queue ("Sleep") sat
+// in PAUSED_PLAYBACK well past 20 s before reaching Playing — Sonos accepts the enqueue and the
+// play, then takes its time expanding the queue and buffering. The old 20 s declared failure on a
+// start that was simply still in progress, and the next press then stopped what it had just
+// started. Sizing this off a big playlist rather than a small one is the whole point.
+static const uint32_t START_TIMEOUT_MS = 45000;
+// ⚠️ COMPARE THE DEADLINE SIGNED — `now - s_startMs > START_TIMEOUT_MS` is a trap here.
+// `now` is sampled once at the top of uiTick, but startPlaylist() calls millis() again a few ms
+// later, so s_startMs ends up AHEAD of now. Unsigned, that subtraction wraps to ~4.29e9, which
+// beats any timeout: the start timed out on the very same tick as the press, every time, and
+// raising the limit from 20 s to 45 s changed nothing at all. The symptom was a start that
+// "failed" instantly and a next press that stopped what it had just started.
+// Signed also keeps the genuine 49.7-day millis() rollover working. Same trap as
+// appSupervisorTick() in core/app.cpp — see CLAUDE.md.
 
 // Press-acknowledge pulse. The press-to-audio path is several SOAP calls; without instant local
 // feedback a user wonders whether the press registered and mashes the button. So the ring gives
@@ -53,6 +66,16 @@ static uint8_t  s_slot      = 1;       // press slot whose playlist is starting/
 // All ring writes funnel through here so the pulse and the resting level can't fight over the
 // pin: while a pulse is active the tick restores the resting level when it expires.
 static void ringRest() { backlightSet(settingsRing()); }
+
+static const char *trName(TransportState t) {
+  switch (t) {
+    case TransportState::Playing:       return "Playing";
+    case TransportState::Paused:        return "Paused";
+    case TransportState::Stopped:       return "Stopped";
+    case TransportState::Transitioning: return "Transitioning";
+    default:                            return "Unknown";
+  }
+}
 
 // Kick a press-acknowledge pulse. Drive the ring to the opposite extreme of where it's resting
 // so the transient is visible either way: resting bright -> dip dark, resting dim/off -> flash
@@ -112,7 +135,13 @@ static void startPlaylist(uint8_t slot) {
   s_slot    = slot;
   s_st      = St::Starting;
   s_startMs = millis();
-  LOG.printf("[unit   ] press x%u start \"%s\" @ vol %u\n", slot, name.c_str(), vol);
+  // Name the TARGET, not just the intent. "timed out" on its own says nothing about whether we
+  // aimed at the right speaker, and that was the first thing worth ruling out when this failed.
+  String room, coord;
+  if (stateLock()) { room = g_player.zoneName; coord = g_player.coordinatorIp; stateUnlock(); }
+  LOG.printf("[unit   ] press x%u start \"%s\" @ vol %u -> %s (coord %s)\n",
+             slot, name.c_str(), vol, room.length() ? room.c_str() : "?",
+             coord.length() ? coord.c_str() : "?");
 }
 
 static void stopPlayback() {
@@ -215,6 +244,11 @@ void uiTick() {
     s_startMs = now;            // Listing shares the same timeout; without this it fires at once
   }
 
+  // Is the room playing the queue WE fill? Hoisted out of the press handler because the start
+  // timeout needs the same answer — see St::Starting below.
+  const bool playingOurQueue =
+      (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
+
   // --- the button -------------------------------------------------------------------------
   // Short is the toggle this product exists for; Double/Triple start their own press slot. Long is
   // reserved: §1 wants hold-at-boot for the WiFi portal, which is a boot-time check, not a runtime
@@ -238,7 +272,6 @@ void uiTick() {
     // start/override: a soundbar plays TV/line-in as a DIFFERENT source (x-sonos-htastream /
     // x-rincon-stream), so a press there takes the room onto the sleep playlist rather than toggling
     // nothing — which is why this can't simply stop on tr==Playing (see df5141a).
-    const bool playingOurQueue = (tr == TransportState::Playing) && srcUri.startsWith("x-rincon-queue");
     if (s_st == St::Starting || playingOurQueue) stopPlayback();
     else                                         startPlaylist(1);
   } else if (ev == KnobEvent::Double) {
@@ -263,14 +296,23 @@ void uiTick() {
         // slot, since any of the three can be the first press after a reboot.
         for (uint8_t s = 1; s <= SETTINGS_PRESS_SLOTS; ++s)
           library::requestPlayNamed(settingsPlaylist(s), /*warmOnly=*/true);
-      } else if (now - s_startMs > START_TIMEOUT_MS) {
+      } else if ((int32_t)(now - s_startMs) > (int32_t)START_TIMEOUT_MS) {
         s_listed = true;                 // don't retry forever; the page just shows a text box
         s_st     = St::Idle;
       }
       break;
     }
 
-    case St::Starting:
+    case St::Starting: {
+      // Log every transport change while starting. "timed out" on its own could not distinguish a
+      // start that never happened from one that was still happening — it was the Paused sighting
+      // here that identified the real behaviour.
+      static TransportState lastTr = TransportState::Unknown;
+      if (tr != lastTr) {
+        LOG.printf("[unit   ] starting: transport -> %s (%ld ms in)\n",
+                   trName(tr), (long)(int32_t)(now - s_startMs));
+        lastTr = tr;
+      }
       // requestPlayNamed() is doing the work on netTask. We just wait for the room to reach
       // Playing, surface a resolve failure, or time out.
       if (library::playNamedFailed()) {
@@ -280,11 +322,27 @@ void uiTick() {
       } else if (tr == TransportState::Playing) {
         s_st = St::Playing;
         LOG.println("[unit   ] playing");
-      } else if (now - s_startMs > START_TIMEOUT_MS) {
-        LOG.println("[unit   ] timed out starting playback");
-        s_st = St::Idle;
+      } else if ((int32_t)(now - s_startMs) > (int32_t)START_TIMEOUT_MS) {
+        String coord;
+        if (stateLock()) { coord = g_player.coordinatorIp; stateUnlock(); }
+        LOG.printf("[unit   ] timed out starting playback — coord=%s tr=%s uri=%s\n",
+                   coord.length() ? coord.c_str() : "?", trName(tr),
+                   srcUri.length() ? srcUri.c_str() : "-");
+
+        // SELF-CORRECT. If the room is in fact playing our queue, the start worked and only our
+        // observation of it was late — dropping to Idle there desyncs the toggle, so the NEXT
+        // press reads as "start" and re-enqueues instead of stopping. That is the symptom this
+        // actually produced on hardware: three starts, three timeouts, and a toggle that had to be
+        // pressed twice. Recovering here fixes the behaviour whatever the underlying latency was.
+        if (playingOurQueue) {
+          s_st = St::Playing;
+          LOG.println("[unit   ] ...but the room IS playing our queue — recovered to Playing");
+        } else {
+          s_st = St::Idle;
+        }
       }
       break;
+    }
 
     case St::Playing:
       // Stopped from the Sonos app, or the queue ran out despite REPEAT_ALL.
