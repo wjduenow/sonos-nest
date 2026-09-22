@@ -23,6 +23,13 @@ This program makes it happen in seconds instead of hours, by holding DMA-capable
 down to a chosen headroom — the state a long-running application reaches on its own — and then
 taking a bulk TCP stream.
 
+## The real capture comes first
+
+`captures/2026-09-15-four-stalls.log` is the fault as it happened on the product: four stalls in
+~13 minutes of ordinary use, with `PKT_STATS` running, extracted verbatim from a 7,221-line serial
+capture. It also contains the same device and traffic **after** the workaround, for comparison. If
+that is enough to verify a fix, the program below is unnecessary.
+
 ## Build and run
 
 ```bash

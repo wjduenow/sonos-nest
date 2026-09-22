@@ -1,0 +1,291 @@
+# esp-hosted-mcu#243 — serial capture from the device the fault was found on.
+#
+# ESP32-P4 (Elecrow CrowPanel Advance 7") + ESP32-C6. esp_hosted 2.12.13 on BOTH sides.
+# SDIO 1-bit @ 10 MHz, STREAMING RX mode, CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM off
+# (its default). CONFIG_ESP_HOSTED_PKT_STATS=y at 2 s, log ceiling raised to INFO so the
+# driver's own warning is compiled in — a default ERROR-only build hides it entirely.
+#
+# Traffic is ordinary product use: browsing a music service over TLS (15-29 KB responses)
+# and fetching cover art. No synthetic load.
+#
+# Four stalls in ~13 minutes, one mechanism each time. Extracted verbatim from a 7,221-line
+# capture (09:00-12:39); the full log is available on request.
+# Local wall-clock timestamps are prepended by the capture tool; the (NNNN) values are the
+# device's own ms.
+
+====================================================================================================
+A. BOOT OF THE DIAGNOSTIC BUILD — transport config and versions
+# hostedGetHostVersion() reports 2.12.11 only because the Arduino core compiles against the
+# platform package's stale prebuilt headers; the LINKED driver is 2.12.13, as the slave line
+# and the fix-only log strings in the ELF confirm.
+====================================================================================================
+09:17:22.245 I (823) esp_core_dump_flash: Core dump data checksum is correct
+09:17:22.245 I (823) esp_core_dump_flash: Found core dump 30852 bytes in flash @ 0xff0000
+09:17:22.245 [    34][I][esp32-hal-psram.c:106] psramAddToHeap(): PSRAM added to the heap.
+09:17:23.246 
+09:17:23.246 [sonos-jukebox] boot
+09:17:23.246 I (848) esp_core_dump_flash: Core dump data checksum is correct
+09:17:23.246 [board ] HOSTED_DIAG: esp_hosted stats + H_SDIO_DRV at INFO, rpc/transport at WARN
+09:17:23.246 [board ] CrowPanel Advance 7" ESP32-P4 — ESP32-P4, 378 KB internal heap free
+09:17:23.246 [   358][I][esp32-hal-i2c-ng.c:112] i2cInit(): Initializing I2C Master: num=0 sda=45 scl=46 freq=100000
+09:17:23.246 [   378][I][esp32-hal-ldo.c:118] io_ldo_try_acquire(): periman IO LDO auto: enabled channel 4 @ 3300 mV
+09:17:23.246 [   388][I][esp32-hal-ledc.c:295] ledcAttachChannel(): LEDC attached to pin 31 (channel 0, resolution 8)
+09:17:23.246 [display] EK79007 1024x600 up, LVGL direct into the DSI buffer
+09:17:23.246 [touch ] GT911 up, LVGL pointer indev registered
+09:17:23.246 [uisnd ] NS4168 ready (amp gated ACTIVE LOW, powers down when idle)
+09:17:23.246 [knob  ] Modulino Knob at 0x3A
+09:17:23.246 [sd    ] mounted /sdcard — ASTC, 57690 MB
+09:17:23.246 [artc  ] 12 slots x 72x72 = 121 KB PSRAM
+09:17:23.246 [   861][I][esp32-hal-hosted.c:391] hostedInitWiFi(): Initializing ESP-Hosted for WiFi
+09:17:23.246 [   870][I][esp32-hal-hosted.c:290] hostedInit(): Initializing ESP-Hosted
+09:17:23.246 W (1667) H_API: ESP-Hosted config valid; reuse existing config
+09:17:23.246 I (1668) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+09:17:23.246 W (1668) H_SDIO_DRV: Reset slave using GPIO[32]
+09:17:25.248 I (3325) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+09:17:25.248 I (3368) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
+09:17:25.248 I (3368) H_SDIO_DRV: Open data path at slave
+09:17:25.248 I (3368) H_SDIO_DRV: Starting SDIO process rx task
+09:17:25.248 I (3396) H_SDIO_DRV: Received ESP_PRIV_IF type message
+09:17:25.248 W (3396) H_SDIO_DRV: SDIO clock freq set to [10000]KHz, Max possible (on PCB) is 40000KHz
+09:17:25.248 I (3398) stats: Start Pkt_stats reporting thread [timer: 2 sec]
+09:17:25.248 I (3503) H_SDIO_DRV: Received INIT event
+09:17:25.248 I (3503) H_SDIO_DRV: Event type: 0x22
+09:17:25.248 I (3503) H_SDIO_DRV: Write thread started
+09:17:25.248 [  2884][I][esp32-hal-hosted.c:125] hostedHasUpdate(): Host firmware version: 2.12.11
+09:17:25.248 [  2892][I][esp32-hal-hosted.c:126] hostedHasUpdate(): Slave firmware version: 2.12.13
+09:17:25.248 [  2899][W][esp32-hal-hosted.c:139] hostedHasUpdate(): Version on Host is OLDER than version on co-processor
+09:17:27.250 I (5403) stats: STA: s2h{in[0] out[0]} h2s{in(flowctrl_drop[0] in[0 or 0]) out(ok[0] drop[0])} flwctl{on[0] off[0]}
+09:17:27.250 I (5403) stats: internal: free 175212 l-free 73716 min-free 168260, psram: free 30592820 l-free 30408692 min-free 0
+09:17:29.251 [wifi   ] connected as "sonos-jukebox"  ip=192.168.68.85
+
+====================================================================================================
+B1. STALL 1 OF 4 — allocation of 18432 B failed
+# `s2h{in[N] out[N]}` FREEZES at the first stats line after the warning and never moves
+# again; `h2s ... out(ok[N])` keeps counting, so host->co-processor is unaffected.
+# The warning appears EXACTLY ONCE — the 2.12.12 retry (pending=true) never runs, because
+# the first pass already cleared NEW_PACKET and the retry pass returns at that gate.
+# `internal: free X l-free Y` is 8BIT|INTERNAL, NOT the DMA-capable pool that ran out:
+# in B2-B4 the largest general block (31,732 B) EXCEEDS the failing request.
+====================================================================================================
+09:18:13.291 [spotify] browse new_releases: 24 items, stack free 4984 B
+09:18:13.291 [ui    ] radio spotify: 24 items, container=new_releases
+09:18:13.291 I (51403) stats: STA: s2h{in[2043] out[2043]} h2s{in(flowctrl_drop[0] in[230 or 230]) out(ok[230] drop[0])} flwctl{on[0] off[0]}
+09:18:13.291 I (51403) stats: internal: free 34872 l-free 19444 min-free 20836, psram: free 30592820 l-free 30408692 min-free 0
+09:18:15.293 I (53403) stats: STA: s2h{in[2135] out[2135]} h2s{in(flowctrl_drop[0] in[249 or 249]) out(ok[249] drop[0])} flwctl{on[0] off[0]}
+09:18:15.293 I (53403) stats: internal: free 35284 l-free 19444 min-free 20836, psram: free 30592820 l-free 30408692 min-free 0
+09:18:16.293 [spotify] browse start spotify:album:7MNrrItJpom6uMJWdT0XD8
+09:18:16.293 [spotify] browse spotify:album:7MNrrItJpom6uMJWdT0XD8: 11 items, stack free 4940 B
+09:18:16.293 [ui    ] radio spotify: 11 items, container=spotify:album:7MNrrItJpom6uMJWdT0XD8
+09:18:17.294 I (55403) stats: STA: s2h{in[2231] out[2231]} h2s{in(flowctrl_drop[0] in[265 or 265]) out(ok[265] drop[0])} flwctl{on[0] off[0]}
+09:18:17.294 I (55403) stats: internal: free 38668 l-free 19444 min-free 20836, psram: free 30592820 l-free 30408692 min-free 0
+09:18:17.294 [health] up=55s heap=34KB min=20KB psram=29875KB wifi=3 rssi=-54 ip=192.168.68.85 zones=8 lvgl_free=381KB log=0/0 art=yes netgap=0s@gena
+09:18:19.296 I (57403) stats: STA: s2h{in[2365] out[2365]} h2s{in(flowctrl_drop[0] in[320 or 320]) out(ok[320] drop[0])} flwctl{on[0] off[0]}
+09:18:19.296 I (57403) stats: internal: free 34724 l-free 19444 min-free 20836, psram: free 30592820 l-free 30408692 min-free 0
+09:18:20.297 W (58190) H_SDIO_DRV: RX buffer alloc failed (len=18432); dropping read
+09:18:21.298 I (59403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[353 or 353]) out(ok[353] drop[0])} flwctl{on[0] off[0]}
+09:18:21.298 I (59403) stats: internal: free 33032 l-free 19444 min-free 17756, psram: free 30534920 l-free 30408692 min-free 0
+09:18:23.300 I (61403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[353 or 353]) out(ok[353] drop[0])} flwctl{on[0] off[0]}
+09:18:23.300 I (61403) stats: internal: free 31524 l-free 19444 min-free 17756, psram: free 30534920 l-free 30408692 min-free 0
+09:18:24.301 [ 61364][W][HTTPClient.cpp:1423] returnError(): error(-11): read Timeout
+09:18:24.301 [art] HTTP -11
+09:18:24.301 [gate] spotify waited 2543 ms for art
+09:18:25.302 I (63403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[356 or 356]) out(ok[356] drop[0])} flwctl{on[0] off[0]}
+09:18:25.302 I (63403) stats: internal: free 27480 l-free 19444 min-free 17756, psram: free 30558172 l-free 30408692 min-free 0
+09:18:26.302 W (64702) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:18:26.303 E (64702) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+09:18:26.303 E (64704) RPC_WRAP: rpc_wifi_sta_get_ap_info: failed, status [-1]
+09:18:27.303 I (65403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[361 or 361]) out(ok[361] drop[0])} flwctl{on[0] off[0]}
+09:18:27.303 I (65403) stats: internal: free 27412 l-free 19444 min-free 17756, psram: free 30557948 l-free 30408692 min-free 0
+09:18:27.303 [health] up=65s heap=26KB min=17KB psram=29841KB wifi=3 rssi=0 ip=192.168.68.85 zones=8 lvgl_free=381KB log=0/0 art=yes netgap=1s@pending
+09:18:28.304 [ 65922][I][NetworkClient.cpp:263] connect(): select returned due to timeout 2000 ms for fd 49
+09:18:29.304 I (67403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[364 or 364]) out(ok[364] drop[0])} flwctl{on[0] off[0]}
+09:18:29.304 I (67403) stats: internal: free 27744 l-free 19444 min-free 17756, psram: free 30558172 l-free 30408692 min-free 0
+09:18:31.306 I (69403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[364 or 364]) out(ok[364] drop[0])} flwctl{on[0] off[0]}
+09:18:31.306 I (69403) stats: internal: free 27744 l-free 19444 min-free 17756, psram: free 30558172 l-free 30408692 min-free 0
+09:18:33.308 I (71403) stats: STA: s2h{in[2427] out[2427]} h2s{in(flowctrl_drop[0] in[364 or 364]) out(ok[364] drop[0])} flwctl{on[0] off[0]}
+09:18:33.308 I (71403) stats: internal: free 27744 l-free 19444 min-free 17756, psram: free 30558172 l-free 30408692 min-free 0
+09:18:33.308 W (71721) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:18:33.308 E (71721) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+09:18:33.308 E (71723) RPC_WRAP: rpc_wifi_sta_get_ap_info: failed, status [-1]
+
+====================================================================================================
+B2. STALL 2 OF 4 — allocation of 15360 B failed
+# `s2h{in[N] out[N]}` FREEZES at the first stats line after the warning and never moves
+# again; `h2s ... out(ok[N])` keeps counting, so host->co-processor is unaffected.
+# The warning appears EXACTLY ONCE — the 2.12.12 retry (pending=true) never runs, because
+# the first pass already cleared NEW_PACKET and the retry pass returns at that gate.
+# `internal: free X l-free Y` is 8BIT|INTERNAL, NOT the DMA-capable pool that ran out:
+# in B2-B4 the largest general block (31,732 B) EXCEEDS the failing request.
+====================================================================================================
+09:24:05.594 I (327333) stats: STA: s2h{in[15376] out[15376]} h2s{in(flowctrl_drop[0] in[1008 or 1008]) out(ok[1008] drop[0])} flwctl{on[0] off[0]}
+09:24:05.594 I (327334) stats: internal: free 60544 l-free 31732 min-free 49320, psram: free 30555928 l-free 30408692 min-free 0
+09:24:07.596 I (329333) stats: STA: s2h{in[15485] out[15485]} h2s{in(flowctrl_drop[0] in[1027 or 1027]) out(ok[1027] drop[0])} flwctl{on[0] off[0]}
+09:24:07.596 I (329334) stats: internal: free 71508 l-free 31732 min-free 47876, psram: free 30592820 l-free 30408692 min-free 0
+09:24:08.596 [spotify] browse start spotify:artist:7tlQrRh6jNY1c95poJvBe9
+09:24:09.597 [spotify] browse spotify:artist:7tlQrRh6jNY1c95poJvBe9: 24 items, stack free 4912 B
+09:24:09.597 [health] up=330s heap=60KB min=46KB psram=29875KB wifi=3 rssi=-51 ip=192.168.68.85 zones=8 lvgl_free=386KB log=0/0 art=yes netgap=6s@gena
+09:24:09.597 I (331333) stats: STA: s2h{in[15606] out[15606]} h2s{in(flowctrl_drop[0] in[1071 or 1071]) out(ok[1071] drop[0])} flwctl{on[0] off[0]}
+09:24:09.597 I (331334) stats: internal: free 64760 l-free 31732 min-free 47876, psram: free 30592820 l-free 30408692 min-free 0
+09:24:11.598 I (333333) stats: STA: s2h{in[15710] out[15710]} h2s{in(flowctrl_drop[0] in[1109 or 1109]) out(ok[1109] drop[0])} flwctl{on[0] off[0]}
+09:24:11.598 I (333334) stats: internal: free 56256 l-free 31732 min-free 47876, psram: free 30569424 l-free 30408692 min-free 0
+09:24:12.599 [spotify] browse start spotify:artistTopTracks:7tlQrRh6jNY1c95poJvBe9
+09:24:13.600 I (335333) stats: STA: s2h{in[15794] out[15794]} h2s{in(flowctrl_drop[0] in[1122 or 1122]) out(ok[1122] drop[0])} flwctl{on[0] off[0]}
+09:24:13.600 I (335334) stats: internal: free 54108 l-free 31732 min-free 42836, psram: free 30556152 l-free 30408692 min-free 0
+09:24:14.600 W (335975) H_SDIO_DRV: RX buffer alloc failed (len=15360); dropping read
+09:24:15.601 I (337333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1138 or 1138]) out(ok[1138] drop[0])} flwctl{on[0] off[0]}
+09:24:15.601 I (337334) stats: internal: free 58856 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:17.602 I (339333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1138 or 1138]) out(ok[1138] drop[0])} flwctl{on[0] off[0]}
+09:24:17.602 I (339334) stats: internal: free 58300 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:19.603 [spotify] browse start spotify:album:148Fxu4RXzDl62yXs1JO7P
+09:24:19.604 [health] up=340s heap=56KB min=41KB psram=29816KB wifi=3 rssi=-49 ip=192.168.68.85 zones=8 lvgl_free=386KB log=0/0 art=yes netgap=6s@gena
+09:24:19.604 I (341333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1138 or 1138]) out(ok[1138] drop[0])} flwctl{on[0] off[0]}
+09:24:19.604 I (341334) stats: internal: free 58244 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:20.604 W (342509) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:24:20.604 E (342509) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+09:24:20.604 E (342512) RPC_WRAP: rpc_wifi_sta_get_ap_info: failed, status [-1]
+09:24:21.604 I (343333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1139 or 1139]) out(ok[1139] drop[0])} flwctl{on[0] off[0]}
+09:24:21.604 I (343334) stats: internal: free 57912 l-free 31732 min-free 42836, psram: free 30531776 l-free 30408692 min-free 0
+09:24:22.604 [343765][I][NetworkClient.cpp:263] connect(): select returned due to timeout 2000 ms for fd 55
+09:24:23.605 I (345333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1139 or 1139]) out(ok[1139] drop[0])} flwctl{on[0] off[0]}
+09:24:23.605 I (345334) stats: internal: free 58244 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:24.606 [ui    ] radio enter: src=spotify listEmpty=0 awaiting=0 state=1 cur=spotify:playlist:37i9dQZF1DWZeKCadgRdKQ
+09:24:25.606 I (347333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1139 or 1139]) out(ok[1139] drop[0])} flwctl{on[0] off[0]}
+09:24:25.606 I (347334) stats: internal: free 58244 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:27.612 I (349333) stats: STA: s2h{in[15837] out[15837]} h2s{in(flowctrl_drop[0] in[1139 or 1139]) out(ok[1139] drop[0])} flwctl{on[0] off[0]}
+09:24:27.612 I (349334) stats: internal: free 58244 l-free 31732 min-free 42836, psram: free 30532000 l-free 30408692 min-free 0
+09:24:27.612 W (349529) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:24:27.612 E (349529) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+09:24:28.613 E (349531) RPC_WRAP: rpc_wifi_sta_get_ap_info: failed, status [-1]
+09:24:28.613 [net] RSSI 0 twice and coordinator 192.168.68.114 does not answer TCP (7s into the episode) — the radio link is dead
+
+====================================================================================================
+B3. STALL 3 OF 4 — allocation of 21504 B failed
+# `s2h{in[N] out[N]}` FREEZES at the first stats line after the warning and never moves
+# again; `h2s ... out(ok[N])` keeps counting, so host->co-processor is unaffected.
+# The warning appears EXACTLY ONCE — the 2.12.12 retry (pending=true) never runs, because
+# the first pass already cleared NEW_PACKET and the retry pass returns at that gate.
+# `internal: free X l-free Y` is 8BIT|INTERNAL, NOT the DMA-capable pool that ran out:
+# in B2-B4 the largest general block (31,732 B) EXCEEDS the failing request.
+====================================================================================================
+09:27:38.803 I (185333) stats: internal: free 74248 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:27:40.805 I (187333) stats: STA: s2h{in[8005] out[8005]} h2s{in(flowctrl_drop[0] in[586 or 586]) out(ok[586] drop[0])} flwctl{on[0] off[0]}
+09:27:40.805 I (187334) stats: internal: free 73804 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:27:42.807 I (189333) stats: STA: s2h{in[8087] out[8087]} h2s{in(flowctrl_drop[0] in[597 or 597]) out(ok[597] drop[0])} flwctl{on[0] off[0]}
+09:27:42.807 I (189333) stats: internal: free 69684 l-free 31732 min-free 50112, psram: free 30560904 l-free 30408692 min-free 0
+09:27:44.808 [health] up=190s heap=72KB min=48KB psram=29875KB wifi=3 rssi=-51 ip=192.168.68.85 zones=8 lvgl_free=407KB log=0/0 art=yes netgap=1s@gena
+09:27:44.809 I (191333) stats: STA: s2h{in[8193] out[8193]} h2s{in(flowctrl_drop[0] in[610 or 610]) out(ok[610] drop[0])} flwctl{on[0] off[0]}
+09:27:44.809 I (191333) stats: internal: free 74968 l-free 31732 min-free 50112, psram: free 30592820 l-free 30408692 min-free 0
+09:27:46.810 [spotify] browse start spotify:album:4JYMeEAVnEVnJhXe1VZS2b
+09:27:46.810 I (193333) stats: STA: s2h{in[8280] out[8280]} h2s{in(flowctrl_drop[0] in[612 or 612]) out(ok[612] drop[0])} flwctl{on[0] off[0]}
+09:27:46.810 I (193333) stats: internal: free 69052 l-free 31732 min-free 50112, psram: free 30575640 l-free 30408692 min-free 0
+09:27:46.810 [spotify] browse spotify:album:4JYMeEAVnEVnJhXe1VZS2b: 16 items, stack free 4912 B
+09:27:48.812 I (195333) stats: STA: s2h{in[8403] out[8403]} h2s{in(flowctrl_drop[0] in[658 or 658]) out(ok[658] drop[0])} flwctl{on[0] off[0]}
+09:27:48.813 I (195333) stats: internal: free 68892 l-free 31732 min-free 50112, psram: free 30592820 l-free 30408692 min-free 0
+09:27:50.815 W (197257) H_SDIO_DRV: RX buffer alloc failed (len=21504); dropping read
+09:27:50.815 I (197333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[720 or 720]) out(ok[720] drop[0])} flwctl{on[0] off[0]}
+09:27:50.815 I (197333) stats: internal: free 67076 l-free 31732 min-free 50112, psram: free 30534924 l-free 30408692 min-free 0
+09:27:51.815 [ui    ] radio enter: src=spotify listEmpty=0 awaiting=0 state=2 cur=your_songs
+09:27:52.816 I (199333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[720 or 720]) out(ok[720] drop[0])} flwctl{on[0] off[0]}
+09:27:52.817 I (199334) stats: internal: free 66536 l-free 31732 min-free 50112, psram: free 30534924 l-free 30408692 min-free 0
+09:27:54.818 [health] up=200s heap=64KB min=48KB psram=29819KB wifi=3 rssi=-51 ip=192.168.68.85 zones=8 lvgl_free=396KB log=0/0 art=yes netgap=1s@gena
+09:27:54.818 [200483][W][HTTPClient.cpp:1423] returnError(): error(-11): read Timeout
+09:27:54.818 [art] HTTP -11
+09:27:54.818 I (201333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[722 or 722]) out(ok[722] drop[0])} flwctl{on[0] off[0]}
+09:27:54.818 I (201333) stats: internal: free 67364 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:27:55.818 W (202794) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:27:55.818 E (202794) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+09:27:55.818 E (202796) RPC_WRAP: rpc_wifi_sta_get_ap_info: failed, status [-1]
+09:27:56.819 I (203333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[727 or 727]) out(ok[727] drop[0])} flwctl{on[0] off[0]}
+09:27:56.819 I (203333) stats: internal: free 66692 l-free 31732 min-free 50112, psram: free 30562176 l-free 30408692 min-free 0
+09:27:57.820 [204049][I][NetworkClient.cpp:263] connect(): select returned due to timeout 2000 ms for fd 54
+09:27:58.821 I (205333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[728 or 728]) out(ok[728] drop[0])} flwctl{on[0] off[0]}
+09:27:58.821 I (205333) stats: internal: free 67020 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:28:00.823 I (207333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[731 or 731]) out(ok[731] drop[0])} flwctl{on[0] off[0]}
+09:28:00.823 I (207333) stats: internal: free 67020 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:28:01.824 [ui    ] radio enter: src=spotify listEmpty=0 awaiting=0 state=2 cur=your_songs
+09:28:02.824 I (209333) stats: STA: s2h{in[8539] out[8539]} h2s{in(flowctrl_drop[0] in[733 or 733]) out(ok[733] drop[0])} flwctl{on[0] off[0]}
+09:28:02.824 I (209333) stats: internal: free 66648 l-free 31732 min-free 50112, psram: free 30562400 l-free 30408692 min-free 0
+09:28:02.824 W (209813) rpc_core: Timeout waiting for Resp for [0x126](Req_WifiStaGetApInfo)
+09:28:02.824 E (209813) rpc_core: Response not received for [0x126](Req_WifiStaGetApInfo)
+
+====================================================================================================
+B4. STALL 4 OF 4 — allocation of 23040 B failed
+# `s2h{in[N] out[N]}` FREEZES at the first stats line after the warning and never moves
+# again; `h2s ... out(ok[N])` keeps counting, so host->co-processor is unaffected.
+# The warning appears EXACTLY ONCE — the 2.12.12 retry (pending=true) never runs, because
+# the first pass already cleared NEW_PACKET and the retry pass returns at that gate.
+# `internal: free X l-free Y` is 8BIT|INTERNAL, NOT the DMA-capable pool that ran out:
+# in B2-B4 the largest general block (31,732 B) EXCEEDS the failing request.
+====================================================================================================
+09:31:04.978 I (177333) stats: internal: free 86996 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:06.979 I (179333) stats: STA: s2h{in[7588] out[7588]} h2s{in(flowctrl_drop[0] in[449 or 449]) out(ok[449] drop[0])} flwctl{on[0] off[0]}
+09:31:06.979 I (179333) stats: internal: free 86996 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:08.981 I (181333) stats: STA: s2h{in[7684] out[7684]} h2s{in(flowctrl_drop[0] in[465 or 465]) out(ok[465] drop[0])} flwctl{on[0] off[0]}
+09:31:08.981 I (181333) stats: internal: free 86964 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:09.982 [health] up=180s heap=84KB min=56KB psram=29846KB wifi=3 rssi=-52 ip=192.168.68.85 zones=8 lvgl_free=442KB log=0/0 art=yes netgap=4s@gena
+09:31:10.982 I (183333) stats: STA: s2h{in[7765] out[7765]} h2s{in(flowctrl_drop[0] in[473 or 473]) out(ok[473] drop[0])} flwctl{on[0] off[0]}
+09:31:10.982 I (183333) stats: internal: free 86704 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:12.983 I (185333) stats: STA: s2h{in[7844] out[7844]} h2s{in(flowctrl_drop[0] in[474 or 474]) out(ok[474] drop[0])} flwctl{on[0] off[0]}
+09:31:12.983 I (185333) stats: internal: free 86704 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:14.985 I (187333) stats: STA: s2h{in[7930] out[7930]} h2s{in(flowctrl_drop[0] in[474 or 474]) out(ok[474] drop[0])} flwctl{on[0] off[0]}
+09:31:14.985 I (187333) stats: internal: free 86704 l-free 31732 min-free 57972, psram: free 30562400 l-free 30408692 min-free 0
+09:31:16.986 I (189333) stats: STA: s2h{in[8033] out[8033]} h2s{in(flowctrl_drop[0] in[493 or 493]) out(ok[493] drop[0])} flwctl{on[0] off[0]}
+09:31:16.986 I (189333) stats: internal: free 83220 l-free 31732 min-free 57972, psram: free 30560904 l-free 30408692 min-free 0
+09:31:17.987 W (190143) H_SDIO_DRV: RX buffer alloc failed (len=23040); dropping read
+09:31:18.987 I (191333) stats: STA: s2h{in[8094] out[8094]} h2s{in(flowctrl_drop[0] in[518 or 518]) out(ok[518] drop[0])} flwctl{on[0] off[0]}
+09:31:18.987 I (191333) stats: internal: free 84956 l-free 31732 min-free 57972, psram: free 30534928 l-free 30408692 min-free 0
+09:31:19.988 [health] up=190s heap=82KB min=56KB psram=29819KB wifi=3 rssi=-51 ip=192.168.68.85 zones=8 lvgl_free=442KB log=0/0 art=yes netgap=4s@gena
+09:31:20.988 I (193333) stats: STA: s2h{in[8094] out[8094]} h2s{in(flowctrl_drop[0] in[519 or 519]) out(ok[519] drop[0])} flwctl{on[0] off[0]}
+09:31:20.988 I (193333) stats: internal: free 83092 l-free 31732 min-free 57972, psram: free 30534704 l-free 30408692 min-free 0
+09:31:21.989 [193359][W][HTTPClient.cpp:1423] returnError(): error(-11): read Timeout
+09:31:21.989 [art] HTTP -11
+09:31:22.989 [193894][I][NetworkClient.cpp:263] connect(): select returned due to timeout 3000 ms for fd 55
+09:31:22.989 [193902][W][HTTPClient.cpp:1423] returnError(): error(-1): connection refused
+09:31:22.989 [193909][W][HTTPClient.cpp:1423] returnError(): error(-4): not connected
+09:31:22.989 I (195333) stats: STA: s2h{in[8094] out[8094]} h2s{in(flowctrl_drop[0] in[524 or 524]) out(ok[524] drop[0])} flwctl{on[0] off[0]}
+09:31:22.989 I (195333) stats: internal: free 84772 l-free 31732 min-free 57972, psram: free 30561952 l-free 30408692 min-free 0
+09:31:24.990 I (197333) stats: STA: s2h{in[8094] out[8094]} h2s{in(flowctrl_drop[0] in[526 or 526]) out(ok[526] drop[0])} flwctl{on[0] off[0]}
+09:31:24.990 I (197333) stats: internal: free 84772 l-free 31732 min-free 57972, psram: free 30561952 l-free 30408692 min-free 0
+09:31:25.991 [196918][I][NetworkClient.cpp:263] connect(): select returned due to timeout 3000 ms for fd 54
+09:31:25.991 [196926][W][HTTPClient.cpp:1423] returnError(): error(-1): connection refused
+09:31:25.991 [196933][W][HTTPClient.cpp:1423] returnError(): error(-4): not connected
+09:31:25.991 [197619][I][ssl_client.cpp:140] start_ssl_client(): select returned due to timeout 4000 ms for fd 53
+09:31:25.991 [197628][I][NetworkClientSecure.cpp:153] connect(): Actual TLS start postponed.
+09:31:25.991 [197635][E][NetworkClientSecure.cpp:159] connect(): start_ssl_client: connect failed: -1
+09:31:25.991 [197643][W][HTTPClient.cpp:1423] returnError(): error(-1): connection refused
+09:31:25.991 [art] HTTP -1
+09:31:26.991 I (199333) stats: STA: s2h{in[8094] out[8094]} h2s{in(flowctrl_drop[0] in[531 or 531]) out(ok[531] drop[0])} flwctl{on[0] off[0]}
+09:31:26.991 I (199333) stats: internal: free 84796 l-free 31732 min-free 57972, psram: free 30561952 l-free 30408692 min-free 0
+09:31:28.992 [199942][I][NetworkClient.cpp:263] connect(): select returned due to timeout 3000 ms for fd 54
+
+====================================================================================================
+C. THE SAME DEVICE AND TRAFFIC WITH MEMPOOL_PREFER_SPIRAM=y (+ CACHE_L2_CACHE_LINE_64B=y)
+# The shipped workaround: the buffers come from DMA-capable PSRAM instead.
+# s2h climbs continuously. No RX buffer alloc failed, no RPC timeout, no restart, for
+# 2 h 52 min of the same browsing. Internal free/largest are ~90 KB higher than before,
+# because the driver's buffers left internal RAM.
+====================================================================================================
+09:44:59.663 I (671606) stats: internal: free 184868 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:00.664 [health] up=670s heap=180KB min=142KB psram=29728KB wifi=3 rssi=-50 ip=192.168.68.85 zones=8 lvgl_free=404KB log=0/0 art=yes netgap=13s@gena
+09:45:01.665 I (673605) stats: STA: s2h{in[31099] out[31099]} h2s{in(flowctrl_drop[0] in[2174 or 2174]) out(ok[2174] drop[0])} flwctl{on[0] off[0]}
+09:45:01.665 I (673606) stats: internal: free 184868 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:03.666 I (675605) stats: STA: s2h{in[31180] out[31180]} h2s{in(flowctrl_drop[0] in[2174 or 2174]) out(ok[2174] drop[0])} flwctl{on[0] off[0]}
+09:45:03.667 I (675606) stats: internal: free 184868 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:05.668 I (677605) stats: STA: s2h{in[31264] out[31264]} h2s{in(flowctrl_drop[0] in[2175 or 2175]) out(ok[2175] drop[0])} flwctl{on[0] off[0]}
+09:45:05.668 I (677606) stats: internal: free 184868 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:07.670 I (679605) stats: STA: s2h{in[31342] out[31342]} h2s{in(flowctrl_drop[0] in[2182 or 2182]) out(ok[2182] drop[0])} flwctl{on[0] off[0]}
+09:45:07.670 I (679606) stats: internal: free 184608 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:09.672 I (681605) stats: STA: s2h{in[31427] out[31427]} h2s{in(flowctrl_drop[0] in[2182 or 2182]) out(ok[2182] drop[0])} flwctl{on[0] off[0]}
+09:45:09.672 I (681606) stats: internal: free 184608 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:10.673 [health] up=680s heap=179KB min=142KB psram=29728KB wifi=3 rssi=-55 ip=192.168.68.85 zones=8 lvgl_free=404KB log=0/0 art=yes netgap=13s@gena
+09:45:11.673 I (683605) stats: STA: s2h{in[31498] out[31498]} h2s{in(flowctrl_drop[0] in[2182 or 2182]) out(ok[2182] drop[0])} flwctl{on[0] off[0]}
+09:45:11.673 I (683606) stats: internal: free 184608 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:13.675 I (685605) stats: STA: s2h{in[31569] out[31569]} h2s{in(flowctrl_drop[0] in[2182 or 2182]) out(ok[2182] drop[0])} flwctl{on[0] off[0]}
+09:45:13.675 I (685606) stats: internal: free 184608 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:15.677 I (687605) stats: STA: s2h{in[31671] out[31671]} h2s{in(flowctrl_drop[0] in[2200 or 2200]) out(ok[2200] drop[0])} flwctl{on[0] off[0]}
+09:45:15.677 I (687606) stats: internal: free 184628 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:17.679 I (689605) stats: STA: s2h{in[31761] out[31761]} h2s{in(flowctrl_drop[0] in[2206 or 2206]) out(ok[2206] drop[0])} flwctl{on[0] off[0]}
+09:45:17.679 I (689606) stats: internal: free 184616 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:19.680 I (691605) stats: STA: s2h{in[31811] out[31811]} h2s{in(flowctrl_drop[0] in[2206 or 2206]) out(ok[2206] drop[0])} flwctl{on[0] off[0]}
+09:45:19.680 I (691606) stats: internal: free 184616 l-free 73716 min-free 145532, psram: free 30442260 l-free 29884404 min-free 0
+09:45:20.681 [health] up=690s heap=179KB min=142KB psram=29728KB wifi=3 rssi=-56 ip=192.168.68.85 zones=8 lvgl_free=404KB log=0/0 art=yes netgap=13s@gena
