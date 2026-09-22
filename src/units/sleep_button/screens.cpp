@@ -219,30 +219,32 @@ static void screenTick(uint32_t now) {
   const String qr      = cfg ? String(cfg) : String();
   const char  *caption = cfg ? "Scan to configure" : "Connecting to Wi-Fi...";
 
-  char l0[40], l1[40], l2[40], l3[40];
   const String roomAscii = asciiFold(room);
-  snprintf(l0, sizeof(l0), "room  %s", roomAscii.length() ? roomAscii.c_str() : "-");
-  snprintf(l1, sizeof(l1), "ip    %s", ip ? ipStr : "-");
-  // ⚠️ RSSI NEEDS HYSTERESIS, NOT ROUNDING. The page repaints when its content signature changes
-  // and a repaint starts with fillScreen(BLACK), so a value that moves on its own makes the screen
-  // flash. Rounding to 5 dB was the obvious fix and did NOT work: measured drift of -51/-54/-50/
-  // -49/-52 rounds to -50/-50/-50/-45/-50, so a 1 dB wobble across a boundary still flips it.
-  // Only update what is DISPLAYED once it has moved 10 dB from the displayed value — 5 was still
-  // too tight against a real observed swing of -55 to -67 with the box sitting still.
+
+  // RSSI hysteresis: only move the DISPLAYED value once the real one is 10 dB away from it. The
+  // page repaints when its content changes and a repaint starts with fillScreen(BLACK), so a
+  // figure that drifts on its own (a real swing of -55 to -67 with the box sitting still) flashes
+  // the screen. Rounding was tried first and is not enough — a wobble across a bucket boundary
+  // still flips it.
   {
     const int rssi = (int)g_linkRssi;
     if (abs(rssi - s_shownRssi) >= 10) s_shownRssi = rssi;
   }
-  snprintf(l2, sizeof(l2), "wifi  %d dBm / %u zones", s_shownRssi, (unsigned)g_linkZones);
-  snprintf(l3, sizeof(l3), "fw    %s", FW_VERSION);
 
-  // settingsBrightness() is in the signature because infoScreenShow() applies it — without it,
-  // dragging the brightness slider on the config page would do nothing until some OTHER field on
-  // this page happened to change, which reads as a broken control.
-  // Battery is in the signature so the page repaints when a bar changes — but QUANTISED to the
-  // bar, not the percent. The raw figure moves constantly even smoothed, and every change here
-  // costs a repaint, which is what made the screen flash before.
-  const int batBar = batteryPercent() < 0 ? -1 : (batteryPercent() + 12) / 25;
+  // Battery quantised to the BAR for signature purposes: the raw figure moves constantly even
+  // smoothed, and every change costs a repaint.
+  const int batPct = batteryPercent();
+  const int batBar = batPct < 0 ? -1 : (batPct + 12) / 25;
+
+  // "label\tvalue" — the board draws the label small and grey above a double-height value, and
+  // picks the value's size to fit. See displayQrPage(). Keep the values SHORT: 12 characters is
+  // the boundary at which one drops from double to single height.
+  char l0[44], l1[44], l2[44], l3[44];
+  snprintf(l0, sizeof(l0), "room\t%s", roomAscii.length() ? roomAscii.c_str() : "-");
+  snprintf(l1, sizeof(l1), "ip\t%s", ip ? ipStr : "-");
+  snprintf(l2, sizeof(l2), "wifi\t%d dBm  %u zones", s_shownRssi, (unsigned)g_linkZones);
+  snprintf(l3, sizeof(l3), "firmware\t%s", FW_VERSION);
+
   const String sig = qr + "|" + l0 + "|" + l1 + "|" + l2 + "|" + l3 + "|" + settingsBrightness()
                    + "|b" + batBar;
   if (s_screenLit && sig == s_screenSig) return;   // nothing moved — don't repaint, don't flicker
@@ -378,7 +380,7 @@ void uiTick() {
       if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
       const uint32_t ip = g_linkIp;
       LOG.printf("[health ] up=%lus heap=%luKB min=%luKB wifi=%d rssi=%d ip=%u.%u.%u.%u "
-                 "zones=%u room=%s state=%d btn=%d edges=%lu\n",
+                 "zones=%u room=%s state=%d btn=%d edges=%lu bat=%d%%/%dmV\n",
                  (unsigned long)(now / 1000),
                  (unsigned long)(ESP.getFreeHeap() / 1024),
                  (unsigned long)(ESP.getMinFreeHeap() / 1024),
@@ -386,7 +388,8 @@ void uiTick() {
                  (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
                  (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF),
                  (unsigned)g_linkZones, room.length() ? room.c_str() : "-", (int)s_st,
-                 knobDown() ? 1 : 0, (unsigned long)s_edges);
+                 knobDown() ? 1 : 0, (unsigned long)s_edges,
+                 batteryPercent(), batteryMilliVolts());
     }
   }
 
@@ -478,6 +481,11 @@ void uiTick() {
   // A button press shakes the box too, so this often fires alongside the edge above — harmless,
   // since both mean the same thing and screenWake() is idempotent.
   if (tapDetected()) screenWake();
+
+  // Keep the fuel gauge current. Self-rate-limited in the board to one ADC read every 250 ms, so
+  // calling it every tick is free — and it has to be called steadily, or the average only advances
+  // while the screen happens to be lit. No-op on the boards with no cell.
+  (void)batteryPercent();
 
   const KnobEvent ev = knobEvent();
   if (ev == KnobEvent::Short) {

@@ -80,6 +80,7 @@ KnobEvent knobEvent()    { return buttonEvent(); }
 bool      knobPressed()  { return buttonEvent() == KnobEvent::Short; }
 bool      knobDown()     { return buttonDown(); }
 int       batteryPercent() { return -1; }   // USB-powered
+int       batteryMilliVolts() { return -1; }
 bool      tapDetected()  { return false; }   // no IMU on this board
 
 // --- Everything this board doesn't have -------------------------------------------------

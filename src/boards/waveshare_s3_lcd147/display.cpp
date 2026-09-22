@@ -3,6 +3,7 @@
 #include "pins.h"
 #include "core/board.h"      // batteryPercent()
 #include <Arduino.h>
+#include <string.h>
 #include <Arduino_GFX_Library.h>
 
 extern "C" {
@@ -122,30 +123,33 @@ static bool drawQr(const char *text, int16_t x0, int16_t y0, int16_t box) {
   return true;
 }
 
-// A four-bar battery glyph, bottom-right. Drawn rather than written because a bar is readable at
-// a glance from across a room and "72%" is not — this screen is a signpost, and the number is
-// there only for when you actually care.
+// A gauge that fills left to right across the whole status column. Full width because the column
+// is otherwise mostly empty, and because a long bar resolves a change of a few percent into
+// something actually visible — the old 34 px glyph quantised to four bars and threw the rest away.
 //
-// Bars, not a continuous fill: the underlying estimate is a linear fit to a curve that is not
-// linear (see batteryPercent()), so it is good to roughly a quarter and no better. Quantising to
-// four steps shows exactly that much confidence and no more, and it also stops a one-percent
-// wobble from repainting the page.
-static void drawBattery(int16_t x, int16_t y, int pct) {
-  const int16_t W = 34, H = 15, NUB = 3;
+// Still drawn rather than written: a bar reads at a glance from across a room and "72%" does not.
+// The number sits inside it for when the glance is not enough.
+static void drawBattery(int16_t x, int16_t y, int16_t w, int pct) {
+  const int16_t H = 18, NUB = 3;
+  const int16_t bw = w - NUB;
   const uint16_t col = pct <= 15 ? RED : (pct <= 35 ? YELLOW : GREEN);
 
-  s_gfx->drawRect(x, y, W, H, LIGHTGREY);
-  s_gfx->fillRect(x + W, y + (H - 7) / 2, NUB, 7, LIGHTGREY);
+  s_gfx->drawRect(x, y, bw, H, LIGHTGREY);
+  s_gfx->fillRect(x + bw, y + (H - 8) / 2, NUB, 8, LIGHTGREY);
 
-  const int bars = (pct + 12) / 25;             // 0..4, rounded to the nearest quarter
-  const int16_t bw = (W - 6) / 4;
-  for (int i = 0; i < bars; ++i)
-    s_gfx->fillRect(x + 3 + i * bw, y + 3, bw - 1, H - 6, col);
+  // The fill is continuous now, not quantised — see the note above. Two pixels of inset so the
+  // fill never touches the outline, which at 100% would otherwise look like one solid slab.
+  const int16_t fill = (int16_t)((int32_t)(bw - 4) * pct / 100);
+  if (fill > 0) s_gfx->fillRect(x + 2, y + 2, fill, H - 4, col);
 
-  s_gfx->setTextColor(LIGHTGREY);
+  // Printed over the fill, so it stays put as the bar moves. BLACK on the filled part would
+  // vanish once the fill passes it, so it is drawn in white with the bar behind it either way.
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d%%", pct);
   s_gfx->setTextSize(1);
-  s_gfx->setCursor(x + W + NUB + 5, y + 4);
-  s_gfx->printf("%d%%", pct);
+  s_gfx->setTextColor(WHITE);
+  s_gfx->setCursor(x + bw / 2 - (int16_t)(strlen(buf) * 3), y + 6);
+  s_gfx->print(buf);
 }
 
 
@@ -162,7 +166,12 @@ void displayQrPage(const char *qrText, const char *caption,
 
   const int16_t MARGIN = 6;
   const int16_t box    = DISP_H - 2 * MARGIN;
-  const int16_t tx     = MARGIN + box + MARGIN;
+  // 4, not MARGIN: the status column is the tight one and the QR does not care about a couple of
+  // pixels. Those 4 px are what let a 12-character room name render at double height — see the
+  // auto-sizing below, where 12 chars is exactly the boundary.
+  const int16_t GAP    = 4;
+  const int16_t tx     = MARGIN + box + GAP;
+  const int16_t tw     = DISP_W - tx - GAP;      // usable width of the status column
 
   if (qrChanged) {
     s_gfx->fillScreen(BLACK);
@@ -188,30 +197,51 @@ void displayQrPage(const char *qrText, const char *caption,
     s_gfx->print("QR encode failed");
   }
 
-  int16_t ty = MARGIN + 4;
+  int16_t ty = MARGIN;
 
   if (caption && *caption) {
     s_gfx->setTextColor(CYAN);
     s_gfx->setTextSize(1);
     s_gfx->setCursor(tx, ty);
     s_gfx->print(caption);
-    ty += 14;
-    s_gfx->drawFastHLine(tx, ty, DISP_W - tx - MARGIN, DARKGREY);
-    ty += 8;
-  }
-
-  s_gfx->setTextColor(LIGHTGREY);
-  s_gfx->setTextSize(1);
-  for (uint8_t i = 0; i < nLines && lines; ++i) {
-    if (ty > DISP_H - 10) break;                    // ran out of glass; drop the rest silently
-    if (!lines[i]) continue;
-    s_gfx->setCursor(tx, ty);
-    s_gfx->print(lines[i]);
     ty += 12;
+    s_gfx->drawFastHLine(tx, ty, tw, DARKGREY);
+    ty += 7;
   }
 
-  // Bottom-right, clear of the status lines. Skipped entirely when there is no sensing or no
-  // cell — an empty battery outline would read as "flat", which is the opposite of the truth.
+  // Each line arrives as "label\tvalue" and is drawn on TWO rows: a small grey label over a
+  // double-height value. That is what fills the column — at one size on one row it was a strip of
+  // tiny text with two thirds of the panel black underneath.
+  //
+  // The value's size is chosen per line, largest that fits: 12 px/char at size 2, 6 at size 1.
+  // Adaptive because the values genuinely differ — a room name wants to be readable across a
+  // room, while an IP address is 14 characters that nobody reads at a glance anyway, and forcing
+  // one size on both either truncates the address or wastes the room name.
+  const int16_t BOTTOM = DISP_H - 26;            // leave room for the gauge
+  for (uint8_t i = 0; i < nLines && lines; ++i) {
+    if (!lines[i]) continue;
+    const char *tab = strchr(lines[i], '\t');
+    const char *val = tab ? tab + 1 : lines[i];
+    const uint8_t vsize = ((int16_t)strlen(val) * 12 <= tw) ? 2 : 1;
+    const int16_t need = (tab ? 10 : 0) + (vsize == 2 ? 16 : 8) + 5;
+    if (ty + need > BOTTOM) break;               // out of glass; drop the rest silently
+
+    if (tab) {
+      s_gfx->setTextSize(1);
+      s_gfx->setTextColor(DARKGREY);
+      s_gfx->setCursor(tx, ty);
+      for (const char *c = lines[i]; c < tab; ++c) s_gfx->write(*c);
+      ty += 10;
+    }
+    s_gfx->setTextSize(vsize);
+    s_gfx->setTextColor(WHITE);
+    s_gfx->setCursor(tx, ty);
+    s_gfx->print(val);
+    ty += (vsize == 2 ? 16 : 8) + 5;
+  }
+
+  // Along the bottom, full column width. Skipped entirely when there is no sensing or no cell —
+  // an empty outline would read as "flat", which is the opposite of the truth.
   const int bat = batteryPercent();
-  if (bat >= 0) drawBattery(tx, DISP_H - 22, bat);
+  if (bat >= 0) drawBattery(tx, DISP_H - 24, tw, bat);
 }

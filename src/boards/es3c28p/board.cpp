@@ -38,6 +38,7 @@ bool boardInit() {
 // See core/board.h for what each one means.
 void ringSet(uint8_t /*pct*/) {}                 // no illuminated button ring
 int  batteryPercent() { return -1; }   // mains-powered
+int  batteryMilliVolts() { return -1; }
 bool tapDetected() { return false; }             // no IMU
 bool infoScreenPresent() { return false; }       // this board has a REAL screen; the info screen
                                                  // HAL is the button-v3 signpost panel, not this

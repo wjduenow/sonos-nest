@@ -115,22 +115,36 @@ static const float BAT_FULL_V  = 4.20f;   // what this board's charger floats a 
 // 3.5 and everything below that is unreachable. Calling 3.5 "empty" makes the bar mean something.
 static const float BAT_EMPTY_V = 3.50f;
 
-static float s_batV = 0.0f;               // EMA state; 0 = not yet seeded
+static float    s_batV     = 0.0f;        // EMA state, volts; 0 = not yet seeded
+static uint32_t s_batNext  = 0;           // next ADC sample due
 
-int batteryPercent() {
+// ⚠️ SAMPLES ON A TIMER, NOT ON EVERY CALL, and that is a fix not a flourish. The first version
+// advanced the EMA once per caller — and the callers are the screen repaint and the page's content
+// signature, both of which only run WHILE THE SCREEN IS LIT. With the screen dark for hours the
+// average stopped advancing entirely, so the first reading after a wake was blended against a
+// value from the last time anyone looked. Sampling on a timer instead means the gauge is current
+// whenever it is read, and the unit can poll it every tick for free.
+static void batterySample() {
+  const uint32_t now = millis();
+  if (s_batV > 0.1f && (int32_t)(now - s_batNext) < 0) return;   // signed: survives the rollover
+  s_batNext = now + 250;
+
   const float v = analogReadMilliVolts(PIN_BAT_ADC) * 3.0f / 992.857f;
-
-  // A first reading taken during a TX burst would otherwise drag the average for a minute, so
-  // seed rather than blend on the first call.
+  // Seed rather than blend on the first reading: one taken mid-TX-burst would otherwise drag the
+  // average for a minute.
   if (s_batV <= 0.1f) s_batV = v;
   else                s_batV += (v - s_batV) * 0.05f;
+}
 
+int batteryMilliVolts() {
+  batterySample();
+  return (int)(s_batV * 1000.0f + 0.5f);
+}
+
+int batteryPercent() {
+  batterySample();
   const float pct = (s_batV - BAT_EMPTY_V) / (BAT_FULL_V - BAT_EMPTY_V) * 100.0f;
 
-  // ⚠️ LINEAR, which a LiPo discharge curve is NOT — it is flat through the middle and falls off
-  // a cliff at the end, so this reads pessimistically at midlife and optimistically near empty.
-  // Adequate for a four-bar indicator, where quantisation hides most of it, and honest about
-  // being adequate rather than accurate. A proper curve would need this cell characterised.
   if (pct < 0.0f)   return 0;
   if (pct > 100.0f) return 100;
   return (int)(pct + 0.5f);

@@ -55,6 +55,11 @@ bool      knobDown();              // true while the knob is held; false if no k
 // device running on battery, not as a charge-state display.
 int batteryPercent();
 
+// The smoothed cell voltage in millivolts, or -1 where there is no sensing. Exists for calibration
+// and diagnosis: a percentage cannot tell you whether 100% means a full cell, a wrong divider
+// ratio or a pin that is not connected to what you think, and the raw voltage can.
+int batteryMilliVolts();
+
 // One-shot: has the board's motion sensor seen a TAP? False on boards without an IMU.
 // The board samples inside this call, so it must be polled STEADILY (every uiTick) rather than
 // only when a caller happens to care — a gap in the polling is a gap in the detection.
