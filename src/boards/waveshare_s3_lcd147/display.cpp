@@ -132,7 +132,14 @@ static bool drawQr(const char *text, int16_t x0, int16_t y0, int16_t box) {
 static void drawBattery(int16_t x, int16_t y, int16_t w, int pct) {
   const int16_t H = 18, NUB = 3;
   const int16_t bw = w - NUB;
-  const uint16_t col = pct <= 15 ? RED : (pct <= 35 ? YELLOW : GREEN);
+
+  // ⚠️ DARK fills, not Arduino_GFX's GREEN/YELLOW/RED. Those are full-brightness primaries and the
+  // percentage is printed ON TOP of the fill, so white-on-GREEN came out barely legible. The text
+  // has to sit on a moving background — black where the bar has not reached, the fill where it
+  // has — so the only colour that works for it is white, and the fills have to be dark enough to
+  // carry white. RGB565, roughly (0,130,40), (200,130,0) and (190,30,30).
+  static const uint16_t BAT_OK = 0x0405, BAT_LOW = 0xCC00, BAT_CRIT = 0xB8E3;
+  const uint16_t col = pct <= 15 ? BAT_CRIT : (pct <= 35 ? BAT_LOW : BAT_OK);
 
   s_gfx->drawRect(x, y, bw, H, LIGHTGREY);
   s_gfx->fillRect(x + bw, y + (H - 8) / 2, NUB, 8, LIGHTGREY);
@@ -142,8 +149,7 @@ static void drawBattery(int16_t x, int16_t y, int16_t w, int pct) {
   const int16_t fill = (int16_t)((int32_t)(bw - 4) * pct / 100);
   if (fill > 0) s_gfx->fillRect(x + 2, y + 2, fill, H - 4, col);
 
-  // Printed over the fill, so it stays put as the bar moves. BLACK on the filled part would
-  // vanish once the fill passes it, so it is drawn in white with the bar behind it either way.
+  // Printed over the fill, so it stays put as the bar moves rather than being pushed along by it.
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
   s_gfx->setTextSize(1);
