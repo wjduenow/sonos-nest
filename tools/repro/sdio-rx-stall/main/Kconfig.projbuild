@@ -1,0 +1,24 @@
+menu "Reproducer configuration"
+
+config REPRO_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "myssid"
+    help
+        The co-processor joins this network. The sender (send_bulk.py) must be on it too.
+
+config REPRO_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default "mypassword"
+
+config REPRO_TARGET_DMA_FREE_KB
+    int "Leave this much DMA-capable internal memory free (KB)"
+    default 24
+    range 8 128
+    help
+        The program holds INTERNAL|DMA memory until only this much is free, which is what makes a
+        full streaming read fail to allocate. A full read is (co-processor SDIO Tx queue size) *
+        1536 B; with the default queue size of 20 that is 30720 B, so 24 KB reproduces the fault
+        quickly. Raise it to confirm the healthy case: with enough of this pool free, the same
+        traffic runs indefinitely.
+
+endmenu
