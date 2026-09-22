@@ -239,7 +239,12 @@ static void screenTick(uint32_t now) {
   // settingsBrightness() is in the signature because infoScreenShow() applies it — without it,
   // dragging the brightness slider on the config page would do nothing until some OTHER field on
   // this page happened to change, which reads as a broken control.
-  const String sig = qr + "|" + l0 + "|" + l1 + "|" + l2 + "|" + l3 + "|" + settingsBrightness();
+  // Battery is in the signature so the page repaints when a bar changes — but QUANTISED to the
+  // bar, not the percent. The raw figure moves constantly even smoothed, and every change here
+  // costs a repaint, which is what made the screen flash before.
+  const int batBar = batteryPercent() < 0 ? -1 : (batteryPercent() + 12) / 25;
+  const String sig = qr + "|" + l0 + "|" + l1 + "|" + l2 + "|" + l3 + "|" + settingsBrightness()
+                   + "|b" + batBar;
   if (s_screenLit && sig == s_screenSig) return;   // nothing moved — don't repaint, don't flicker
   s_screenSig = sig;
 

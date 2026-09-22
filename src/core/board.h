@@ -47,6 +47,14 @@ KnobEvent knobEvent();             // next queued press event; None if no knob
 bool      knobPressed();           // true once per Short press; false if no knob
 bool      knobDown();              // true while the knob is held; false if no knob
 
+// Battery charge, 0..100, or -1 on a board with no battery sensing (which is most of them).
+//
+// ⚠️ A BOARD ON USB READS FULL, AND CANNOT TELL YOU IT IS CHARGING. The charger holds the cell's
+// terminal voltage at its float level whenever USB is present, so "100%" means "either charged or
+// plugged in" — there is no VBUS sense pin to separate them. Treat this as a fuel gauge for a
+// device running on battery, not as a charge-state display.
+int batteryPercent();
+
 // One-shot: has the board's motion sensor seen a TAP? False on boards without an IMU.
 // The board samples inside this call, so it must be polled STEADILY (every uiTick) rather than
 // only when a caller happens to care — a gap in the polling is a gap in the detection.

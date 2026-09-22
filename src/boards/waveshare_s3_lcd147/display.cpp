@@ -1,6 +1,7 @@
 // See display.h.
 #include "display.h"
 #include "pins.h"
+#include "core/board.h"      // batteryPercent()
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 
@@ -121,6 +122,33 @@ static bool drawQr(const char *text, int16_t x0, int16_t y0, int16_t box) {
   return true;
 }
 
+// A four-bar battery glyph, bottom-right. Drawn rather than written because a bar is readable at
+// a glance from across a room and "72%" is not — this screen is a signpost, and the number is
+// there only for when you actually care.
+//
+// Bars, not a continuous fill: the underlying estimate is a linear fit to a curve that is not
+// linear (see batteryPercent()), so it is good to roughly a quarter and no better. Quantising to
+// four steps shows exactly that much confidence and no more, and it also stops a one-percent
+// wobble from repainting the page.
+static void drawBattery(int16_t x, int16_t y, int pct) {
+  const int16_t W = 34, H = 15, NUB = 3;
+  const uint16_t col = pct <= 15 ? RED : (pct <= 35 ? YELLOW : GREEN);
+
+  s_gfx->drawRect(x, y, W, H, LIGHTGREY);
+  s_gfx->fillRect(x + W, y + (H - 7) / 2, NUB, 7, LIGHTGREY);
+
+  const int bars = (pct + 12) / 25;             // 0..4, rounded to the nearest quarter
+  const int16_t bw = (W - 6) / 4;
+  for (int i = 0; i < bars; ++i)
+    s_gfx->fillRect(x + 3 + i * bw, y + 3, bw - 1, H - 6, col);
+
+  s_gfx->setTextColor(LIGHTGREY);
+  s_gfx->setTextSize(1);
+  s_gfx->setCursor(x + W + NUB + 5, y + 4);
+  s_gfx->printf("%d%%", pct);
+}
+
+
 void displayQrPage(const char *qrText, const char *caption,
                    const char *const *lines, uint8_t nLines) {
   if (!s_gfx) return;
@@ -181,4 +209,9 @@ void displayQrPage(const char *qrText, const char *caption,
     s_gfx->print(lines[i]);
     ty += 12;
   }
+
+  // Bottom-right, clear of the status lines. Skipped entirely when there is no sensing or no
+  // cell — an empty battery outline would read as "flat", which is the opposite of the truth.
+  const int bat = batteryPercent();
+  if (bat >= 0) drawBattery(tx, DISP_H - 22, bat);
 }

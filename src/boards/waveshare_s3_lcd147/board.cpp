@@ -101,6 +101,41 @@ bool      knobPressed()  { return buttonEvent() == KnobEvent::Short; }
 bool      knobDown()     { return buttonDown(); }
 bool      tapDetected()  { return imuTapDetected(); }
 
+// --- Battery ------------------------------------------------------------------------------
+// GPIO1 through the board's own divider. The scale factor is Waveshare's: their demo reads
+// analogReadMilliVolts() and applies 3.0 / 0.992857, the 3.0 being the divider ratio and the rest
+// a fudge for its tolerance.
+//
+// ⚠️ SMOOTHED, AND IT HAS TO BE. Wi-Fi TX pulls ~200 mA in bursts and the cell's internal
+// resistance turns that into tens of millivolts of sag, so raw readings swing by several percent
+// at random. An unsmoothed gauge visibly flickers between bars and — worse on this unit — changes
+// the page's content signature, which repaints the screen. See displayQrPage().
+static const float BAT_FULL_V  = 4.20f;   // what this board's charger floats a cell at
+// Not 3.0: the ME6217C33 needs ~200 mV of headroom to hold 3V3, so the device browns out around
+// 3.5 and everything below that is unreachable. Calling 3.5 "empty" makes the bar mean something.
+static const float BAT_EMPTY_V = 3.50f;
+
+static float s_batV = 0.0f;               // EMA state; 0 = not yet seeded
+
+int batteryPercent() {
+  const float v = analogReadMilliVolts(PIN_BAT_ADC) * 3.0f / 992.857f;
+
+  // A first reading taken during a TX burst would otherwise drag the average for a minute, so
+  // seed rather than blend on the first call.
+  if (s_batV <= 0.1f) s_batV = v;
+  else                s_batV += (v - s_batV) * 0.05f;
+
+  const float pct = (s_batV - BAT_EMPTY_V) / (BAT_FULL_V - BAT_EMPTY_V) * 100.0f;
+
+  // ⚠️ LINEAR, which a LiPo discharge curve is NOT — it is flat through the middle and falls off
+  // a cliff at the end, so this reads pessimistically at midlife and optimistically near empty.
+  // Adequate for a four-bar indicator, where quantisation hides most of it, and honest about
+  // being adequate rather than accurate. A proper curve would need this cell characterised.
+  if (pct < 0.0f)   return 0;
+  if (pct > 100.0f) return 100;
+  return (int)(pct + 0.5f);
+}
+
 // --- Everything this board doesn't have (or doesn't use) --------------------------------
 bool localAudioPlay(const char *)     { return false; }
 void localAudioStop()                 {}

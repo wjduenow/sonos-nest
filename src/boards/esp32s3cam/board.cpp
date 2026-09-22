@@ -79,6 +79,7 @@ int32_t   encoderDelta() { return 0; }
 KnobEvent knobEvent()    { return buttonEvent(); }
 bool      knobPressed()  { return buttonEvent() == KnobEvent::Short; }
 bool      knobDown()     { return buttonDown(); }
+int       batteryPercent() { return -1; }   // USB-powered
 bool      tapDetected()  { return false; }   // no IMU on this board
 
 // --- Everything this board doesn't have -------------------------------------------------

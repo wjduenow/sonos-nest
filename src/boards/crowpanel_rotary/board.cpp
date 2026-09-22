@@ -31,6 +31,7 @@ bool boardInit() {
 // --- Ring, tap, info screen: peripherals of the sonos-button family, none of them on this board.
 // See core/board.h for what each one means.
 void ringSet(uint8_t /*pct*/) {}                 // no illuminated button ring
+int  batteryPercent() { return -1; }   // mains-powered
 bool tapDetected() { return false; }             // no IMU
 bool infoScreenPresent() { return false; }       // this board has a REAL screen; the info screen
                                                  // HAL is the button-v3 signpost panel, not this
