@@ -4,9 +4,12 @@ The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, wit
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
 > **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `body.stl`, `bezel.stl`, `back.stl` —
-> all watertight, 31 clearance rows passing, all three pairwise interference tests clean, and six
-> access envelopes verified — USB receptacle and plug, button body+tail, nut sweep, nut column,
-> and the harness band. **42.17 x 24.98 x 52.32 mm**, 12.47 + 4.01 + 5.19 cm3. Nothing has been printed or test-fitted,
+> all watertight, every clearance row passing, all three pairwise interference tests clean, and six
+> access envelopes verified — USB receptacle and plug, button body+tail, nut sweep, nut column and
+> the harness slot. **42.17 x 24.98 x 52.32 mm**, 12.08 + 4.01 + 5.19 cm³.
+>
+> **PRINTED AND ASSEMBLED**, with a board, button, harness and cell fitted and the firmware
+> running on it. The mounting height is confirmed — the glass sits flush in the bezel. Nothing has been printed or test-fitted,
 > and `PCB_T` is still an assumption rather than a measurement (§2).
 
 ## 1. The idea
@@ -171,12 +174,10 @@ shell/render_preview.py  render_preview.png
 > USB notch grows **forward** toward the bezel rather than backward, because backward is blocked by
 > the middle plane sitting 0.5 mm behind the shell, which left only 4.8 mm of usable opening.
 
-> ⚠️ **A per-part check cannot catch an assembly fault.** The first build had both parts
-> watertight, both passing every clearance row, and **0.064 cm3 of solid in the same place** — the
-> shell's lid-screw posts standing inside the lid's spigot. `build_lid.py` now asserts all three
-> pairwise intersections are empty on every build, plus that the spigot actually REACHES the
-> carrier — a gap there would leave the board floating on 6.48 mm of nothing and is invisible to
-> every other check. Keep them.
+> ⚠️ **A per-part check cannot catch an assembly fault.** An early build had both parts watertight,
+> both passing every clearance row, and **0.064 cm³ of solid in the same place**. `build_back.py`
+> now asserts all three pairwise intersections are empty on every build — body∩bezel, body∩back,
+> bezel∩back. Keep them.
 
 Built with Python CSG (trimesh + manifold3d), never OpenSCAD — see `hardware/README.md`:
 
@@ -185,36 +186,89 @@ conda run -n img23d python hardware/button-v3/shell/button_params.py   # print t
 conda run -n img23d python hardware/button-v3/shell/build_all.py       # once it exists
 ```
 
-## 4. Screws (BOM)
+## 4. Bill of materials
 
-| qty | screw | into |
+### Bought
+
+| qty | part | notes |
 |---|---|---|
-| 4 | **M2 x 8** | the board's threaded eyelets, from BEHIND, through the middle plane and its posts |
-| 4 | **M3 x 8 countersunk** | the corner bosses, from the FRONT (bezel) |
-| 4 | **M3 x 8 countersunk** | the SAME corner bosses, from the REAR (back cover) |
+| 1 | **Waveshare ESP32-S3-LCD-1.47B** | ⚠️ the **B** matters — see §2. 36.37 x 20.32 mm, ESP32-S3R8, 16 MB flash, 8 MB PSRAM, 1.47" ST7789 172x320, QMI8658 IMU, USB-C |
+| 1 | **FILN FLM12-FJ-6** | Ø12 momentary, IP67, metal, **white** illuminated ring. Four flying leads: white, black, brown, brown |
+| 1 | **LiPo cell, 3.85 V** | the one fitted is 550 mAh / 2.12 Wh with three leads (+, −, NTC). Caveats below |
+| 4 | **M2 x 8** pan head | board → middle plane, driven from the REAR with the back cover off |
+| 8 | **M3 x 8** countersunk | four front into the bezel, four rear into the back cover — into the **same** four bosses |
+| — | heatshrink | for the cell's unused NTC lead |
 
-One boss serves both covers, with a pilot drilled in from each end — deliberately not through, or
-a screw driven from either side would push past its own thread engagement.
+The button ships with its own harness, so it needs no extra wire. The cell's leads solder straight
+to the board's `VBAT` / `GND` pads.
 
 > ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
 > engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
 > which nothing recovers. A brass eyelet in a 1.6 mm board offers at most 1.6 mm of thread, so the
 > window is narrow — `MID_T` is tuned to 2.7 precisely so a **stock M2 x 8** lands inside it
-> (crosses 6.50, engages 1.50).
+> (crosses 6.50, engages 1.50). Change `MID_T` and the screw length changes with it.
 
-> ⚠️ **The M2 length is pinned from BOTH ends and is asserted, not chosen.** Under 1.0 mm of
-> engagement it does not hold; past `PCB_T` it drives through the board into the back of the LCD,
-> which nothing recovers. A brass eyelet in a 1.6 mm board offers at most 1.6 mm of thread, so the
-> window is narrow — `CARRIER_T` is tuned to 2.7 precisely so a **stock M2 x 8** lands inside it
-> (crosses 6.50, engages 1.50). Change `CARRIER_T` and the screw length changes with it.
+One boss serves both covers, with a pilot drilled in from each end — deliberately not through, or
+a screw driven from either side would push past its own thread engagement.
+
+### Printed — `shell/`
+
+| part | volume | what it does |
+|---|---|---|
+| `body.stl` | 12.08 cm³ | four walls, closed rear, the integral middle plane and the four board posts |
+| `bezel.stl` | 4.01 cm³ | front frame; the glass sits flush in its opening |
+| `back.stl` | 5.19 cm³ | comes off to reach the M2 screws |
+
+**≈ 21.3 cm³ total, ~26 g in PLA.** Print flat, no supports. Assembled box is
+**42.17 x 24.98 x 52.32 mm**.
+
+Optional, `gauge/` — `hole_gauge.pdf` (print at 100%) or the three `.stl` gauges, for checking the
+mounting-hole pattern before committing to a case print. See §6.
+
+### Wiring
+
+```
+button                 board, LEFT header rail (USB-C end first)
+  white  ──────────►   pad 1   5V (VBUS)      ring +
+  brown  ──────────►   pad 2   GND            switch
+  brown  ──────────►   pad 5   GP2            switch   (either brown; no polarity)
+  black  ──────────►   pad 7   GP4            ring −   (the pin SINKS it)
+                       pad 6   GP3            ⚠️ LEAVE EMPTY — JTAG strapping pin
+
+cell                   board, RIGHT header rail
+  red    ──────────►   pad 3   VBAT
+  black  ──────────►   pad 4   GND
+  white  ──✂           NTC — unused, insulate
+```
+
+> ⚠️ **The ring is wired LOW-SIDE, and that is the whole trick.** A white LED has Vf ≈ 3.1 V and
+> the ring is specced 5–24 V, so a 3.3 V pin **cannot source it**. It does not need to: white goes
+> to the full 5 V and black lands on the GPIO, which pulls the cathode to ground. No MOSFET. The
+> logic inverts as a result — **LOW = lit**.
+
+> ⚠️ **Meter the cell's leads before soldering.** These are bare pads, not a polarised connector.
+> Two pairs read ≈3.8 V and one reads ≈0 V; the lead *not* in the 0 V pair is **+**. Reversing +
+> and − is the one destructive mistake. Guessing wrong between − and the NTC is harmless — the
+> return would run through a ~10 kΩ thermistor, so the board simply will not power up.
+
+### Things the BOM cannot fix
+
+- **The ring goes dark on battery.** It hangs off VBUS, which exists only while USB is connected.
+  The screen wakes on a press instead, so press feedback survives in a different form.
+- **Runtime is ~5 h.** The always-associated radio dominates and the screen's duty cycle barely
+  moves it. This is a UPS, not a cordless product, without light-sleep work.
+- **The cell is a 3.85 V type on a 4.2 V charger**, so it takes roughly 80% of its rated capacity.
+  That is the safe direction of mismatch — undercharging, not overcharging.
+- **The CHG indicator LED cannot be turned off in firmware.** It is wired to the charge-management
+  IC, not to a GPIO, and lights whenever a cell is charging. Mask it if the glow shows through the
+  case. The RGB bead *is* driven dark at boot — see `pins.h`.
 
 ## 5. Still open
 
-1. **NOTHING HAS BEEN PRINTED.** No test fit, no tolerance check on the button bore, no
-   confirmation that the window frames the display squarely.
-1b. ⚠️ **The carrier posts assume the PCB is clear of components around each eyelet.** They are
-   4.5 mm across and land on the board's back face at the corners. Not verified — check before
-   printing, or the carrier will sit on a capacitor instead of the board.
+1. ⚠️ **The board posts assume the PCB is clear of components around each eyelet.** They stand off
+   the middle plane, are 4.0 mm across and land on the board's back face at the corners. Never
+   verified against a populated board — if a post lands on a capacitor the board will sit crooked
+   in the window, which is the symptom to recognise.
 2. ⚠️ **`PCB_T` is assumed 1.6.** Absorbed by `GLASS_AIR` if it is out by <=0.3; beyond that the
    glass moves toward the window rim.
 3a. ⚠️ **The harness has exactly one route, and it is 1.5 mm.** The four button wires leave the
