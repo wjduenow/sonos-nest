@@ -245,12 +245,21 @@ void displayQrPage(const char *qrText, const char *caption,
 
   int16_t ty = MARGIN;
 
+  // The caption takes the same '#' prefix as a prose line: double height, wrapped. Opt-in rather
+  // than always-on because it costs a row the STATUS page cannot spare — a two-row caption plus
+  // four label/value items needs 163 px of a 146 px budget, and the fourth item would vanish. The
+  // pages that ask for it are the ones with only two or three short lines under them.
   if (caption && *caption) {
+    const bool bigCap = (*caption == '#');
     s_gfx->setTextColor(CYAN);
-    s_gfx->setTextSize(1);
-    s_gfx->setCursor(tx, ty);
-    s_gfx->print(caption);
-    ty += 12;
+    if (bigCap) {
+      ty = drawWrapped(caption + 1, tx, ty, tw, DISP_H - 40, 2);
+    } else {
+      s_gfx->setTextSize(1);
+      s_gfx->setCursor(tx, ty);
+      s_gfx->print(caption);
+      ty += 12;
+    }
     s_gfx->drawFastHLine(tx, ty, tw, DARKGREY);
     ty += 7;
   }

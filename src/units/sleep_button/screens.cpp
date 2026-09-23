@@ -218,7 +218,7 @@ static void screenHoldHint(uint32_t heldMs) {
   char l1[16];
   snprintf(l1, sizeof(l1), "#%d", secs > 0 ? secs : 0);
   const char *lines[3] = { "#Keep holding", l1, "Release to cancel." };
-  infoScreenShow("", "Wi-Fi setup", lines, 3);
+  infoScreenShow("", "#Wi-Fi setup", lines, 3);
   s_screenLit   = true;
   s_screenUntil = 0;              // no timeout while a finger is on the button
   s_screenSig   = "";             // force the normal page to repaint afterwards
@@ -227,7 +227,7 @@ static void screenHoldHint(uint32_t heldMs) {
 static void screenReprovisioning() {
   if (!infoScreenPresent()) return;
   const char *lines[2] = { "#Restarting", "#Wi-Fi setup" };
-  infoScreenShow("", "Wi-Fi setup", lines, 2);
+  infoScreenShow("", "#Wi-Fi setup", lines, 2);
   s_screenLit = true;
 }
 
@@ -273,7 +273,7 @@ static void screenTick(uint32_t now) {
 
   const String qr      = cfg ? String(cfg) : String();
   const char  *caption = cfg      ? "Scan to configure"
-                       : helpWifi ? "No Wi-Fi network"
+                       : helpWifi ? "#No Wi-Fi network"
                                   : "Connecting to Wi-Fi...";
 
   const String roomAscii = asciiFold(room);
@@ -360,7 +360,7 @@ void uiProvisioning(const char *apSsid) {
   char l1[56];
   snprintf(l1, sizeof(l1), "#%s", apSsid ? apSsid : "?");
   const char *lines[4] = { "Or join:", l1, "then open", "#192.168.4.1" };
-  infoScreenShow(qr.c_str(), "Scan to set up Wi-Fi", lines, 4);
+  infoScreenShow(qr.c_str(), "#Scan to set up Wi-Fi", lines, 4);
   s_screenLit   = true;
   s_screenUntil = 0;          // no deadline; the first uiTick() clears it
   s_screenSig   = "";
