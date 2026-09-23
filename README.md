@@ -1,14 +1,14 @@
 # sonos-nest
 
-**Physical controls for a Sonos system.** Five small appliances — a knob, a nightstand player,
-two buttons and a wall panel — that talk **directly** to the speakers on your LAN. No phone, no
+**Physical controls for a Sonos system.** Six small appliances — a knob, a nightstand player,
+three buttons and a wall panel — that talk **directly** to the speakers on your LAN. No phone, no
 account, no cloud service, no server in the middle. You press the thing, the music starts.
 
 ![The sonos-nest family](docs/images/hero.png)
 
 They all run one firmware. A shared core does Sonos discovery, control, browsing, settings,
 networking and over-the-air updates; each device adds only its own drivers and its own idea of
-what a person should be able to do with it. Adding a sixth form factor is a board directory, a
+what a person should be able to do with it. Adding another form factor is a board directory, a
 unit directory and one build env — the core is untouched.
 
 ---
@@ -32,6 +32,11 @@ risk, which the docs are honest about rather than quiet about.
 
 A 7" landscape touchscreen on an **ESP32-P4**, wall-mounted, always awake. Six screens off a
 nav rail — Now Playing, Favorites, Radio, Search, Rooms, Settings — a physical dial, and album art.
+
+![sonos-jukebox on the wall](docs/images/unit-jukebox.png)
+
+The screens below are rendered from the firmware's own layout, because a lit 7" panel
+photographs with glare:
 
 ![Now Playing](docs/images/jukebox-now-playing.png)
 
@@ -77,7 +82,8 @@ freezes the UI rather than dropping a frame.
 
 > **Also on it:** Sonos Favorites off an SD cache, Wi-Fi setup, OTA, and UI click feedback
 > through the onboard speakers.
-> **Not done:** the four transport buttons (a PCF8574 on the shared I²C bus) and the case.
+> **Not done:** the four transport buttons (a PCF8574 on the shared I²C bus). The case is
+> printed and on the wall — [`hardware/jukebox-7/`](hardware/jukebox-7/).
 >
 > **Read before touching it:** [`plans/07-sonos-jukebox.md`](plans/07-sonos-jukebox.md) — this is
 > RISC-V silicon on a different toolchain, and several of its failure modes are silent.
@@ -90,7 +96,7 @@ freezes the UI rather than dropping a frame.
 
 ### sonos-nest — the knob
 
-![sonos-nest](docs/images/unit-nest.png)
+<p align="center"><img src="docs/images/unit-nest.png" alt="sonos-nest" width="75%"></p>
 
 The original. A **round 480×480 display** with a real rotary encoder and a knob you press, on an
 ELECROW CrowPanel 2.1". Wall-mounted on a magnetic pull-off cradle.
@@ -127,18 +133,21 @@ wake-word story: [`plans/03`](plans/03-wake-word-integration.md)
 
 ---
 
-### sonos-button — one button, no screen
+### sonos-button — one button, three boards
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/unit-button.png" alt="sonos-button"></td>
-<td width="50%"><img src="docs/images/unit-button-v2.png" alt="sonos-button-v2"></td>
+<td width="33%"><img src="docs/images/unit-button.png" alt="sonos-button"></td>
+<td width="33%"><img src="docs/images/unit-button-v2.png" alt="sonos-button-v2"></td>
+<td width="33%"><img src="docs/images/unit-button-v3.png" alt="sonos-button-v3"></td>
 </tr>
 <tr>
 <td><b>sonos-button</b> — ESP32-S3-CAM, 57.1 cm³, taped under a nightstand with the button
 facing down.</td>
 <td><b>sonos-button-v2</b> — the identical product on a Seeed XIAO ESP32S3 (21 × 17.8 mm, ~$7).
-Same firmware unit, unchanged. <b>24.5 cm³ — 2.3× smaller.</b></td>
+<b>24.5 cm³ — 2.3× smaller.</b></td>
+<td><b>sonos-button-v3</b> — the identical product plus a 1.47" screen, on a Waveshare
+ESP32-S3-LCD-1.47B. 42 × 25 × 52 mm, with an optional LiPo cell.</td>
 </tr>
 </table>
 
@@ -146,18 +155,42 @@ Press it: the configured room starts the configured saved playlist, looped, at t
 volume. Press again: stop. **Double-press and triple-press each start their own playlist and
 volume**, so one button covers three moods.
 
-It is headless — there is genuinely no screen — so everything is set up in a browser: a SoftAP
-captive portal for Wi-Fi, then a config page on `:8080` for room, playlists, volume, ring
-brightness and device name. It also mirrors its log over TCP on `:2323`, which on a device with
-no display is the only way to watch it think.
+**All three boards run the same firmware unit, unchanged** — `units/sleep_button/`, with the
+press classifier and the config page shared in `boards/button_common/`. What differs is only the
+drivers, so a fix to the button's behaviour lands on all three at once.
+
+Everything is set up in a browser: a SoftAP captive portal for Wi-Fi, then a config page on
+`:8080` for room, playlists, volume, ring brightness and device name. Each also mirrors its log
+over TCP on `:2323`, which on a device with no display is the only way to watch it think.
 
 > The single press deliberately costs ~350 ms, because a release is only a *single* press once
 > the multi-press window closes. That is why the ring pulses on the press **edge** rather than on
 > the classified event: feedback a third of a second after your finger reads as a missed press.
 
+#### What v3 adds: a screen that is off
+
+v1 and v2 answer "which network do I join?" and "where is the config page?" with a router lease
+table. v3 answers both with a **QR code**. The screen is **dark by default** and wakes for 45 s
+on a **tap on the case** or a press, showing the setup SoftAP before provisioning (a
+`WIFI:` QR a phone camera joins directly) and this device's own `:8080` page after — beside
+it, the room, what each of the three presses will play, and the battery.
+
+- **Tap wake is software** — the accelerometer is polled for jerk, with a threshold measured
+  *in the printed case*, because a bare board and a boxed one differ by an order of magnitude.
+- **Hold the button for 5 s to re-provision**, with an on-screen countdown and "release to
+  cancel". The other buttons re-provision by holding through power-on, which a battery makes
+  impossible — pulling USB no longer turns the unit off.
+- **The battery is a UPS, not yet a cordless mode.** The ring runs off USB power, so it goes
+  dark on battery, and runtime is short: the firmware does not yet try to save power. That is
+  [issue #32](https://github.com/wjduenow/sonos-nest/issues/32).
+- It deliberately **does not link LVGL** — a QR and five lines of text do not justify a 96 KB
+  pool; the QR encoder is vendored in `lib/qrcodegen/`.
+
 **→ [plans/04 — the button](plans/04-sonos-button-plan.md)** ·
 [**plans/11 — why the XIAO**](plans/11-button-v2.md) ·
-cases: [`hardware/cam-button/`](hardware/cam-button/) · [`hardware/button-v2/`](hardware/button-v2/)
+[**plans/14 — the screen**](plans/14-button-v3.md) ·
+cases: [`hardware/cam-button/`](hardware/cam-button/) · [`hardware/button-v2/`](hardware/button-v2/) ·
+[`hardware/button-v3/`](hardware/button-v3/)
 
 ---
 
@@ -199,6 +232,7 @@ instead of GitHub — [`plans/06`](plans/06-scalable-ota.md).
 | **sonos-sleep-machine** | Hosyond/LCDWIKI ES3C28P 2.8" | ESP32-S3R8 | 240×320 | `sleep-machine` | [docs](docs/sonos-sleep-machine.md) |
 | **sonos-button** | nulllab/emakefun ESP32-S3-CAM | ESP32-S3 | — headless | `sleep-button` | [plans/04](plans/04-sonos-button-plan.md) |
 | **sonos-button-v2** | Seeed XIAO ESP32S3 | ESP32-S3R8 | — headless | `button-v2` | [plans/11](plans/11-button-v2.md) |
+| **sonos-button-v3** | Waveshare ESP32-S3-LCD-1.47B | ESP32-S3R8 | 172×320, dark until woken | `button-v3` | [plans/14](plans/14-button-v3.md) |
 
 Every unit ships Wi-Fi provisioning over a captive portal, mDNS, ArduinoOTA, pull-OTA and portal
 self-registration, because all of that lives in the shared core.
@@ -225,7 +259,7 @@ src/
     sonos/              soap_client · ssdp discovery · DIDL-Lite parser · gena eventing
     net/                wifi · ota · updater · captive portal · registrar · logmirror
     ui/                 the ONLY LVGL-coupled part of core — headless envs drop it wholesale
-  boards/               drivers, one dir per board (+ button_common/, shared by both buttons)
+  boards/               drivers, one dir per board (+ button_common/, shared by all three buttons)
   units/                UX, one dir per unit
 ```
 
@@ -259,7 +293,8 @@ tools/pio run -e sonos-jukebox                               # the ESP32-P4 pane
 Then copy `include/secrets.example.h` → `include/secrets.h`. **Wi-Fi credentials are optional** —
 leave them blank and the device raises an open SoftAP captive portal named `<hostname>-setup` on
 first boot, lists nearby networks, and reverts cleanly on a wrong password so a typo cannot
-strand it. Hold the knob or button through power-on to re-provision.
+strand it. Hold the knob or button through power-on to re-provision (on button-v3, hold the
+button for 5 s at any time).
 
 - **Full setup, disk budget, the package-tree split, CI:** [`docs/dev-setup.md`](docs/dev-setup.md)
 - **Flashing from WSL2** (usbipd, port renumbering, the reader script):
@@ -268,7 +303,7 @@ strand it. Hold the knob or button through power-on to re-provision.
 - **Enclosures** — all Python CSG (trimesh + manifold3d), each part asserting its own clearances
   at build time: [`hardware/README.md`](hardware/README.md)
 
-CI builds all five app envs on every PR and every push to `main`.
+CI builds all six app envs on every PR and every push to `main`.
 
 ---
 
@@ -296,10 +331,13 @@ gotcha that cost someone a day is written down there, at length, with the reason
 
 ## Status
 
-The jukebox, nest, sleep-machine and both buttons all work and are in daily use. Known open
-items: the jukebox's four transport buttons and its case; the sleep-machine's RGB LED; a third
-wake word that trains but does not fire; and one unresolved ESP-Hosted link fault on the P4 that
-recovers by reboot rather than being cured. On Search, playing a track is proven on hardware and
-playing an artist *station* is not yet. Each is written up where it lives.
+The jukebox, nest, sleep-machine and all three buttons work; button-v3 was assembled into its
+printed case on 2026-09-23. Known open items: the jukebox's four transport buttons;
+the sleep-machine's RGB LED; button-v3's battery runtime
+([#32](https://github.com/wjduenow/sonos-nest/issues/32)); and a third wake word that trains but
+does not fire. The P4's ESP-Hosted link death is fixed at its root cause, an SDIO RX-buffer
+allocation ([`plans/13`](plans/13-jukebox-inbound-bursts.md)), and every Spotify playback form the
+jukebox's Search offers — tracks, playlists and artist radio — has played on hardware. Each is
+written up where it lives.
 
 Sonos is a third party and is not affiliated with this project.
