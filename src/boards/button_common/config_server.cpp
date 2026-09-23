@@ -66,7 +66,7 @@ static const char kIndexHtml[] PROGMEM = R"HTML(<!doctype html>
   </div>
   <input type=range id=bright min=10 max=100 step=5>
   <div class=hint>The screen is dark until you tap the case or press the button, then shows this
-    device's QR code for 20 seconds. It will not go below 10% &mdash; blanking it would hide the
+    device's QR code for 45 seconds. It will not go below 10% &mdash; blanking it would hide the
     code you need to get back here.</div>
 </div>
 

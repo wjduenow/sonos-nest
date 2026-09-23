@@ -154,9 +154,18 @@ def check_clearances(verbose=True):
     rec("usb notch depth for a plug", P.USB_SLOT_Y1 - P.USB_SLOT_Y0, 7.5)
     # ...and the post nearest the connector has to miss it. These live on different parts, which is
     # exactly why nothing was checking the pair until it was found by intersection.
-    rec("post clear of the USB receptacle",
-        ((P.PCB_TOP_Z + P.USB_OFF_Z - P.USB_WIDTH / 2)
-         - max(z for x, z in P.HOLE_POS if z < P.PCB_TOP_Z + P.USB_OFF_Z)) - P.POST_OD / 2, 0.1)
+    # ⚠️ Filter on the USB-C END, not merely "above the connector". Selecting by z alone picked
+    #    the FAR-END post at x = -16.215 — about 34 mm from the connector — so the row passed at
+    #    0.14 mm while saying nothing about the thing it is named after, and the post BELOW the
+    #    connector was excluded entirely. build_body() runs only check_clearances(), so this row is
+    #    the sole dimensional guard here; the envelope intersection in __main__ covers it too, but
+    #    a row that passes for the wrong reason is worse than no row.
+    usb_x  = max(x for x, _ in P.HOLE_POS)                 # the USB-C end's post column
+    usb_z0 = P.PCB_TOP_Z + P.USB_OFF_Z - P.USB_WIDTH / 2   # connector's top and bottom edges
+    usb_z1 = P.PCB_TOP_Z + P.USB_OFF_Z + P.USB_WIDTH / 2
+    for z in (z for x, z in P.HOLE_POS if abs(x - usb_x) < 0.01):
+        gap = (usb_z0 - z) if z < usb_z0 else (z - usb_z1)
+        rec(f"USB-end post at z={z:.2f} clear of the receptacle", gap - P.POST_OD / 2, 0.1)
 
     # 9. The bezel bosses must sit clear of the board, in the bands above and below it.
     rec("upper boss above the board", P.PCB_TOP_Z - (P.BOSS_ZS[0] + P.BOSS_OD / 2), 0.5)

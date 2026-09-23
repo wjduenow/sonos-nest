@@ -3,14 +3,17 @@
 The `button-v3` case: a Waveshare ESP32-S3-LCD-1.47B behind a screen window, with a FILN
 FLM12-FJ-6 illuminated button on top. Firmware and rationale: `plans/14-button-v3.md`.
 
-> **Status: BUILT, NOT PRINTED — 2026-09-09.** Three parts — `body.stl`, `bezel.stl`, `back.stl` —
-> all watertight, every clearance row passing, all three pairwise interference tests clean, and six
-> access envelopes verified — USB receptacle and plug, button body+tail, nut sweep, nut column and
-> the harness slot. **42.17 x 24.98 x 52.32 mm**, 12.08 + 4.01 + 5.19 cm³.
+> **Status: PRINTED, ASSEMBLED AND VERIFIED — 2026-09-23.** Everything fits. A board, button,
+> harness and cell are fitted, the firmware runs on it, and the mounting height is confirmed — the
+> glass sits flush in the bezel.
 >
-> **PRINTED AND ASSEMBLED**, with a board, button, harness and cell fitted and the firmware
-> running on it. The mounting height is confirmed — the glass sits flush in the bezel. Nothing has been printed or test-fitted,
-> and `PCB_T` is still an assumption rather than a measurement (§2).
+> Three parts — `body.stl`, `bezel.stl`, `back.stl` — all watertight, every clearance row passing,
+> all three pairwise interference tests clean, and six access envelopes verified: USB receptacle
+> and plug, button body+tail, nut sweep, nut column and the harness slot.
+> **42.17 x 24.98 x 52.32 mm**, 12.08 + 4.01 + 5.19 cm³.
+>
+> ⚠️ `PCB_T` is still an assumption (1.6) rather than a measurement — the LCD is bonded across the
+> board, so calipers cannot reach bare laminate. §2.
 
 ## 1. The idea
 
@@ -27,7 +30,7 @@ so the display reads landscape, matching `DISPLAY_ROTATION 1` as shipped.
 ```
 
 - **The middle plane is part of the body**, not a separate carrier. It sits 0.5 mm behind the
-  tallest component, so the board screws are short (**M2 x 8**), and there is **10.5 mm** of open
+  tallest component, so the board screws are short (**M2 x 8**), and there is **8.48 mm** of open
   cavity behind it for a screwdriver. Every earlier arrangement failed one of those two — either
   M2 x 18 spanning the whole box, or a joint nothing could reach.
 - **The board loads from the FRONT**, through the bezel opening, and lands on four posts standing
@@ -72,12 +75,12 @@ the 363 MB Arduino installer.
 
 | what | value | note |
 |---|---|---|
-| glass top -> PCB back face | **5.50** | the LCD is seated on the PCB, so this is the only reachable datum |
-| glass top -> tallest component | **8.50** | closes exactly: 5.50 + 3.00 |
+| glass top -> PCB back face | **7.50** | the LCD is seated on the PCB, so this is the only reachable datum |
+| glass top -> tallest component | **8.50** | ⚠️ SUSPECT: 7.50 + 3.30 = 10.80, not 8.50. The printed case fit confirms DISP_STACK, so this is the bad reading. `COMP_Z_MAX` takes the worse of both routes, so the cavity cannot come out short. |
 | lit area | **32.4 x 17.4** | |
 | lit area offset from PCB top-left | **0.2, 0.2** | PCB-relative: LCD and PCB share one footprint |
 | dead chin, USB-C side | **3.5** | cross-checks the derived 3.77 right margin |
-| M2 hole centres | **x 1.97 / 33.97, z 3.5 / 16.8** | eyelets are THREADED |
+| M2 hole centres | **a trapezoid** — see §2 | eyelets are THREADED |
 | USB-C shell | **9.0 x 3.3**, centred | cross-checks the derived 3.00 tallest component |
 
 Three independent cross-checks closed, which is what makes these trustworthy: the chin against the

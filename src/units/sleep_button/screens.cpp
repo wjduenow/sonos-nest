@@ -212,17 +212,39 @@ static String asciiFold(const String &in) {
 // Shown while the re-provision hold is in progress, and again just before the reboot. Painted
 // directly rather than through the normal page so it cannot be suppressed by the content-signature
 // compare — this is the one page that must appear the instant it is asked for.
+static int s_hintSecs = -1;              // countdown value currently painted; -1 = hint not up
+
 static void screenHoldHint(uint32_t heldMs) {
   if (!infoScreenPresent()) return;
   const int secs = (int)((REPROV_HOLD_MS - heldMs + 999) / 1000);
+
+  // ⚠️ REPAINT ONCE PER SECOND, NOT ONCE PER TICK. uiTick runs every ~5 ms, and every call here
+  // goes through displayQrPage(), which clears the text column and redraws it — so painting
+  // unconditionally made the countdown strobe for the whole 3.5 s it was up, and cost a column of
+  // SPI plus an NVS read in settingsBrightness() each time. The value only changes once a second.
+  if (secs == s_hintSecs) return;
+  s_hintSecs = secs;
+
   char l1[16];
   snprintf(l1, sizeof(l1), "#%d", secs > 0 ? secs : 0);
   const char *lines[3] = { "#Keep holding", l1, "Release to cancel." };
   infoScreenShow("", "#Wi-Fi setup", lines, 3);
-  s_screenLit   = true;
-  s_screenUntil = 0;              // no timeout while a finger is on the button
-  s_screenSig   = "";             // force the normal page to repaint afterwards
+  s_screenLit = true;
+
+  // ⚠️ A REAL DEADLINE, NOT 0. Setting it to 0 meant "no timeout while a finger is down", which is
+  // true but wrong: the moment the button is RELEASED, screenTick() resumes, reads
+  // s_screenUntil == 0 as "expired" and blanks the panel. So "Release to cancel." cancelled by
+  // turning the screen off. A normal wake period brings the status page back instead, which is
+  // what cancelling should look like. screenTick() is suppressed while the hold is in progress,
+  // so this deadline cannot expire underneath it.
+  s_screenUntil = millis() + SCREEN_ON_MS;
+  s_screenSig   = "";                    // the normal page must repaint over the hint
 }
+
+// Re-arm the hint so the next hold repaints from its first second. Its own function because
+// uiTick is common to all three boards and must not touch a screen-only static directly — doing
+// exactly that broke the screenless builds once already in this branch.
+static void screenHoldEnded() { s_hintSecs = -1; }
 
 static void screenReprovisioning() {
   if (!infoScreenPresent()) return;
@@ -331,6 +353,7 @@ static inline void screenInit() {}
 static inline void screenWake() {}
 static inline void screenTick(uint32_t) {}
 static inline void screenHoldHint(uint32_t) {}
+static inline void screenHoldEnded() {}
 static inline void screenReprovisioning() {}
 #endif
 
@@ -552,7 +575,7 @@ void uiTick() {
   // makes a double or triple press countable in the dark.
   const bool down = knobDown();
   if (down && !s_wasDown) { ++s_edges; s_downSince = now; ringPulse(); screenWake(); }
-  if (!down) s_downSince = 0;
+  if (!down) { s_downSince = 0; screenHoldEnded(); }
   s_wasDown = down;
 
   // --- hold to re-provision ---------------------------------------------------------------

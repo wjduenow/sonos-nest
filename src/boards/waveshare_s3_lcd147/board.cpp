@@ -74,7 +74,17 @@ bool boardInit() {
 // --- Light -------------------------------------------------------------------------------
 // On this board these are genuinely two different lamps, which is why core/board.h had to split
 // them: backlightSet() is the LCD, ringSet() is the illuminated button.
-void backlightSet(uint8_t pct) { displayBacklight(pct); }
+// ⚠️ A NO-OP ON THIS BOARD, DELIBERATELY. main.cpp calls backlightSet(settingsBrightness())
+// immediately after boardInit(), which on a screened board would light a panel displayInit() has
+// just cleared to black — and nothing paints it until screenTick() runs on uiTask, which does not
+// start until appBoot() has finished connecting Wi-Fi and discovering zones. That is several
+// seconds of lit black glass on every boot.
+//
+// It also contradicts two rules this board already states: infoScreenShow() paints before it
+// lights precisely so a repaint is never visible, and core/board.h says the info screen owns this
+// backlight. infoScreenShow() and infoScreenOff() are the only intended controls, so the boot-time
+// call is ignored rather than obeyed.
+void backlightSet(uint8_t) {}
 
 // INVERTED, because low-side: pct 100 -> duty 0 -> pin held LOW -> fully lit.
 void ringSet(uint8_t pct) {

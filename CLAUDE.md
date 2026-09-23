@@ -78,7 +78,7 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > rather than by screws. See `hardware/button-v2/README.md` §3.
 - **sonos-button-v3** (`button-v3` env) — **the same product again, on a Waveshare
   ESP32-S3-LCD-1.47B**, plus a 1.47" ST7789 (172x320, no touch) that is **dark by default** and
-  wakes on a tap or a press to show a **QR code** for 20 s: the Wi-Fi setup AP before provisioning,
+  wakes on a tap or a press to show a **QR code** for 45 s: the Wi-Fi setup AP before provisioning,
   this device's own `:8080` page after. It runs `units/sleep_button/` unchanged — one UX, three
   boards — and shares `boards/button_common/`. Plan: `plans/14-button-v3.md`.
   > ⚠️ **`backlightSet()` USED TO BE THE RING, and this board broke that.** On both screenless
@@ -107,8 +107,12 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `upload_speed = 115200` + `--no-stub`, and it re-enumerates `ttyACM0` -> `ttyACM1` on every
   > reset. 16 MB flash here though, so `default_16MB.csv`, not the other buttons' 8 MB table.
   > ⚠️ **Tap wake is SOFTWARE** (accelerometer jerk polled from `uiTick`), because the QMI8658's INT
-  > line is undocumented on this board. `TAP_JERK_LSB` in `boards/waveshare_s3_lcd147/imu.cpp` is
-  > still a GUESS — set `TAP_DEBUG 1` and measure the idle floor as well as the knock peaks.
+  > line is undocumented on this board. `TAP_JERK_LSB` is **7000, measured IN THE PRINTED CASE**
+  > (2026-09-10: hands off 290, typing on the same desk 1,688, deliberate taps 29,814-80,823).
+  > **A bench figure does not transfer** — on a bare PCB the same measurement gave a 44-95 floor
+  > and 3,674 taps, so a case moves BOTH ends and not by the same factor: it couples typing in
+  > (invisible -> 1,688, straight through the old 1200 threshold) while also transmitting a
+  > fingertip tap better. Re-measure in the enclosure with `TAP_DEBUG 1`, never on the bench.
 - **sonos-jukebox** (`sonos-jukebox` env) — **a working wall-mounted landscape controller** on an
   ELECROW CrowPanel Advance 7" **ESP32-P4** (1024×600 MIPI-DSI EK79007, GT911 touch, dual speakers,
   ESP32-C6 for Wi-Fi over SDIO/ESP-Hosted). **Working**: panel, LVGL 9 + touch, Wi-Fi, zone

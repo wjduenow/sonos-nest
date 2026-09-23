@@ -121,7 +121,7 @@ STACK_TOTAL  = 8.5     # ⚠️ SUSPECT — see DISP_STACK above. Nominally glas
 # Take the WORSE of the two routes. Subtraction says 3.00; the connector itself measures 3.3, and
 # a cavity sized off the smaller number would foul it by 0.3.
 COMP_Z_MAX   = max(STACK_TOTAL - DISP_STACK, USB_HEIGHT)       # = 3.30
-LCD_MODULE_T = DISP_STACK - PCB_T                              # = 3.90, carries PCB_T's error
+LCD_MODULE_T = DISP_STACK - PCB_T                              # = 5.90, carries PCB_T's error
 
 # --- The display window ----------------------------------------------------------------------
 # The LIT area, not the glass. ~17.4 x 32.4 mm is what 172 x 320 px at this panel's pitch works
@@ -316,9 +316,9 @@ PCB_Z_GAP    = 0.4     # ...and in Z
 NUT_SOCKET_CLR = 0.5
 GLASS_AIR      = 0.0   # the glass IS the front surface — see BEZEL_GAP above
 STACK_REAR_CLR = 0.5     # tallest component -> the lid
-BOSS_STANDOFF  = GLASS_AIR + LCD_MODULE_T                      # = 4.90 — front wall inner face to
+BOSS_STANDOFF  = GLASS_AIR + LCD_MODULE_T                      # = 5.90 — front wall inner face to
                                                                # the PCB's display-side face
-_STACK_Y = GLASS_AIR + STACK_TOTAL + STACK_REAR_CLR            # = 9.30, the whole electronics stack
+_STACK_Y = GLASS_AIR + STACK_TOTAL + STACK_REAR_CLR            # = 9.00, the whole electronics stack
 
 # And this is the number that decides the box. 19.48 vs 9.30: the M12 nut needs MORE THAN TWICE
 # the depth the entire display-plus-PCB-plus-components stack does. Anyone looking at this box
@@ -331,7 +331,7 @@ OUT_Y  = IN_Y + BEZEL_T + BACK_T                               # = 24.98
 BODY_Y0      = BEZEL_T                                         # = 3.00, where the body starts
 BODY_Y1      = OUT_Y - BACK_T                                  # = 22.48, where the back cover starts
 CAVITY_Y1    = BODY_Y1
-BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.24, centred in the cavity
+BUTTON_Y     = FRONT_WALL + IN_Y / 2.0                         # = 12.74, centred in the cavity
 NUT_RELIEF_D = BUTTON_NUT_AC + 1.0                             # = 19.48, the nut's swept circle
 
 # --- Width (X) --------------------------------------------------------------------------------
@@ -360,9 +360,9 @@ HEIGHT_MIN   = PCB_BOT_Z + PCB_Z_GAP + WALL                    # = 39.22, what t
 # ============================================================================================
 # Board Y: one chain, front to back, every link measured.
 BOARD_Y_GLASS     = 0.0                                        # flush with the outside
-BOARD_Y_PCB_FRONT = BOARD_Y_GLASS + LCD_MODULE_T               # = 7.40
-BOARD_Y_PCB_BACK  = BOARD_Y_PCB_FRONT + PCB_T                  # = 9.00  the pillars land here
-BOARD_Y_REAR      = BOARD_Y_PCB_BACK + COMP_Z_MAX              # = 12.30 tallest component
+BOARD_Y_PCB_FRONT = BOARD_Y_GLASS + LCD_MODULE_T               # = 5.90
+BOARD_Y_PCB_BACK  = BOARD_Y_PCB_FRONT + PCB_T                  # = 7.50  the posts land here
+BOARD_Y_REAR      = BOARD_Y_PCB_BACK + COMP_Z_MAX              # = 10.80 tallest component
 
 # The bezel opening, in world coords: the FULL board outline plus a hairline. No lip, no overlap —
 # the whole glass shows and sits flush in it.
@@ -385,9 +385,9 @@ HOLE_POS = tuple((BOARD_X0 + hx, PCB_TOP_Z + hz) for hx, hz in HOLES)
 # two — long screws, or a joint you could not reach.
 #
 # The board still loads from the FRONT, through the bezel opening, and lands on the posts.
-MID_Y0       = BOARD_Y_REAR + STACK_REAR_CLR                   # = 9.30, the plane's front face
+MID_Y0       = BOARD_Y_REAR + STACK_REAR_CLR                   # = 11.30, the plane's front face
 MID_T        = 2.7
-MID_Y1       = MID_Y0 + MID_T                                  # = 12.00
+MID_Y1       = MID_Y0 + MID_T                                  # = 14.00
 # ⚠️ 4.0, NOT 4.5 — set by the USB-C receptacle, not by the cavity wall. The lower-right eyelet is
 # 2.16 mm from the edge of the 9 mm connector, so a 4.5 post (radius 2.25) buries 0.09 mm of itself
 # in the connector body. Found by intersecting the body with a modelled receptacle; no dimensional
@@ -447,9 +447,9 @@ BOSS_PILOT_D    = 6.0      # how deep each pilot goes in from its own end
 BOSS_LEN     = 9.0     # boss depth, comfortably past the screw's ~5 of engagement
 RIM_W        = 1.2     # bezel locating-rim wall
 
-BOSS_X       = IN_X_HALF - BOSS_OD / 2.0 + BOSS_MERGE          # = 16.09
+BOSS_X       = IN_X_HALF - BOSS_OD / 2.0 + BOSS_MERGE          # = 16.08
 BOSS_ZS      = (WALL + BOSS_OD / 2.0 - BOSS_MERGE,              # = 5.00  above the board
-                HEIGHT - WALL - BOSS_OD / 2.0 + BOSS_MERGE)     # = 44.80 below it
+                HEIGHT - WALL - BOSS_OD / 2.0 + BOSS_MERGE)     # = 47.32 below it
 
 # The bezel's locating pocket. This is the "snug" part: the pocket and the window are on the SAME
 # part, so there is no tolerance stack between where the board sits and where the hole is. On the
@@ -477,7 +477,9 @@ SEG = 96      # cylinder smoothness
 if __name__ == "__main__":
     print(f"  PCB            {PCB_W} x {PCB_H} mm, {PCB_T} thick (assumed)")
     print(f"  stack          LCD module {LCD_MODULE_T:.2f} + PCB {PCB_T} + components {COMP_Z_MAX:.2f}"
-          f"  = {STACK_TOTAL} measured")
+          f"  = {LCD_MODULE_T + PCB_T + COMP_Z_MAX:.2f}")
+    print(f"                 (STACK_TOTAL reads {STACK_TOTAL} and is the SUSPECT number — the case"
+          f" fit confirms DISP_STACK)")
     print(f"  boss standoff  {BOSS_STANDOFF:.2f} from the front wall inner face")
     print(f"  header rows    {HDR_ROW_GAP} apart, {HDR_EDGE_OFF:.2f} from each long edge (derived)")
     print(f"  button keepout {BUTTON_KEEPOUT_Z:.2f} deep, {BUTTON_NUT_AC:.2f} across corners")

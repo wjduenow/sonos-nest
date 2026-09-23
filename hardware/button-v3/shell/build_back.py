@@ -1,7 +1,7 @@
 """button-v3 back cover — the rear plate.
 
 Comes off to reach the four M2 screws that hold the board to the middle plane. That is its only
-functional job: with it removed there is 10.5 mm of open cavity behind the plane, which is what
+functional job: with it removed there is 8.48 mm of open cavity behind the plane, which is what
 makes the board joint reachable at all.
 
 Screws into the SAME corner bosses the bezel uses, from the other end — one boss, a pilot drilled

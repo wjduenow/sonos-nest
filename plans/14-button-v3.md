@@ -8,7 +8,7 @@
 The same product as [04](04-sonos-button-plan.md) and [11](11-button-v2.md) — press to start the
 configured playlist, press again to stop, double and triple press have their own slots — on a board
 that also carries a 1.47" ST7789. The screen is **dark by default**, wakes on a tap or a press, and
-shows **one QR code** plus four status lines for 20 seconds.
+shows **one QR code** plus four status lines for 45 seconds.
 
 It exists because a headless button cannot answer two questions:
 
@@ -101,7 +101,8 @@ one edge — which reads as "bad panel" rather than "bad constant". Arduino_GFX 
 constructor argument, so there is nothing to patch:
 
 ```cpp
-new Arduino_ST7789(bus, RST, /*rot=*/1, /*ips=*/true, 172, 320, /*col_offset1=*/34, 0, 0, 0);
+new Arduino_ST7789(bus, RST, /*rot=*/1, /*ips=*/true, 172, 320,
+                   /*col1=*/34, /*row1=*/0, /*col2=*/34, /*row2=*/0);
 ```
 
 The bring-up's test pattern is a 1-px border hard against all four edges, because that is the only
@@ -268,7 +269,7 @@ board.
 > ⚠️ **Firmware cannot detect this.** `displayInit()` only verifies its objects allocated —
 > Arduino_GFX 1.3.1's `begin()` returns void, so there is no return code to check and no register
 > read-back in that driver. A cracked panel reports a clean boot with no error and simply shows
-> nothing, which is indistinguishable from the app's normal 20 s screen-off behaviour. The
+> nothing, which is indistinguishable from the app's normal screen-off behaviour. The
 > bring-up's PERSISTENT test pattern is the only reliable way to tell the two apart.
 
 ## 4. Open
@@ -285,17 +286,17 @@ board.
   > passed. The escaping only matters once an owner sets a device name containing one — and a bad
   > payload does not look wrong, it just sends the phone to a network that does not exist. Set a
   > device name with a semicolon on the `:8080` page and repeat to cover it.
-- ⚠️ **There is no way to re-provision without physical access.** The only trigger is a hold
-  through power-on, which is fine on a desk and useless on a wall — exactly the situation this
-  screen exists to solve. A config-page field that sets a flag and reboots into the portal would
-  fix it, and would have turned a fiddly two-handed test into one HTTP request.
-- ⚠️ **`TAP_JERK_LSB`** — a guess. Measure it against the printed case, not a bare board: a case
-  transmits a knock quite differently from a PCB on a desk.
-- ⚠️ **Mounting-hole centres.** The board is **36.37 × 20.32 mm** with four **M2** corner holes
-  (both from Waveshare's dimension drawing). The hole *centres* are deliberately not recorded: the
-  drawing carries 1.97 / 2.40 / 2.00 / 3.52 / 17.78 without unambiguous leaders, and 17.78 is
-  exactly 7 × 2.54, far more likely to be the rail-to-rail spacing than a hole pitch. **Measure
-  them.** This project has already paid once for trusting a datasheet over calipers (the FLM12-FJ-6
+- ~~There is no way to re-provision without physical access~~ — **SOLVED 2026-09-22**: a **5 s
+  hold** sets an NVS flag and reboots into the portal, with an on-screen countdown and "release to
+  cancel". It became urgent rather than merely nice when a battery was fitted: pulling USB no
+  longer powers the unit down, so "hold through power-on" had silently come to mean "wait ~5 hours
+  or open the case". Screened boards only — the screen is what makes the gesture abandonable.
+- ~~`TAP_JERK_LSB` — a guess~~ — **MEASURED IN THE PRINTED CASE 2026-09-10: 7000.** See §Status.
+  The bench figure of 1200 did not transfer, exactly as this item warned.
+- ~~Mounting-hole centres~~ — **RESOLVED**: the four holes are a **TRAPEZOID**, 16.32 apart at
+  the USB-C end and 13.28 at the far end, 32.00 along the board. The drawing's four insets (1.97,
+  2.40, 3.52, 2.00) are four different dimensions, not four readings of one pattern. Symmetry was
+  assumed three times before the hardware settled it. The case is printed and fits. This project has already paid once for trusting a datasheet over calipers (the FLM12-FJ-6
   depth). M2 corner holes are a real gain over `button-v2`, whose XIAO has none — the lid there is
   structural because of it.
 - ⚠️ **Screen orientation is a case decision.** `DISPLAY_ROTATION 1` (landscape, 320×172) because
