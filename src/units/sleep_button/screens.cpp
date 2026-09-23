@@ -259,7 +259,8 @@ static void screenTick(uint32_t now) {
   // wondering which press plays what — and all three are already on the :8080 page the QR points
   // at, which is where someone who wants them will be within one scan.
   char l0[44], l1[44], l2[44], l3[44];
-  snprintf(l0, sizeof(l0), "room\t%s", roomAscii.length() ? roomAscii.c_str() : "-");
+  // The leading '*' marks this as the accent line — the board draws it amber. See displayQrPage().
+  snprintf(l0, sizeof(l0), "*room\t%s", roomAscii.length() ? roomAscii.c_str() : "-");
   const char *const PRESS_LABEL[SETTINGS_PRESS_SLOTS] = {
       "single press", "double press", "triple press" };
   char *const slotLine[SETTINGS_PRESS_SLOTS] = { l1, l2, l3 };

@@ -234,6 +234,14 @@ void displayQrPage(const char *qrText, const char *caption,
     if (!lines[i]) continue;
     const char *tab = strchr(lines[i], '\t');
     const char *val = tab ? tab + 1 : lines[i];
+
+    // A label beginning '*' marks its value as the ACCENT line — drawn amber rather than white.
+    // An explicit marker at the call site rather than "the first line is special": positional
+    // magic here would break silently the moment anyone reorders the lines, and the reorder would
+    // look entirely reasonable to whoever did it.
+    const char *lab = lines[i];
+    const bool accent = tab && *lab == '*';
+    if (accent) ++lab;
     // ⚠️ ALWAYS DOUBLE HEIGHT, TRUNCATED TO FIT — never dropped to single height. Auto-sizing was
     // tried first and is worse in use: it makes a value's size depend on its length, so a room
     // called "Den" renders twice the height of one called "Dining Room" and the page appears to
@@ -266,11 +274,14 @@ void displayQrPage(const char *qrText, const char *caption,
       s_gfx->setTextSize(1);
       s_gfx->setTextColor(DARKGREY);
       s_gfx->setCursor(tx, ty);
-      for (const char *c = lines[i]; c < tab; ++c) s_gfx->write(*c);
+      for (const char *c = lab; c < tab; ++c) s_gfx->write(*c);
       ty += 9;
     }
+    // Amber for the room, white for everything else — the room is WHERE this will play and the
+    // rest is WHAT, and on a screen read at a glance that distinction is worth a colour.
+    static const uint16_t ACCENT = 0xFDE7;       // ~(255,190,60)
     s_gfx->setTextSize(tab ? 2 : 1);
-    s_gfx->setTextColor(WHITE);
+    s_gfx->setTextColor(accent ? ACCENT : WHITE);
     s_gfx->setCursor(tx, ty);
     s_gfx->print(tab ? vbuf : val);          // prose is not truncated; it is sized to fit already
     ty += (tab ? 16 : 8) + 3;
