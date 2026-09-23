@@ -135,6 +135,19 @@ def main():
         return 0
 
     env = dict(os.environ, PLATFORMIO_CORE_DIR=core_dir)
+    # PIN THE P4 PLATFORM'S OWN PlatformIO. pioarduino builds a private venv (<core>/penv) and
+    # installs `pioarduino>=6.1.19` into it with uv -- unbounded. pioarduino 6.2.0 (2026-09-15)
+    # moves tool-scons to 4.11.1, and the ESP-IDF lib rebuild (custom_sdkconfig) runs that pio,
+    # which swaps scons-local 4.11 into the tree UNDER a build already running on 4.8.1:
+    #   ModuleNotFoundError: No module named 'SCons.Tool.FortranCommon'
+    # Same failure the Core pin in .github/workflows/firmware.yml exists for, by a second door. It
+    # hits only a FRESH P4 tree -- an existing penv already satisfies >=6.1.19 and is never
+    # upgraded -- which is why it surfaced when CI's package cache missed, and why a dev machine
+    # with a populated ~/.platformio-p4 never sees it. uv reads UV_CONSTRAINT (space-separated
+    # files), so this caps it without patching the platform. Harmless for the S3 tree: its platform
+    # does not use uv. To move the pin, bump it here and prove it on a cold jukebox build.
+    constraints = os.path.join(REPO_ROOT, "tools", "uv-constraints.txt")
+    env["UV_CONSTRAINT"] = " ".join(filter(None, [os.environ.get("UV_CONSTRAINT"), constraints]))
     if os.environ.get("SONOS_PIO_VERBOSE"):
         sys.stderr.write(f"tools/pio: PLATFORMIO_CORE_DIR={core_dir}\n")
 
