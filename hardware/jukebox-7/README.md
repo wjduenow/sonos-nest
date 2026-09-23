@@ -279,7 +279,10 @@ it, because the dominant path is the module clearance gap, not translucency.
 
 ## Status
 
-Geometry generates and is watertight. The **face plate is provisional**: the lit area's position on
-the PCB is still a centred guess, and it is the only thing that moves the screen opening. Remaining
-items are listed at the end of [`crowpanel-p4-7-physical-spec.md`](crowpanel-p4-7-physical-spec.md)
+> **DONE — printed, assembled and on the wall (recorded 2026-09-23)**, with the Modulino dial
+> fitted. The firmware's four transport buttons are still unwired, which is a firmware/PCF8574
+> item, not a case one.
+
+Geometry generates and is watertight. Historical design notes: the face plate was provisional while
+the lit area's position on the PCB was a centred guess. Any remaining refinements are listed at the end of [`crowpanel-p4-7-physical-spec.md`](crowpanel-p4-7-physical-spec.md)
 and in [`wall/README.md`](wall/README.md).
