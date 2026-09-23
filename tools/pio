@@ -45,6 +45,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INI = os.path.join(REPO_ROOT, "platformio.ini")
@@ -146,8 +147,21 @@ def main():
     # with a populated ~/.platformio-p4 never sees it. uv reads UV_CONSTRAINT (space-separated
     # files), so this caps it without patching the platform. Harmless for the S3 tree: its platform
     # does not use uv. To move the pin, bump it here and prove it on a cold jukebox build.
+    # UV_CONSTRAINT is SPACE-separated, so a checkout path with a space in it would split into
+    # paths that do not exist -- and uv fails the install outright ("File not found"), which is
+    # worse than no pin. A relative path is no answer: uv runs inside the nested IDF build, not
+    # from the repo root. So copy the file somewhere space-free when the real path is not.
     constraints = os.path.join(REPO_ROOT, "tools", "uv-constraints.txt")
-    env["UV_CONSTRAINT"] = " ".join(filter(None, [os.environ.get("UV_CONSTRAINT"), constraints]))
+    if any(c.isspace() for c in constraints):
+        copy = os.path.join(tempfile.gettempdir(), "sonos-nest-uv-constraints.txt")
+        shutil.copyfile(constraints, copy)
+        constraints = copy
+    if any(c.isspace() for c in constraints):
+        sys.stderr.write("tools/pio: no whitespace-free path for the uv constraints file; the "
+                         "P4 pioarduino pin is NOT applied (see the comment above).\n")
+    else:
+        env["UV_CONSTRAINT"] = " ".join(filter(None, [os.environ.get("UV_CONSTRAINT"),
+                                                      constraints]))
     if os.environ.get("SONOS_PIO_VERBOSE"):
         sys.stderr.write(f"tools/pio: PLATFORMIO_CORE_DIR={core_dir}\n")
 
