@@ -286,11 +286,18 @@ board.
   > passed. The escaping only matters once an owner sets a device name containing one — and a bad
   > payload does not look wrong, it just sends the phone to a network that does not exist. Set a
   > device name with a semicolon on the `:8080` page and repeat to cover it.
-- ~~There is no way to re-provision without physical access~~ — **SOLVED 2026-09-22**: a **5 s
-  hold** sets an NVS flag and reboots into the portal, with an on-screen countdown and "release to
-  cancel". It became urgent rather than merely nice when a battery was fitted: pulling USB no
-  longer powers the unit down, so "hold through power-on" had silently come to mean "wait ~5 hours
-  or open the case". Screened boards only — the screen is what makes the gesture abandonable.
+- ~~Re-provisioning requires a power cycle, which a battery makes impossible~~ — **SOLVED
+  2026-09-22**: a **5 s hold** sets an NVS flag and reboots into the portal, with an on-screen
+  countdown and "release to cancel". It became urgent rather than merely nice when a battery was
+  fitted: pulling USB no longer powers the unit down, so "hold through power-on" had silently come
+  to mean "wait ~5 hours for the cell to flatten, or open the case". Screened boards only — the
+  screen is what makes the gesture abandonable.
+- ⚠️ **Re-provisioning still requires PHYSICAL ACCESS to the button**, which the hold does not
+  change — it runs off `knobDown()`. That is the remaining half of the original item: a
+  wall-mounted unit still has to be reached. A config-page field would cover the case where the
+  device is being moved *deliberately* and is still on its old network, which is the one situation
+  where `:8080` is reachable. It cannot help once the network is gone, which is why the hold
+  exists.
 - ~~`TAP_JERK_LSB` — a guess~~ — **MEASURED IN THE PRINTED CASE 2026-09-10: 7000.** See §Status.
   The bench figure of 1200 did not transfer, exactly as this item warned.
 - ~~Mounting-hole centres~~ — **RESOLVED**: the four holes are a **TRAPEZOID**, 16.32 apart at
