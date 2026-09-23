@@ -5,7 +5,7 @@ and the difference matters:
 
 | kind | files | source |
 |---|---|---|
-| **Photographs** (to be taken) | `hero.png`, `unit-*.png` | you, with a camera — currently **placeholders** |
+| **Photographs** | `unit-*.png` (all six taken) · `hero.png` (**still a placeholder**) | you, with a camera |
 | **Rendered** | `jukebox-*.png` | [`../mockups/render_jukebox_screens.py`](../mockups/render_jukebox_screens.py) |
 | **Screenshot** | `portal-dashboard.png` | cropped from `sonos-portal/docs/dashboard.png` |
 
@@ -19,7 +19,7 @@ dropped in (use `--force` if you actually want the placeholder back).
 A JPEG is fine for photographs, and PNG for a photo is wasteful — but **renaming a `.jpg` to
 `.png` does not re-encode it**, it just hands PNG-expecting tooling JPEG bytes. So either
 *convert* to PNG (`magick photo.jpg photo.png`) and keep the path, or keep the JPEG and fix the
-one matching line in `README.md`. If you switch to `.jpg` names, do all six at once so the set
+one matching line in `README.md`. If you switch to `.jpg` names, do all seven at once so the set
 stays consistent.
 
 ## The shot list
@@ -29,11 +29,12 @@ right. Shoot larger than listed and downscale — 2× is plenty.
 
 | file | ratio | what it has to show |
 |---|---|---|
-| `hero.png` | **20:9** (2000×900) | **All five units in one frame.** The banner. A wide, shallow crop — group them on one surface, or shoot the wall with the jukebox and nest in it and the two buttons in the foreground. This is the single most load-bearing image in the repo: it is the only one that says "this is a *family* of devices", which is the entire premise. |
-| `unit-nest.png` | 4:3 (1200×900) | The round knob **mounted on a wall**, slightly off-axis so the bezel reads as round and the depth is visible. Screen on, showing Now Playing. |
+| `hero.png` | **20:9** (2000×900) | **All six units in one frame.** The banner. A wide, shallow crop — group them on one surface, or shoot the wall with the jukebox and nest in it and the three buttons in the foreground. This is the single most load-bearing image in the repo: it is the only one that says "this is a *family* of devices", which is the entire premise. |
+| `unit-nest.png` | **1:1** (1000×1000) — a round unit does not fit 4:3 whole; the README shows it at 75% width so its height matches the 4:3 shots | The round knob **mounted on a wall**, slightly off-axis so the bezel reads as round and the depth is visible. Screen on, showing Now Playing. |
 | `unit-sleep-machine.png` | 4:3 | On a nightstand, **screen lit**, in a dim room — it is a sleep device, so a warm low-light frame sells it better than a bright one. |
 | `unit-button.png` | 4:3 | In a hand, or thumbed on the underside of a nightstand where it actually lives. **Ring LED lit** — that ring is the entire user interface. |
 | `unit-button-v2.png` | 4:3 | **Next to the v1**, same frame, same distance. The whole point of v2 is that it is 2.3× smaller; a photo of it alone conveys nothing, because there is no scale reference in a plain white box. A coin or a thumb works too. |
+| `unit-button-v3.png` | 4:3 | **Screen awake, showing its QR code** — that screen is the whole difference from v1/v2, and it is dark by default, so tap the case just before the shot (it stays lit 45 s). Ring lit too, which means **on USB power**: the ring goes dark on battery. Beside v2 for scale if the frame allows. Mind the QR: if it encodes this device's LAN address, that is harmless; the setup-AP QR is too. |
 | `unit-jukebox.png` | 4:3 | The 7" panel **on the wall**, showing a real screen. Glare is expected here and is fine — the *UI* is shown by the rendered screenshots, so this shot only has to establish the physical object in a room. |
 
 ### Practical notes

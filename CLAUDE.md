@@ -34,7 +34,7 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > exactly how `art_cache.cpp` broke it for weeks (issue #7). **Two things now stop that
   > recurring, and both matter: every graphics-coupled core file lives in `core/ui/`, which this
   > env drops in one line (`-<core/ui/>`) — so put a new LVGL-touching file THERE, don't grow a
-  > per-file exclusion list back; and CI builds all five app envs on every PR and every push to
+  > per-file exclusion list back; and CI builds all six app envs on every PR and every push to
   > `main`.** (A push to a side branch with no PR open is not covered — build it yourself.) The
   > convention is written up in `src/core/ui/README.md`.
 - **sonos-button-v2** (`button-v2` env) — **the same product as sonos-button, on a Seeed XIAO
@@ -151,7 +151,8 @@ PlatformIO + Arduino + LVGL 9. One **shared core** drives multiple hardware **un
   > `GET /api/knob` dumps driver state + a live probe of every candidate address; the full bus
   > census runs at boot behind `KNOB_DEBUG` because an ACK probe to an *absent* address blocks
   > ~80 ms, so sweeping the range takes ~9 s — far too slow for an HTTP handler.
-  **Not done**: the 4 transport buttons (a PCF8574, same bus) and the case.
+  **Not done**: the 4 transport buttons (a PCF8574, same bus). The case is done and on the wall
+  (`hardware/jukebox-7/`, recorded 2026-09-23).
   > ⚠️ **The Amazon crawl must never restart from zero, and its tree must contain nothing else.**
   > Two bugs kept this device in a permanent reboot loop. (1) `amazon::post()` skipped HTTP headers
   > with `readStringUntil()`, and `Stream::timedRead()` is a **busy-wait with no yield** — with a

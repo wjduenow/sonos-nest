@@ -34,7 +34,7 @@ MARKER = "sonos-nest-photo-placeholder"
 # name -> (width, height, headline, what the shot has to show)
 SHOTS = {
     "hero":               (2000, 900, "The family",
-                           "all five units together"),
+                           "all six units together"),
     "unit-nest":          (1200, 900, "sonos-nest",
                            "the round knob, on the wall"),
     "unit-sleep-machine": (1200, 900, "sonos-sleep-machine",
@@ -43,6 +43,8 @@ SHOTS = {
                            "in the hand, ring lit"),
     "unit-button-v2":     (1200, 900, "sonos-button-v2",
                            "beside the v1, for scale"),
+    "unit-button-v3":     (1200, 900, "sonos-button-v3",
+                           "screen awake, QR showing"),
     "unit-jukebox":       (1200, 900, "sonos-jukebox",
                            "the 7-inch panel, wall-mounted"),
 }
