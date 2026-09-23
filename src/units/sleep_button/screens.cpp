@@ -160,6 +160,11 @@ static String wifiQrEscape(const char *in) {
   return out;
 }
 
+// Record when the unit came up, so "never connected since boot" can be timed the same way "lost
+// the link" is. Separate from screenWake() because it must run even on a boot where nothing ever
+// wakes the screen.
+static void screenInit() { s_bootMs = millis(); }
+
 // Light the screen — but ONLY from dark. While it is already showing, every further tap and press
 // is ignored outright: no extension, no repaint.
 //
@@ -287,6 +292,7 @@ static void screenTick(uint32_t now) {
 }
 
 #else   // !BUTTON_SCREEN — the two screenless boards compile all of the above away
+static inline void screenInit() {}
 static inline void screenWake() {}
 static inline void screenTick(uint32_t) {}
 #endif
@@ -350,7 +356,7 @@ void uiInit() {
   }
   LOG.printf("[unit   ] ring %u%%\n", settingsRing());
 
-  s_bootMs = millis();
+  screenInit();
 
   // Light the info screen for one wake period at boot. You have just plugged the thing in or
   // power-cycled it, which is exactly the moment its address and health are worth reading — and it
