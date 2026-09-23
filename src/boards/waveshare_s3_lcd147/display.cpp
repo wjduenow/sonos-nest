@@ -171,7 +171,12 @@ void displayQrPage(const char *qrText, const char *caption,
   const bool qrChanged = (s_lastQr != (qrText ? qrText : ""));
 
   const int16_t MARGIN = 6;
-  const int16_t box    = DISP_H - 2 * MARGIN;
+  // 150, not the full 160 the height allows. The QR's module scale is an INTEGER division of the
+  // box by (modules + quiet zone), and at both versions this page ever produces — v2 at 33 and v3
+  // at 37 — 150 and 160 both give scale 4. So the 10 px is free: the QR renders pixel-identical
+  // and the status column gains a thirteenth character. Do not shrink it further without redoing
+  // that arithmetic; 148 is where v3 starts to lose a scale step.
+  const int16_t box    = 150;
   // 4, not MARGIN: the status column is the tight one and the QR does not care about a couple of
   // pixels. Those 4 px are what let a 12-character room name render at double height — see the
   // auto-sizing below, where 12 chars is exactly the boundary.
@@ -196,10 +201,11 @@ void displayQrPage(const char *qrText, const char *caption,
   // black in that case. Only a genuine encode failure earns the red text — a silently blank half
   // would otherwise read as a dead panel on the one screen whose job is to be readable when
   // something has gone wrong.
-  if (qrChanged && qrText && *qrText && !drawQr(qrText, MARGIN, MARGIN, box)) {
+  const int16_t qy = (DISP_H - box) / 2;        // centred now the box is not the full height
+  if (qrChanged && qrText && *qrText && !drawQr(qrText, MARGIN, qy, box)) {
     s_gfx->setTextColor(RED);
     s_gfx->setTextSize(1);
-    s_gfx->setCursor(MARGIN + 4, MARGIN + box / 2 - 4);
+    s_gfx->setCursor(MARGIN + 4, qy + box / 2 - 4);
     s_gfx->print("QR encode failed");
   }
 
@@ -228,11 +234,29 @@ void displayQrPage(const char *qrText, const char *caption,
     if (!lines[i]) continue;
     const char *tab = strchr(lines[i], '\t');
     const char *val = tab ? tab + 1 : lines[i];
-    const uint8_t vsize = ((int16_t)strlen(val) * 12 <= tw) ? 2 : 1;
+    // ⚠️ ALWAYS DOUBLE HEIGHT, TRUNCATED TO FIT — never dropped to single height. Auto-sizing was
+    // tried first and is worse in use: it makes a value's size depend on its length, so a room
+    // called "Den" renders twice the height of one called "Dining Room" and the page appears to
+    // change layout for no reason the reader can see. A consistently large value that runs out of
+    // room is both easier to read and easier to trust.
+    const int16_t maxch = tw / 12;                  // 13 at the current column width
+    char vbuf[24];
+    if ((int16_t)strlen(val) <= maxch) {
+      snprintf(vbuf, sizeof(vbuf), "%s", val);
+    } else {
+      // Keep maxch-1 characters and mark the cut. Without a marker a clipped name reads as a
+      // complete one, which on a screen whose job is to say which playlist is mapped is exactly
+      // the wrong failure.
+      int keep = maxch - 1;
+      if (keep > (int)sizeof(vbuf) - 2) keep = (int)sizeof(vbuf) - 2;
+      memcpy(vbuf, val, keep);
+      vbuf[keep]     = '>';
+      vbuf[keep + 1] = '\0';
+    }
     // ⚠️ 9 and 3, not 10 and 5. Four double-height items plus the caption and the gauge come to
     // 149 px of a 146 px budget at the looser spacing — the fourth was being silently dropped by
     // the BOTTOM check below, which looks identical to "the unit only sent three".
-    const int16_t need = (tab ? 9 : 0) + (vsize == 2 ? 16 : 8) + 3;
+    const int16_t need = (tab ? 9 : 0) + 16 + 3;
     if (ty + need > BOTTOM) break;               // out of glass; drop the rest silently
 
     if (tab) {
@@ -242,11 +266,11 @@ void displayQrPage(const char *qrText, const char *caption,
       for (const char *c = lines[i]; c < tab; ++c) s_gfx->write(*c);
       ty += 9;
     }
-    s_gfx->setTextSize(vsize);
+    s_gfx->setTextSize(2);
     s_gfx->setTextColor(WHITE);
     s_gfx->setCursor(tx, ty);
-    s_gfx->print(val);
-    ty += (vsize == 2 ? 16 : 8) + 3;
+    s_gfx->print(vbuf);
+    ty += 16 + 3;
   }
 
   // Along the bottom, full column width. Skipped entirely when there is no sensing or no cell —
