@@ -905,7 +905,16 @@ void appBoot() {
   // must RETRY, never open the portal — else a brief router outage would drop a configured device
   // into AP mode and it would never rejoin (plans/04 Phase 5). Screened units draw a "join <AP>"
   // message via uiProvisioning() (the UI task isn't running yet); headless units no-op it.
-  if (!wifiHaveCreds() || knobDown()) {
+  // A unit can ask for the portal at runtime by setting this and rebooting — the only route in on
+  // a device with a battery, which cannot be powered off to do the hold-through-boot trick.
+  //
+  // ⚠️ CONSUMED BEFORE THE PORTAL RUNS, NOT AFTER. portalRun() blocks until someone configures it,
+  // so clearing the flag afterwards would mean a device that loses power mid-setup comes back
+  // into the portal again, forever. Clearing first costs one wasted trip at worst.
+  const bool provisionAsked = settingsProvisionPending();
+  if (provisionAsked) settingsSetProvisionPending(false);
+
+  if (!wifiHaveCreds() || knobDown() || provisionAsked) {
     String ap = wifiHostname() + "-setup";   // e.g. sonos-nest-setup / sonos-sleep-setup
     uiProvisioning(ap.c_str());
     portalRun(ap.c_str());                   // blocks until joined; tears the AP down on success

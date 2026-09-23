@@ -145,6 +145,12 @@ String  settingsPortal();
 void    settingsSetPortal(const String &hostPort);
 
 // --- OTA pull-update (net/updater.cpp; plans/06). Both opt-in, default off/empty. ---
+// Set by a unit to ask appBoot() to open the Wi-Fi setup portal on the NEXT boot, then cleared by
+// appBoot() as it consumes it. Exists because the only other way in is holding the button through
+// power-on — and a device with a battery fitted cannot BE powered off without opening the case.
+bool    settingsProvisionPending();
+void    settingsSetProvisionPending(bool on);
+
 bool    settingsOtaAuto();               // auto-apply published updates (at boot)? default false
 void    settingsSetOtaAuto(bool on);
 

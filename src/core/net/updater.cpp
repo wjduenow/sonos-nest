@@ -60,6 +60,8 @@ static const char *unitId() {
   return "jukebox";
 #elif defined(UNIT_BUTTON_V2)
   return "button2";
+#elif defined(UNIT_BUTTON_V3)
+  return "button3";
 #elif defined(HEADLESS)
   return "button";
 #else

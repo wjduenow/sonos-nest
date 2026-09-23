@@ -181,6 +181,9 @@ void settingsSetPortal(const String &hostPort) {
   if (settingsPortal() != hostPort) s_prefs.putString("portal", hostPort);
 }
 
+bool settingsProvisionPending() { return s_prefs.getBool("provpend", false); }
+void settingsSetProvisionPending(bool on) { s_prefs.putBool("provpend", on); }
+
 bool settingsOtaAuto() { return s_prefs.getBool("otaauto", false); }
 void settingsSetOtaAuto(bool on) { s_prefs.putBool("otaauto", on); }
 

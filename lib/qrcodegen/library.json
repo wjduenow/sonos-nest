@@ -1,0 +1,12 @@
+{
+  "name": "qrcodegen",
+  "version": "0.0.0-nayuki-via-lvgl-9.2-vendored",
+  "description": "Vendored copy of Project Nayuki's QR Code generator (C). Lifted from LVGL's own vendored copy so the button-v3 info screen can encode a QR without linking LVGL. See VENDORING.md.",
+  "license": "MIT",
+  "build": {
+    "flags": [
+      "-I."
+    ],
+    "libArchive": false
+  }
+}
