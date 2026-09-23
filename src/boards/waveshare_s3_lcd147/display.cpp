@@ -159,6 +159,40 @@ static void drawBattery(int16_t x, int16_t y, int16_t w, int pct) {
 }
 
 
+// Draw prose at `size`, wrapped to the column, breaking at spaces where it can and mid-word only
+// when a single word is longer than a line. Returns the y below the last row drawn.
+//
+// Exists so the provisioning page can be read at double height: that page's whole job is to be
+// legible to someone who could not scan the code, and at single height it was too small to be
+// that. An SSID wrapping across two rows is worth far more than one that fits but cannot be read.
+static int16_t drawWrapped(const char *txt, int16_t x, int16_t y, int16_t w,
+                           int16_t bottom, uint8_t size) {
+  const int16_t cw = 6 * size, rh = 8 * size + 3;
+  const int     maxch = w / cw;
+  if (maxch < 1) return y;
+
+  s_gfx->setTextSize(size);
+  const char *p = txt;
+  while (*p && y + rh <= bottom) {
+    int take = 0, lastSpace = -1;
+    while (p[take] && take < maxch) {
+      if (p[take] == ' ') lastSpace = take;
+      ++take;
+    }
+    // Only break at a space if there is more text after this line — otherwise a final short word
+    // gets pushed onto a row of its own for no reason.
+    if (p[take] && lastSpace > 0) take = lastSpace;
+
+    s_gfx->setCursor(x, y);
+    for (int i = 0; i < take; ++i) s_gfx->write(p[i]);
+    y += rh;
+    p += take;
+    while (*p == ' ') ++p;                       // swallow the break's own space
+  }
+  return y;
+}
+
+
 void displayQrPage(const char *qrText, const char *caption,
                    const char *const *lines, uint8_t nLines) {
   if (!s_gfx) return;
@@ -264,10 +298,13 @@ void displayQrPage(const char *qrText, const char *caption,
     // ⚠️ 9 and 3, not 10 and 5. Four double-height items plus the caption and the gauge come to
     // 149 px of a 146 px budget at the looser spacing — the fourth was being silently dropped by
     // the BOTTOM check below, which looks identical to "the unit only sent three".
-    // A line with NO tab is plain prose, not a label/value pair, and renders small so a sentence
-    // fits — 26 characters against 13. That is what lets this page carry instructions (see the
-    // no-Wi-Fi case in the unit) without a second code path through here.
-    const int16_t need = tab ? (9 + 16 + 3) : (8 + 3);
+    // A line with NO tab is prose rather than a label/value pair. A leading '#' asks for it at
+    // DOUBLE height, wrapped; plain prose stays single height, where 26 characters against 13
+    // means a whole sentence fits on one row. Both forms exist because the two pages want
+    // opposite things: the provisioning page needs a few words big enough to read across a room,
+    // the no-Wi-Fi page needs four sentences of explanation.
+    const bool bigProse = !tab && *lines[i] == '#';
+    const int16_t need = tab ? (9 + 16 + 3) : (bigProse ? 19 : 11);
     if (ty + need > BOTTOM) break;               // out of glass; drop the rest silently
 
     if (tab) {
@@ -280,11 +317,16 @@ void displayQrPage(const char *qrText, const char *caption,
     // Amber for the room, white for everything else — the room is WHERE this will play and the
     // rest is WHAT, and on a screen read at a glance that distinction is worth a colour.
     static const uint16_t ACCENT = 0xFDE7;       // ~(255,190,60)
-    s_gfx->setTextSize(tab ? 2 : 1);
     s_gfx->setTextColor(accent ? ACCENT : WHITE);
-    s_gfx->setCursor(tx, ty);
-    s_gfx->print(tab ? vbuf : val);          // prose is not truncated; it is sized to fit already
-    ty += (tab ? 16 : 8) + 3;
+    if (tab) {
+      s_gfx->setTextSize(2);
+      s_gfx->setCursor(tx, ty);
+      s_gfx->print(vbuf);
+      ty += 16 + 3;
+    } else {
+      // Wrapped prose reports its own height — it may occupy several rows.
+      ty = drawWrapped(bigProse ? val + 1 : val, tx, ty, tw, BOTTOM, bigProse ? 2 : 1);
+    }
   }
 
   // Along the bottom, full column width. Skipped entirely when there is no sensing or no cell —

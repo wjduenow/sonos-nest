@@ -215,9 +215,9 @@ static String asciiFold(const String &in) {
 static void screenHoldHint(uint32_t heldMs) {
   if (!infoScreenPresent()) return;
   const int secs = (int)((REPROV_HOLD_MS - heldMs + 999) / 1000);
-  char l0[40];
-  snprintf(l0, sizeof(l0), "Keep holding: %d", secs > 0 ? secs : 0);
-  const char *lines[3] = { l0, "", "Release to cancel." };
+  char l1[16];
+  snprintf(l1, sizeof(l1), "#%d", secs > 0 ? secs : 0);
+  const char *lines[3] = { "#Keep holding", l1, "Release to cancel." };
   infoScreenShow("", "Wi-Fi setup", lines, 3);
   s_screenLit   = true;
   s_screenUntil = 0;              // no timeout while a finger is on the button
@@ -226,7 +226,7 @@ static void screenHoldHint(uint32_t heldMs) {
 
 static void screenReprovisioning() {
   if (!infoScreenPresent()) return;
-  const char *lines[2] = { "Restarting into", "Wi-Fi setup..." };
+  const char *lines[2] = { "#Restarting", "#Wi-Fi setup" };
   infoScreenShow("", "Wi-Fi setup", lines, 2);
   s_screenLit = true;
 }
@@ -352,11 +352,15 @@ void uiProvisioning(const char *apSsid) {
   // it — a QR renders identically whether or not the SSID escaping is right, and a wrong payload
   // sends the phone to a network that does not exist.
   LOG.printf("[unit   ] provisioning QR: %s\n", qr.c_str());
-  char l0[48], l1[48];
-  snprintf(l0, sizeof(l0), "join  %s", apSsid ? apSsid : "?");
-  snprintf(l1, sizeof(l1), "then  http://192.168.4.1/");
-  const char *lines[2] = { l0, l1 };
-  infoScreenShow(qr.c_str(), "Scan to set up Wi-Fi", lines, 2);
+
+  // '#' asks for double height, wrapped — see displayQrPage(). The network name and the address
+  // are what someone who could NOT scan the code has to read and retype, so they are the two
+  // things on this page that must be legible; at single height they were not. The SSID wraps
+  // across two rows, which is a far better trade than fitting on one and being unreadable.
+  char l1[56];
+  snprintf(l1, sizeof(l1), "#%s", apSsid ? apSsid : "?");
+  const char *lines[4] = { "Or join:", l1, "then open", "#192.168.4.1" };
+  infoScreenShow(qr.c_str(), "Scan to set up Wi-Fi", lines, 4);
   s_screenLit   = true;
   s_screenUntil = 0;          // no deadline; the first uiTick() clears it
   s_screenSig   = "";
