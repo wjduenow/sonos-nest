@@ -43,6 +43,19 @@ bool boardInit() {
   digitalWrite(PIN_RING_GATE, HIGH);         // start dark; the unit applies the saved level
   ledcSetup(RING_CH, RING_FREQ, RING_RES);
 
+  // ⚠️ EXPLICITLY DARK, and it has to be explicit. A WS2812 latches its colour and holds it until
+  // something rewrites it — a reset does not clear it, and neither does flashing. This app never
+  // otherwise drives the bead, so it simply kept whatever the last firmware to touch it left
+  // behind: Waveshare's factory demo, or a bring-up run interrupted mid-cycle. Sealed in a case
+  // that reads as a glow leaking out of the seams with no way to account for it.
+  //
+  // Written twice with a gap. The first write after power-up occasionally lands while the bead's
+  // controller is still coming up and is ignored, which on a part that latches means it stays lit
+  // for good.
+  neopixelWrite(PIN_RGB_LED, 0, 0, 0);
+  delay(2);
+  neopixelWrite(PIN_RGB_LED, 0, 0, 0);
+
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ_HZ);
   imuInit();                                 // false is survivable — press still wakes the screen
 

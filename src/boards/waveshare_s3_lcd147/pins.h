@@ -79,6 +79,11 @@
 // --- WS2812 RGB bead ---
 // Inside the case once assembled, so it is a bring-up liveness tell, never product UI — exactly
 // the role the XIAO's GPIO21 LED plays. The button's own ring is the indicator that ships.
+//
+// ⚠️ boardInit() DRIVES THIS DARK ON EVERY BOOT. Not driving it is not the same as it being off: a
+// WS2812 latches and holds its colour through a reset and through a reflash, so an app that simply
+// ignores the pin inherits whatever the last firmware left — and in a sealed case that is a glow
+// with no obvious source.
 #define PIN_RGB_LED          38
 
 // --- microSD (SDMMC, 4-bit) ---
