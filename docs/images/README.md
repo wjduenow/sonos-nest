@@ -5,7 +5,7 @@ and the difference matters:
 
 | kind | files | source |
 |---|---|---|
-| **Photographs** (to be taken) | `hero.png`, `unit-*.png` | you, with a camera — currently **placeholders** |
+| **Photographs** | `unit-*.png` (all six taken) · `hero.png` (**still a placeholder**) | you, with a camera |
 | **Rendered** | `jukebox-*.png` | [`../mockups/render_jukebox_screens.py`](../mockups/render_jukebox_screens.py) |
 | **Screenshot** | `portal-dashboard.png` | cropped from `sonos-portal/docs/dashboard.png` |
 
