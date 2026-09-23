@@ -256,7 +256,10 @@ void displayQrPage(const char *qrText, const char *caption,
     // ⚠️ 9 and 3, not 10 and 5. Four double-height items plus the caption and the gauge come to
     // 149 px of a 146 px budget at the looser spacing — the fourth was being silently dropped by
     // the BOTTOM check below, which looks identical to "the unit only sent three".
-    const int16_t need = (tab ? 9 : 0) + 16 + 3;
+    // A line with NO tab is plain prose, not a label/value pair, and renders small so a sentence
+    // fits — 26 characters against 13. That is what lets this page carry instructions (see the
+    // no-Wi-Fi case in the unit) without a second code path through here.
+    const int16_t need = tab ? (9 + 16 + 3) : (8 + 3);
     if (ty + need > BOTTOM) break;               // out of glass; drop the rest silently
 
     if (tab) {
@@ -266,11 +269,11 @@ void displayQrPage(const char *qrText, const char *caption,
       for (const char *c = lines[i]; c < tab; ++c) s_gfx->write(*c);
       ty += 9;
     }
-    s_gfx->setTextSize(2);
+    s_gfx->setTextSize(tab ? 2 : 1);
     s_gfx->setTextColor(WHITE);
     s_gfx->setCursor(tx, ty);
-    s_gfx->print(vbuf);
-    ty += 16 + 3;
+    s_gfx->print(tab ? vbuf : val);          // prose is not truncated; it is sized to fit already
+    ty += (tab ? 16 : 8) + 3;
   }
 
   // Along the bottom, full column width. Skipped entirely when there is no sensing or no cell —

@@ -135,11 +135,17 @@ static const uint32_t SCREEN_ON_MS   = 45000;
 // Rebuild-and-compare cadence while lit. The page only repaints when its CONTENT changes, so this
 // is just how often we ask; a repaint is ~40 ms of SPI and would visibly flicker every second.
 static const uint32_t SCREEN_POLL_MS = 1000;
+// How long to keep saying "connecting" before switching to instructions. Long enough that a normal
+// boot, a router reboot or a brief drop never shows it — those all recover well inside a minute —
+// and short enough that someone who has just moved the device is not left guessing.
+static const uint32_t NO_LINK_HELP_MS = 90000;
 
 static uint32_t s_screenUntil = 0;       // 0 = dark
 static bool     s_screenLit   = false;
 static uint32_t s_screenPoll  = 0;
 static String   s_screenSig;             // content signature of what is currently painted
+static uint32_t s_lastLinkMs  = 0;       // last time we held an IP; 0 = never since boot
+static uint32_t s_bootMs      = 0;       // uiInit() time, so "never connected" can be timed too
 
 // Escape an SSID for a `WIFI:` QR payload. `\ ; , :` are the payload's own delimiters and must be
 // backslash-escaped. NOT theoretical: the SSID is wifiHostname(), which is settingsDeviceName()
@@ -209,8 +215,28 @@ static void screenTick(uint32_t now) {
   if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
 
   const char *cfg = boardConfigUrl();     // nullptr until Wi-Fi is up
+  const uint32_t ipNow = g_linkIp;
+  if (ipNow) s_lastLinkMs = now;
+
+  // ⚠️ A DEVICE MOVED TO A NEW HOUSE NEVER OFFERS THE PORTAL BY ITSELF, and that is deliberate:
+  // appBoot() opens it only when there are NO stored credentials or the button is held through
+  // power-on. A merely-failed connect must retry forever, because portalRun() BLOCKS until someone
+  // configures it — so dropping into AP mode on a router outage would strand a working device that
+  // would otherwise have rejoined on its own (core/app.cpp, plans/04 Phase 5).
+  //
+  // Sound behaviour, but on its own it leaves the owner staring at "Connecting to Wi-Fi..." with
+  // no idea that a recovery exists. Telling them is exactly what this screen is for, so after a
+  // grace period it stops reporting and starts instructing.
+  const bool linkLost = !cfg && s_lastLinkMs &&
+                        (int32_t)(now - s_lastLinkMs) > (int32_t)NO_LINK_HELP_MS;
+  const bool neverUp  = !cfg && !s_lastLinkMs &&
+                        (int32_t)(now - s_bootMs) > (int32_t)NO_LINK_HELP_MS;
+  const bool helpWifi = linkLost || neverUp;
+
   const String qr      = cfg ? String(cfg) : String();
-  const char  *caption = cfg ? "Scan to configure" : "Connecting to Wi-Fi...";
+  const char  *caption = cfg      ? "Scan to configure"
+                       : helpWifi ? "No Wi-Fi network"
+                                  : "Connecting to Wi-Fi...";
 
   const String roomAscii = asciiFold(room);
 
@@ -241,14 +267,22 @@ static void screenTick(uint32_t now) {
   }
 
   const String sig = qr + "|" + l0 + "|" + l1 + "|" + l2 + "|" + l3 + "|" + settingsBrightness()
-                   + "|b" + batBar;
+                   + "|b" + batBar + (helpWifi ? "|help" : "");
   // NOTE the playlist names are IN the signature via l1..l3, so changing a slot on the :8080 page
   // repaints the screen by itself — no separate generation check needed.
   if (s_screenLit && sig == s_screenSig) return;   // nothing moved — don't repaint, don't flicker
   s_screenSig = sig;
 
+  // Untabbed lines render as small prose rather than label/value — see displayQrPage().
+  static const char *const WIFI_HELP[4] = {
+      "The saved network is",
+      "not in range.",
+      "To join a new one: hold",
+      "the button, then power on.",
+  };
   const char *lines[4] = { l0, l1, l2, l3 };
-  infoScreenShow(qr.c_str(), caption, lines, 4);
+  infoScreenShow(qr.c_str(), caption,
+                 helpWifi ? WIFI_HELP : lines, 4);
   s_screenLit = true;
 }
 
@@ -315,6 +349,8 @@ void uiInit() {
     LOG.printf("[unit   ] press x%u: %s @ vol %u\n", s, label.c_str(), settingsVolume(s));
   }
   LOG.printf("[unit   ] ring %u%%\n", settingsRing());
+
+  s_bootMs = millis();
 
   // Light the info screen for one wake period at boot. You have just plugged the thing in or
   // power-cycled it, which is exactly the moment its address and health are worth reading — and it
