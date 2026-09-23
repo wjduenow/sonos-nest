@@ -81,6 +81,17 @@ static uint32_t s_plGen     = 0;       // playlist-pick generation; see the re-w
 static uint8_t  s_lastVol   = 0;       // last volume we pushed to Sonos; seeded in uiInit()
 static uint32_t s_pulseEnd  = 0;       // ring-pulse deadline (0 = not pulsing)
 static bool     s_wasDown   = false;   // previous knobDown(), for the press-edge pulse
+static uint32_t s_downSince = 0;       // when the current hold began; 0 = not held
+
+// ⚠️ THE ONLY WAY TO RE-PROVISION A DEVICE THAT CANNOT BE POWERED OFF. The documented route was
+// "hold the button through power-on", which quietly stopped working the moment a battery was
+// fitted: pulling USB no longer powers the unit down, so that instruction means "wait about five
+// hours for the cell to flatten, or open the case". A runtime hold is the only input a device
+// that is off-network still has — :8080 is unreachable precisely when you need it.
+static const uint32_t REPROV_HOLD_MS = 5000;
+// Feedback starts well before the trigger so the gesture is discoverable and, more importantly,
+// abandonable: a user who did not mean it sees what is about to happen and lets go.
+static const uint32_t REPROV_HINT_MS = 1500;
 static uint8_t  s_slot      = 1;       // press slot whose playlist is starting/playing
 // Cumulative press-edge count, for the heartbeat. Deliberately a COUNTER and not a log line: an
 // event only tells you anything if someone is watching at that instant, and coordinating "press
@@ -198,6 +209,28 @@ static String asciiFold(const String &in) {
   return out;
 }
 
+// Shown while the re-provision hold is in progress, and again just before the reboot. Painted
+// directly rather than through the normal page so it cannot be suppressed by the content-signature
+// compare — this is the one page that must appear the instant it is asked for.
+static void screenHoldHint(uint32_t heldMs) {
+  if (!infoScreenPresent()) return;
+  const int secs = (int)((REPROV_HOLD_MS - heldMs + 999) / 1000);
+  char l0[40];
+  snprintf(l0, sizeof(l0), "Keep holding: %d", secs > 0 ? secs : 0);
+  const char *lines[3] = { l0, "", "Release to cancel." };
+  infoScreenShow("", "Wi-Fi setup", lines, 3);
+  s_screenLit   = true;
+  s_screenUntil = 0;              // no timeout while a finger is on the button
+  s_screenSig   = "";             // force the normal page to repaint afterwards
+}
+
+static void screenReprovisioning() {
+  if (!infoScreenPresent()) return;
+  const char *lines[2] = { "Restarting into", "Wi-Fi setup..." };
+  infoScreenShow("", "Wi-Fi setup", lines, 2);
+  s_screenLit = true;
+}
+
 static void screenTick(uint32_t now) {
   if (!infoScreenPresent()) return;
 
@@ -280,15 +313,16 @@ static void screenTick(uint32_t now) {
   s_screenSig = sig;
 
   // Untabbed lines render as small prose rather than label/value — see displayQrPage().
-  static const char *const WIFI_HELP[4] = {
+  static const char *const WIFI_HELP[5] = {
       "The saved network is",
       "not in range.",
-      "To join a new one: hold",
-      "the button, then power on.",
+      "",
+      "Hold the button for 5s",
+      "to join a new network.",
   };
   const char *lines[4] = { l0, l1, l2, l3 };
   infoScreenShow(qr.c_str(), caption,
-                 helpWifi ? WIFI_HELP : lines, 4);
+                 helpWifi ? WIFI_HELP : lines, helpWifi ? 5 : 4);
   s_screenLit = true;
 }
 
@@ -296,6 +330,8 @@ static void screenTick(uint32_t now) {
 static inline void screenInit() {}
 static inline void screenWake() {}
 static inline void screenTick(uint32_t) {}
+static inline void screenHoldHint(uint32_t) {}
+static inline void screenReprovisioning() {}
 #endif
 
 void uiProvisioning(const char *apSsid) {
@@ -511,8 +547,31 @@ void uiTick() {
   // pulse was added to prevent. knobDown() is still edge-immediate, and pulsing per press also
   // makes a double or triple press countable in the dark.
   const bool down = knobDown();
-  if (down && !s_wasDown) { ++s_edges; ringPulse(); screenWake(); }
+  if (down && !s_wasDown) { ++s_edges; s_downSince = now; ringPulse(); screenWake(); }
+  if (!down) s_downSince = 0;
   s_wasDown = down;
+
+  // --- hold to re-provision ---------------------------------------------------------------
+  // Deliberately long. A press that reaches Short is 200 ms and Long fires at 700; five seconds
+  // is far past anything anyone does by accident, which matters because the cost of a false
+  // trigger is a device that drops off the network and waits in AP mode for someone to notice.
+  //
+  // ⚠️ SCREENED BOARDS ONLY, and that is not an oversight. On a screenless button this gesture has
+  // no feedback while it runs, no way to tell it is about to fire, and nothing afterwards to say
+  // what happened — a bedside unit with something resting on the button would silently take itself
+  // off the network. The screen is what makes the gesture both discoverable and abandonable, so
+  // the gesture only exists where the screen does. Those units can still be powered off, which is
+  // the whole reason this was needed here and not there.
+#ifdef BUTTON_SCREEN
+  if (down && s_downSince && (int32_t)(now - s_downSince) >= (int32_t)REPROV_HOLD_MS) {
+    LOG.println("[unit   ] button held 5 s — rebooting into Wi-Fi setup");
+    settingsSetProvisionPending(true);
+    screenReprovisioning();          // say so before the reboot takes the screen away
+    ringSet(0);
+    delay(600);                      // let the panel latch and NVS settle
+    ESP.restart();
+  }
+#endif
 
   // Knock-to-wake. Polled every tick whether or not the screen is up, because the board samples
   // the accelerometer INSIDE this call and a gap in the polling is a gap in the detection
@@ -546,10 +605,20 @@ void uiTick() {
     LOG.println("[unit   ] button Long — reserved");
   }
 
+  // The hold hint owns the screen while a finger is down past the threshold, so it is driven
+  // ahead of screenTick and suppresses it.
+#ifdef BUTTON_SCREEN
+  const bool holding = down && s_downSince &&
+                       (int32_t)(now - s_downSince) >= (int32_t)REPROV_HINT_MS;
+#else
+  const bool holding = false;
+#endif
+  if (holding) screenHoldHint(now - s_downSince);
+
   // --- the info screen: repaint if its content moved, darken when the wake period expires ----
   // Also the thing that takes down the provisioning page: uiProvisioning() leaves it lit with no
   // deadline, and the first tick after Wi-Fi comes up clears it.
-  screenTick(now);
+  if (!holding) screenTick(now);
 
   // --- state machine ----------------------------------------------------------------------
   switch (s_st) {
