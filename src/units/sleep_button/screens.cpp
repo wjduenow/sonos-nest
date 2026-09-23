@@ -140,7 +140,6 @@ static uint32_t s_screenUntil = 0;       // 0 = dark
 static bool     s_screenLit   = false;
 static uint32_t s_screenPoll  = 0;
 static String   s_screenSig;             // content signature of what is currently painted
-static int      s_shownRssi   = 0;       // last RSSI actually PAINTED — see the hysteresis below
 
 // Escape an SSID for a `WIFI:` QR payload. `\ ; , :` are the payload's own delimiters and must be
 // backslash-escaped. NOT theoretical: the SSID is wifiHostname(), which is settingsDeviceName()
@@ -209,44 +208,42 @@ static void screenTick(uint32_t now) {
   String room;
   if (stateLock()) { room = g_player.zoneName; stateUnlock(); }
 
-  const uint32_t ip = g_linkIp;
-  char ipStr[20];
-  snprintf(ipStr, sizeof(ipStr), "%u.%u.%u.%u",
-           (unsigned)(ip & 0xFF), (unsigned)((ip >> 8) & 0xFF),
-           (unsigned)((ip >> 16) & 0xFF), (unsigned)((ip >> 24) & 0xFF));
-
   const char *cfg = boardConfigUrl();     // nullptr until Wi-Fi is up
   const String qr      = cfg ? String(cfg) : String();
   const char  *caption = cfg ? "Scan to configure" : "Connecting to Wi-Fi...";
 
   const String roomAscii = asciiFold(room);
 
-  // RSSI hysteresis: only move the DISPLAYED value once the real one is 10 dB away from it. The
-  // page repaints when its content changes and a repaint starts with fillScreen(BLACK), so a
-  // figure that drifts on its own (a real swing of -55 to -67 with the box sitting still) flashes
-  // the screen. Rounding was tried first and is not enough — a wobble across a bucket boundary
-  // still flips it.
-  {
-    const int rssi = (int)g_linkRssi;
-    if (abs(rssi - s_shownRssi) >= 10) s_shownRssi = rssi;
-  }
-
   // Battery quantised to the BAR for signature purposes: the raw figure moves constantly even
   // smoothed, and every change costs a repaint.
   const int batPct = batteryPercent();
   const int batBar = batPct < 0 ? -1 : (batPct + 12) / 25;
 
-  // "label\tvalue" — the board draws the label small and grey above a double-height value, and
-  // picks the value's size to fit. See displayQrPage(). Keep the values SHORT: 12 characters is
-  // the boundary at which one drops from double to single height.
+  // "label\tvalue" — the board draws the label small and grey above a double-height value and
+  // picks that value's size to fit. Keep values SHORT: 12 characters is the boundary at which one
+  // drops from double to single height.
+  //
+  // WHAT THE BUTTON WILL DO, not what the network is doing. The IP, RSSI and firmware version
+  // were developer diagnostics on a screen whose reader is standing in front of the device
+  // wondering which press plays what — and all three are already on the :8080 page the QR points
+  // at, which is where someone who wants them will be within one scan.
   char l0[44], l1[44], l2[44], l3[44];
   snprintf(l0, sizeof(l0), "room\t%s", roomAscii.length() ? roomAscii.c_str() : "-");
-  snprintf(l1, sizeof(l1), "ip\t%s", ip ? ipStr : "-");
-  snprintf(l2, sizeof(l2), "wifi\t%d dBm  %u zones", s_shownRssi, (unsigned)g_linkZones);
-  snprintf(l3, sizeof(l3), "firmware\t%s", FW_VERSION);
+  const char *const PRESS_LABEL[SETTINGS_PRESS_SLOTS] = {
+      "single press", "double press", "triple press" };
+  char *const slotLine[SETTINGS_PRESS_SLOTS] = { l1, l2, l3 };
+  for (uint8_t sl = 0; sl < SETTINGS_PRESS_SLOTS; ++sl) {
+    // Playlist names come off the network, so they get the same ASCII fold the room name does —
+    // the panel's built-in font has no glyphs above 0x7F.
+    const String nm = asciiFold(settingsPlaylist(sl + 1));
+    snprintf(slotLine[sl], 44, "%s\t%s", PRESS_LABEL[sl],
+             nm.length() ? nm.c_str() : "(unmapped)");
+  }
 
   const String sig = qr + "|" + l0 + "|" + l1 + "|" + l2 + "|" + l3 + "|" + settingsBrightness()
                    + "|b" + batBar;
+  // NOTE the playlist names are IN the signature via l1..l3, so changing a slot on the :8080 page
+  // repaints the screen by itself — no separate generation check needed.
   if (s_screenLit && sig == s_screenSig) return;   // nothing moved — don't repaint, don't flicker
   s_screenSig = sig;
 
