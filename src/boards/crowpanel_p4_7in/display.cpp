@@ -45,6 +45,7 @@ static bool IRAM_ATTR frameDoneCb(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_even
 // a clock ticking once a second stays quiet. `wait` is time spent blocked on the buffer flip;
 // the rest of each frame period is LVGL rendering.
 static uint32_t s_statStart = 0, s_statFrames = 0, s_statWaitUs = 0;
+static uint32_t s_flipTimeouts = 0;   // lifetime count; should stay 0
 
 static void frameStat(uint32_t waitUs) {
   const uint32_t now = millis();
@@ -54,9 +55,10 @@ static void frameStat(uint32_t waitUs) {
   const uint32_t span = now - s_statStart;
   if (span < 2000) return;
   if (s_statFrames >= 10) {
-    LOG.printf("[display] %lu fps  (%lu frames / %lu ms, flip wait avg %lu us)\n",
+    LOG.printf("[display] %lu fps  (%lu frames / %lu ms, flip wait avg %lu us, timeouts %lu)\n",
                (unsigned long)(s_statFrames * 1000 / span), (unsigned long)s_statFrames,
-               (unsigned long)span, (unsigned long)(s_statWaitUs / s_statFrames));
+               (unsigned long)span, (unsigned long)(s_statWaitUs / s_statFrames),
+               (unsigned long)s_flipTimeouts);
   }
   s_statFrames = 0;
   s_statWaitUs = 0;
@@ -115,7 +117,10 @@ static void flushCb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
   esp_lcd_panel_draw_bitmap(s_panel, 0, sync.y1, LCD_WIDTH, sync.y2 + 1, px);
   xSemaphoreTake(s_frameDone, 0);
   const uint32_t t0 = micros();
-  xSemaphoreTake(s_frameDone, pdMS_TO_TICKS(50));   // one frame is 16.7 ms; bound it anyway
+  // One frame is 16.7 ms. A timeout here is not a tearing risk: the frame-done callback fires from
+  // the same ISR that restarts the scan-out DMA, so if it has not fired nothing is scanning out at
+  // all. Count it rather than hang the UI task on a dead panel.
+  if (xSemaphoreTake(s_frameDone, pdMS_TO_TICKS(50)) != pdTRUE) s_flipTimeouts++;
   frameStat(micros() - t0);
 
   s_front = px;
