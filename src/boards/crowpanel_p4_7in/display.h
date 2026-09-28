@@ -9,6 +9,6 @@
 // OFF — call backlightSet() once there is something worth showing. False on any failure.
 bool displayInit();
 
-// The DPI frame buffer LVGL renders straight into (RGB565, LCD_WIDTH*LCD_HEIGHT*2 bytes).
-// nullptr before displayInit() succeeds.
+// The DPI frame buffer currently on screen (RGB565, LCD_WIDTH*LCD_HEIGHT*2 bytes). There are two;
+// LVGL renders into the other and they swap each frame. nullptr before displayInit() succeeds.
 uint8_t *displayFrameBuffer();

@@ -12,14 +12,18 @@
 #include "esp_lcd_panel_dev.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_ldo_regulator.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "core/board.h"          // backlightSet() is part of the HAL contract; implemented here
 #include "pins.h"
 
 static esp_lcd_panel_handle_t s_panel = nullptr;
-static uint8_t               *s_fb    = nullptr;
+static uint8_t               *s_fb[2] = {nullptr, nullptr};
+static uint8_t               *s_front = nullptr;   // the buffer the DSI DMA is scanning out
+static SemaphoreHandle_t      s_frameDone = nullptr;
 
-uint8_t *displayFrameBuffer() { return s_fb; }
+uint8_t *displayFrameBuffer() { return s_front; }
 
 void backlightSet(uint8_t pct) {
   if (pct > 100) pct = 100;
@@ -28,26 +32,98 @@ void backlightSet(uint8_t pct) {
 
 static uint32_t lvglTickCb() { return millis(); }
 
-// LVGL renders in DIRECT mode straight into the DPI frame buffer that the DSI peripheral is
-// already scanning out — no second buffer, no blit. All flush has to do is push the dirty rows
-// back out of the CPU cache.
+// ISR: the DMA has finished scanning out one frame and has already restarted on whichever buffer
+// draw_bitmap() last selected. From here on the other buffer is no longer being read.
+static bool IRAM_ATTR frameDoneCb(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *,
+                                  void *) {
+  BaseType_t woken = pdFALSE;
+  xSemaphoreGiveFromISR(s_frameDone, &woken);
+  return woken == pdTRUE;
+}
+
+// Frame-rate readout. Logged only while something is animating (>= 10 frames in a 2 s window), so
+// a clock ticking once a second stays quiet. `wait` is time spent blocked on the buffer flip;
+// the rest of each frame period is LVGL rendering.
+static uint32_t s_statStart = 0, s_statFrames = 0, s_statWaitUs = 0;
+static uint32_t s_flipTimeouts = 0;   // lifetime count; should stay 0
+
+static void frameStat(uint32_t waitUs) {
+  const uint32_t now = millis();
+  if (s_statFrames == 0) s_statStart = now;
+  s_statFrames++;
+  s_statWaitUs += waitUs;
+  const uint32_t span = now - s_statStart;
+  if (span < 2000) return;
+  if (s_statFrames >= 10) {
+    LOG.printf("[display] %lu fps  (%lu frames / %lu ms, flip wait avg %lu us, timeouts %lu)\n",
+               (unsigned long)(s_statFrames * 1000 / span), (unsigned long)s_statFrames,
+               (unsigned long)span, (unsigned long)(s_statWaitUs / s_statFrames),
+               (unsigned long)s_flipTimeouts);
+  }
+  s_statFrames = 0;
+  s_statWaitUs = 0;
+}
+
+// Row span helpers: every area this frame touched, as one [y1, y2] band.
+struct RowSpan { int32_t y1 = INT32_MAX, y2 = -1; };
+static RowSpan s_curSpan, s_prevSpan;
+
+static void spanAdd(RowSpan &s, int32_t y1, int32_t y2) {
+  if (y1 < s.y1) s.y1 = y1;
+  if (y2 > s.y2) s.y2 = y2;
+}
+
+// Double-buffered DIRECT mode. LVGL renders into the back buffer (`px` is its base) while the DSI
+// DMA scans out the front one, so the panel never shows a half-drawn frame — with a single buffer
+// it did, and scrolling a list (every row repainted every frame) flickered heavily.
+//
+// Per area we only write the dirty rows back out of the CPU cache. On the LAST area of a frame we
+// hand the back buffer to draw_bitmap(), which makes it the buffer the DMA starts on at the next
+// frame boundary, then block until that boundary has passed. Only then may LVGL touch the old
+// front buffer, which becomes its next back buffer.
+//
+// *** The cache write-back is load-bearing. *** The frame buffers are in PSRAM and the DSI DMA
+// reads them directly, bypassing the data cache. Without it the panel shows only the cache lines
+// that happened to be evicted on their own: the image comes out shredded into vertical stripes of
+// otherwise-correct colour. It looks exactly like a DSI timing or lane fault and is neither.
+// (esp_lcd_dpi_panel_set_pattern() draws inside the DSI peripheral with no frame buffer, so
+// "hardware bars fine, our drawing shredded" is the signature of a missing sync — see
+// display_test.cpp, which keeps that pattern call for exactly this diagnosis.)
+//
+// And it has to cover MORE than this frame's areas. Before rendering, LVGL copies the areas it drew
+// into the other buffer last frame over to this one (lv_refr.c refr_sync_areas) — with the CPU, so
+// those rows sit dirty in cache too, and no flush area names them. Hence the previous frame's span.
+//
+// Whole rows only: a row is LCD_WIDTH*2 = 2048 B, a clean multiple of the 64-byte cache line.
 static void flushCb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
-  (void)px;
-  // *** Load-bearing. *** The frame buffer is in PSRAM and the DSI DMA reads it directly,
-  // bypassing the data cache. Without this write-back the panel shows only the cache lines that
-  // happened to be evicted on their own: the image comes out shredded into vertical stripes of
-  // otherwise-correct colour. It looks exactly like a DSI timing or lane fault and is neither.
-  // (esp_lcd_dpi_panel_set_pattern() draws inside the DSI peripheral with no frame buffer, so
-  // "hardware bars fine, our drawing shredded" is the signature of a missing sync — see
-  // display_test.cpp, which keeps that pattern call for exactly this diagnosis.)
-  //
-  // Whole rows only: a row is LCD_WIDTH*2 = 2048 B, a clean multiple of the 64-byte cache line,
-  // so this stays aligned without rounding. Syncing just the dirty rows rather than the whole
-  // 1200 KB buffer is what keeps the frame rate up.
   const size_t rowBytes = (size_t)LCD_WIDTH * 2;
-  esp_cache_msync(s_fb + (size_t)area->y1 * rowBytes,
-                  (size_t)(area->y2 - area->y1 + 1) * rowBytes,
-                  ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  spanAdd(s_curSpan, area->y1, area->y2);
+
+  if (!lv_display_flush_is_last(disp)) {
+    esp_cache_msync(px + (size_t)area->y1 * rowBytes,
+                    (size_t)(area->y2 - area->y1 + 1) * rowBytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    lv_display_flush_ready(disp);
+    return;
+  }
+
+  RowSpan sync = s_curSpan;
+  if (s_prevSpan.y2 >= 0) spanAdd(sync, s_prevSpan.y1, s_prevSpan.y2);
+  s_prevSpan = s_curSpan;
+  s_curSpan = RowSpan();
+
+  // draw_bitmap() does its own write-back of the rows it is given, then selects this buffer.
+  // A take(0) AFTER it drains any frame-done that fired before the switch; if one fired between
+  // the two calls we drain the real one and wait one extra frame — slower, never wrong.
+  esp_lcd_panel_draw_bitmap(s_panel, 0, sync.y1, LCD_WIDTH, sync.y2 + 1, px);
+  xSemaphoreTake(s_frameDone, 0);
+  const uint32_t t0 = micros();
+  // One frame is 16.7 ms. A timeout here is not a tearing risk: the frame-done callback fires from
+  // the same ISR that restarts the scan-out DMA, so if it has not fired nothing is scanning out at
+  // all. Count it rather than hang the UI task on a dead panel.
+  if (xSemaphoreTake(s_frameDone, pdMS_TO_TICKS(50)) != pdTRUE) s_flipTimeouts++;
+  frameStat(micros() - t0);
+
+  s_front = px;
   lv_display_flush_ready(disp);
 }
 
@@ -93,6 +169,7 @@ bool displayInit() {
   // 4. DPI video stream. 1024x600 plus porches is 1354x636, ~51.7 Mpx/s at 60 Hz.
   esp_lcd_dpi_panel_config_t dpiCfg =
       EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+  dpiCfg.num_fbs = 2;   // double-buffered: see flushCb. 2 x 1.2 MB of PSRAM, which has ~29 MB free.
 
   ek79007_vendor_config_t vendorCfg = {};
   vendorCfg.mipi_config.dsi_bus = bus;
@@ -113,8 +190,18 @@ bool displayInit() {
     LOG.println("[display] FAIL: panel reset/init");
     return false;
   }
-  if (esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, (void **)&s_fb) != ESP_OK || !s_fb) {
-    LOG.println("[display] FAIL: no frame buffer");
+  if (esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2, (void **)&s_fb[0], (void **)&s_fb[1]) !=
+          ESP_OK || !s_fb[0] || !s_fb[1]) {
+    LOG.println("[display] FAIL: no frame buffers");
+    return false;
+  }
+  s_front = s_fb[0];   // the driver scans out buffer 0 first
+
+  s_frameDone = xSemaphoreCreateBinary();
+  esp_lcd_dpi_panel_event_callbacks_t cbs = {};
+  cbs.on_frame_buf_complete = frameDoneCb;
+  if (!s_frameDone || esp_lcd_dpi_panel_register_event_callbacks(s_panel, &cbs, nullptr) != ESP_OK) {
+    LOG.println("[display] FAIL: frame-done callback");
     return false;
   }
 
@@ -124,10 +211,11 @@ bool displayInit() {
   lv_display_t *disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
   lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
   lv_display_set_flush_cb(disp, flushCb);
-  lv_display_set_buffers(disp, s_fb, nullptr, (uint32_t)LCD_WIDTH * LCD_HEIGHT * 2,
+  // LVGL starts on buf_1 as its back buffer, so it must be the one NOT being scanned out.
+  lv_display_set_buffers(disp, s_fb[1], s_fb[0], (uint32_t)LCD_WIDTH * LCD_HEIGHT * 2,
                          LV_DISPLAY_RENDER_MODE_DIRECT);
 
-  LOG.printf("[display] EK79007 %dx%d up, LVGL direct into the DSI buffer\n",
+  LOG.printf("[display] EK79007 %dx%d up, LVGL double-buffered direct into the DSI buffers\n",
                 LCD_WIDTH, LCD_HEIGHT);
   return true;
 }
