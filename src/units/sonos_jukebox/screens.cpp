@@ -3949,6 +3949,22 @@ void uiTick() {
     }
   }
 
+  // Idle on any other page drifts back to Now Playing, so a panel left on Search or Rooms does not
+  // sit there all night. Same LVGL inactivity timer as the screensaver (the dial feeds it too). It
+  // fires once: after the switch s_cur is PAGE_NOW and nothing repeats until someone navigates
+  // away again. Not while a link ceremony is up — that QR is waiting on a phone, not on this panel,
+  // and the Spotify code alone lives five minutes.
+  {
+    static constexpr uint32_t PAGE_IDLE_MS = 150000;   // 2.5 min
+    const amazon::LinkState  a = amazon::linkState();
+    const spotify::LinkState sp = spotify::linkState();
+    const bool midLink = a == amazon::LinkState::Starting || a == amazon::LinkState::Waiting ||
+                         sp == spotify::LinkState::Starting || sp == spotify::LinkState::Waiting;
+    if (s_cur != PAGE_NOW && !midLink && lv_display_get_inactive_time(nullptr) >= PAGE_IDLE_MS) {
+      showPage(PAGE_NOW);
+    }
+  }
+
   // Screensaver LAST, after every page has updated: it owns the backlight and the top-layer
   // overlay, and running it before the pages would let a page repaint under a screen that is
   // already meant to be dark.
